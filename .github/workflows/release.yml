@@ -1,0 +1,29 @@
+name: Release
+# Push a tag such as v1.0.1 to test the setup on clean machines and publish a release with
+# slot17.tar.gz, install.sh and SHA256SUMS. Add Slot17.ipa by hand afterwards; it is built on a Mac.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    uses: ./.github/workflows/linux-setup.yml
+
+  publish:
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check the tag matches VERSION
+        run: test "v$(cat VERSION)" = "$GITHUB_REF_NAME"
+      - name: Build the release files
+        run: bash scripts/make_release.sh "$GITHUB_REF_NAME"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Slot17 $GITHUB_REF_NAME" --notes-file docs/RELEASE-NOTES.md

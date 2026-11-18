@@ -1,0 +1,7 @@
+build/
+*.xcodeproj/
+Slot17/Info.plist
+.DS_Store
+*.pdf
+__pycache__/
+Slot17Live/Info.plist

@@ -1,0 +1,20 @@
+# Tooling only: the Pi runs p0/ and display/ directly, and this project is not installed as a package.
+[tool.ruff]
+line-length = 140
+target-version = "py310"  # the display host; the Pi runs 3.13
+exclude = ["ios/build"]
+
+[tool.ruff.lint]
+select = ["E9", "F", "B", "S", "BLE"]
+ignore = [
+    "S101",   # assert is fine in tests and self-tests
+    "S603",   # fixed argument lists, by design
+    "S607",   # systemctl, journalctl and airspy tools by name, by design
+    "BLE001", # broad catches here keep a capture running; each is commented
+    "B905",   # zip lengths are equal by construction
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/test_*.py" = ["S", "B", "BLE"]
+"tests/**" = ["S", "B", "BLE"]
+"display/stress_server.py" = ["S", "B", "BLE"]

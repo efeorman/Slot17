@@ -1,0 +1,85 @@
+# Cloud builds on Codemagic (a free allowance of Mac minutes each month, private repo).
+# There is no triggering section on purpose: a build starts only with "Start new build".
+workflows:
+  app-only:
+    name: App only
+    instance_type: mac_mini_m2
+    max_build_duration: 15
+    environment:
+      xcode: latest
+    scripts:
+      - name: Generate the Xcode project
+        script: |
+          cd ios
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
+          xcodegen generate
+      - name: Build the unsigned IPA
+        script: cd ios && bash scripts/build-ipa.sh
+    artifacts:
+      - ios/build/Slot17-unsigned.ipa
+      - ios/build/check/archive.log
+
+  # Everything except real sound: the pretend drive against the real server code, and every screen.
+  full:
+    name: App and the whole test
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    environment:
+      xcode: latest
+    scripts:
+      - name: Generate the Xcode project
+        script: |
+          cd ios
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
+          xcodegen generate
+      - name: Build the unsigned IPA
+        script: cd ios && bash scripts/build-ipa.sh
+      - name: All tests, without real sound
+        script: cd ios && NO_AUDIO=1 bash scripts/run-tests.sh
+    artifacts:
+      - ios/build/Slot17-unsigned.ipa
+      - ios/build/check/*.log
+      - ios/build/check/*.txt
+      - ios/build/check/*.ips
+      - ios/build/check/screens/*.png
+
+  quick:
+    name: App, unit tests and pictures
+    instance_type: mac_mini_m2
+    max_build_duration: 20
+    environment:
+      xcode: latest
+    scripts:
+      - name: Generate the Xcode project
+        script: |
+          cd ios
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install xcodegen
+          xcodegen generate
+      - name: Build the unsigned IPA
+        script: cd ios && bash scripts/build-ipa.sh
+      - name: Unit tests and pictures
+        script: cd ios && bash scripts/run-quick.sh
+    artifacts:
+      - ios/build/Slot17-unsigned.ipa
+      - ios/build/check/*.log
+      - ios/build/check/screens/*.png
+
+  # The Linux setup test. Same script as GitHub Actions: scripts/test_setup.sh.
+  linux-setup:
+    name: Linux setup test
+    instance_type: linux_x2
+    max_build_duration: 40
+    scripts:
+      - name: Machine
+        script: |
+          cat /etc/os-release | head -2; ps -p 1 -o comm=; docker --version || true; sudo -n true && echo "sudo ok"
+      - name: Full install through the release installer
+        script: bash scripts/test_setup.sh full
+      - name: Debian 12
+        script: bash scripts/test_setup.sh distro debian:12
+      - name: Debian 13
+        script: bash scripts/test_setup.sh distro debian:13
+      - name: Ubuntu 22.04
+        script: bash scripts/test_setup.sh distro ubuntu:22.04
+      - name: Ubuntu 24.04
+        script: bash scripts/test_setup.sh distro ubuntu:24.04

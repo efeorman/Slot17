@@ -1,0 +1,4 @@
+# Tested existing Pi numerical environment; prefer its installed distribution packages.
+# Python 3.13.5; OS-provided libairspy. Do not pip-install into system Python blindly.
+numpy==2.2.4
+scipy==1.15.3

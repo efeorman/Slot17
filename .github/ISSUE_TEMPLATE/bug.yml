@@ -1,0 +1,33 @@
+name: Bug report
+description: The software does something wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste your private link, keys or passwords, and no recordings or GPS tracks from your drives.
+  - type: textarea
+    id: what
+    attributes:
+      label: What went wrong?
+      description: What you did, what happened, and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `bash ~/Slot17/setup.sh doctor`
+      render: text
+  - type: textarea
+    id: log
+    attributes:
+      label: Relevant log lines
+      description: For example `journalctl -u tetra-detector.service -n 60 --no-pager`, or the app's Logs screen. Remove keys.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Versions
+      placeholder: "1.2.9, app 1.6.0"
+    validations:
+      required: true

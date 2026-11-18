@@ -1,0 +1,119 @@
+{
+  "schema": 1,
+  "message": "",
+  "rules": {
+    "red_db": 22,
+    "yellow_db": 12,
+    "urgent_db": 50,
+    "urgent_gap_s": 1,
+    "chime_gap_any_s": 6,
+    "chime_gap_channel_s": 30,
+    "max_age_s": 10,
+    "quiet_red_db": 28,
+    "quiet_gap_s": 30
+  },
+  "warnings": {
+    "link_lost_after_s": 30,
+    "receiver_quiet_windows": 40,
+    "receiver_tone_repeat_s": 300
+  },
+  "marks": {
+    "summary_window_s": 120
+  },
+  "location": {
+    "track_every_s": 10
+  },
+  "display": {
+    "weak_colour": "#6F8BA8",
+    "silent_colour": "#F5C542",
+    "chime_colour": "#FF4D4F",
+    "strong_outline_colour": "#FFFFFF",
+    "strong_badge": "STRONG",
+    "frequent_text": "Frequent bursts",
+    "pulse_on_new_strong": true
+  },
+  "sounds": {
+    "urgent": {
+      "wave": "square",
+      "peak": 0.7,
+      "attack_s": 0.005,
+      "release_s": 0.015,
+      "notes": [
+        [
+          2000,
+          0.0,
+          0.135
+        ],
+        [
+          2000,
+          0.17,
+          0.135
+        ],
+        [
+          2000,
+          0.34,
+          0.135
+        ]
+      ]
+    },
+    "chime": {
+      "wave": "triangle",
+      "peak": 0.65,
+      "attack_s": 0.015,
+      "release_s": 0.25,
+      "notes": [
+        [
+          988,
+          0.0,
+          0.45
+        ],
+        [
+          1319,
+          0.17,
+          0.45
+        ]
+      ]
+    },
+    "warning": {
+      "wave": "sine",
+      "peak": 0.5,
+      "attack_s": 0.03,
+      "release_s": 0.52,
+      "notes": [
+        [
+          392,
+          0.0,
+          0.55
+        ],
+        [
+          294,
+          0.26,
+          0.55
+        ]
+      ]
+    },
+    "link_lost": {
+      "wave": "sine",
+      "peak": 0.5,
+      "attack_s": 0.03,
+      "release_s": 0.47,
+      "notes": [
+        [
+          523,
+          0.0,
+          0.5
+        ],
+        [
+          392,
+          0.22,
+          0.5
+        ],
+        [
+          294,
+          0.44,
+          0.5
+        ]
+      ]
+    }
+  }
+}

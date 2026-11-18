@@ -1,0 +1,105 @@
+{
+  "measured_utc": "2026-11-03T23:30:00+00:00",
+  "median_ppm": 4.09,
+  "median_offset_hz": 1568.5,
+  "note": "receiver reads high by this much; analyze.py subtracts it",
+  "basis": "Uplink training-word residual: 16 September session median -2113.8 Hz against the deployed 9.607 ppm. Scored on the separate 3 November 22:08 session; earlier testing. Not re-measured on the downlink.",
+  "superseded": {
+    "measured_utc": "2026-09-07T10:30:53+00:00",
+    "median_offset_hz": 3784.1796875,
+    "median_ppm": 9.607367713075869,
+    "std_hz": 45.92995846629722,
+    "n": 11,
+    "note": "receiver reads high by this much; analyze.py subtracts it"
+  },
+  "measurements": [
+    {
+      "channel": 60,
+      "raster_hz": 391512500.0,
+      "measured_hz": 391516357.421875,
+      "offset_hz": 3857.421875,
+      "ppm": 9.85261485904026,
+      "snr_db": 12.572377218919641
+    },
+    {
+      "channel": 90,
+      "raster_hz": 392262500.0,
+      "measured_hz": 392266265.8691406,
+      "offset_hz": 3765.869140625,
+      "ppm": 9.60038020617571,
+      "snr_db": 13.513303882935467
+    },
+    {
+      "channel": 104,
+      "raster_hz": 392612500.0,
+      "measured_hz": 392616271.97265625,
+      "offset_hz": 3771.97265625,
+      "ppm": 9.607367713075869,
+      "snr_db": 16.822428086224726
+    },
+    {
+      "channel": 119,
+      "raster_hz": 392987500.0,
+      "measured_hz": 392991271.97265625,
+      "offset_hz": 3771.97265625,
+      "ppm": 9.598200085880595,
+      "snr_db": 15.630536135505224
+    },
+    {
+      "channel": 135,
+      "raster_hz": 393387500.0,
+      "measured_hz": 393391265.8691406,
+      "offset_hz": 3765.869140625,
+      "ppm": 9.57292527247307,
+      "snr_db": 17.42791187061983
+    },
+    {
+      "channel": 177,
+      "raster_hz": 394437500.0,
+      "measured_hz": 394441284.1796875,
+      "offset_hz": 3784.1796875,
+      "ppm": 9.593863888448741,
+      "snr_db": 23.14654675651999
+    },
+    {
+      "channel": 151,
+      "raster_hz": 393787500.0,
+      "measured_hz": 393791351.3183594,
+      "offset_hz": 3851.318359375,
+      "ppm": 9.78019454496397,
+      "snr_db": 9.814328698550952
+    },
+    {
+      "channel": 163,
+      "raster_hz": 394087500.0,
+      "measured_hz": 394091186.5234375,
+      "offset_hz": 3686.5234375,
+      "ppm": 9.354580994068575,
+      "snr_db": 13.91001931358786
+    },
+    {
+      "channel": 169,
+      "raster_hz": 394237500.0,
+      "measured_hz": 394241333.0078125,
+      "offset_hz": 3833.0078125,
+      "ppm": 9.722585529027553,
+      "snr_db": 13.16824323990766
+    },
+    {
+      "channel": 174,
+      "raster_hz": 394362500.0,
+      "measured_hz": 394366302.4902344,
+      "offset_hz": 3802.490234375,
+      "ppm": 9.642119203461283,
+      "snr_db": 14.713651096119598
+    },
+    {
+      "channel": 188,
+      "raster_hz": 394712500.0,
+      "measured_hz": 394716308.59375,
+      "offset_hz": 3808.59375,
+      "ppm": 9.649032523672293,
+      "snr_db": 12.453666799208698
+    }
+  ]
+}

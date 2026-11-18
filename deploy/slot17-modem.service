@@ -1,0 +1,16 @@
+# Keeps a ZTE 4G USB stick connected and ranks its route below a wired network
+# and above Wi-Fi. Optional: only needed when the Pi uses such a stick.
+# See docs/operations/MOBILE-MODEM.md. Started by slot17-modem.timer.
+
+[Unit]
+Description=Slot17 - keep the 4G stick's data session up
+After=NetworkManager.service zte-mf79n.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/slot17/modem_link.py
+TimeoutStartSec=60
+# Change the ranking here if your wired or Wi-Fi metrics differ from
+# NetworkManager's defaults (100 and 600).
+#Environment=SLOT17_MODEM_METRIC_UP=200
+#Environment=SLOT17_MODEM_METRIC_DOWN=700

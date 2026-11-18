@@ -1,0 +1,36 @@
+# Pushes the running detector's live state to the phone display server.
+# Read-only: reads /run/tetra/watch.heartbeat and the session's events.jsonl; it
+# never opens the Airspy. Starting the detector pulls this in (WantedBy=);
+# stopping the detector stops it (PartOf=). Requisite=, not BindsTo=/Requires=:
+# those would make `systemctl start` of THIS unit start the detector and open the
+# receiver. With Requisite= a manual start while the detector is down just fails.
+# A detector that dies on its own removes its heartbeat; the publisher then
+# reports "stopped" and exits after 30 s. Never enabled at boot on its own, and
+# the detector does not depend on it.
+# The __TOKENS__ are filled in by deploy/install-publisher.sh.
+[Unit]
+Description=TETRA detector - phone display publisher
+Requisite=tetra-detector.service
+PartOf=tetra-detector.service
+After=tetra-detector.service
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__PROJECT__/display
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=__PYTHON__ __PROJECT__/display/display_publisher.py
+# The detector keeps the scheduling edge (Nice=-5); this stays out of its way.
+Nice=10
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+# No NoNewPrivileges=yes here, deliberately. The phone's stop button runs
+# `sudo -n systemctl --no-block stop tetra-detector.service`, and sudo cannot
+# become root under that flag: on 16 September both taps were refused with
+# 'The "no new privileges" flag is set'. The privilege boundary is the one-line
+# grant in /etc/sudoers.d/60-slot17-stop (deploy/60-slot17-stop.sudoers).
+
+[Install]
+WantedBy=tetra-detector.service

@@ -1,0 +1,809 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e13">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Slot17">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="icon" type="image/png" href="/icon-180.png">
+<title>Slot17 · TETRA</title>
+<style nonce="__NONCE__">
+  :root {
+    --bg: #0b0e13; --panel: #131821; --line: #232b38; --text: #e8edf4; --dim: #7d8896;
+    --green: #2fd26b; --yellow: #f5c542; --red: #ff4d4f; --grey: #3a4452; --blue: #4ea3ff;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 16px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; overflow-x: hidden;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .logo { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-weight: 700;
+    font-size: 12px; letter-spacing: .5px; color: #0b0e13; background: var(--grey); flex: none; transition: background .3s; }
+  .logo.ok { background: var(--green); } .logo.warn { background: var(--yellow); }
+  .logo.bad { background: var(--red); } .logo.idle { background: var(--grey); color: var(--text); }
+  .status { flex: 1; min-width: 0; }
+  .status b { display: block; font-size: 16px; }
+  .status span { display: block; color: var(--dim); font-size: 13px; white-space: normal; overflow-wrap: anywhere; }
+  button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 10px 12px; cursor: pointer; }
+  button:active { transform: scale(.97); }
+  .icon { width: 46px; height: 46px; padding: 0; display: grid; place-items: center; position: relative; }
+  .icon svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .icon small { position: absolute; bottom: 2px; right: 4px; font-size: 10px; color: var(--yellow); }
+  main { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 16px; gap: 16px; }
+  .meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(6px, 2.5vw, 12px); align-items: stretch; }
+  .meter { min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 14px 6px 12px;
+    display: flex; flex-direction: column; align-items: center; gap: 10px; transition: opacity .6s; }
+  .segs { display: flex; flex-direction: column-reverse; gap: 5px; width: 100%; max-width: 76px; }
+  .seg { height: clamp(14px, 3.2vh, 26px); border-radius: 5px; background: #1b222d; transition: background .25s; }
+  .meter.green .seg.on { background: var(--green); }
+  .meter.yellow .seg.on { background: var(--yellow); }
+  .meter.red .seg.on { background: var(--red); box-shadow: 0 0 10px rgba(255,77,79,.45); }
+  .meter.grey .seg.on { background: var(--grey); }
+  .meter.empty { opacity: .35; }
+  .ch { font-size: clamp(17px, 5.5vw, 22px); font-weight: 700; letter-spacing: .5px; }
+  .meta { text-align: center; color: var(--dim); font-size: 12px; line-height: 1.3; max-width: 100%; overflow-wrap: anywhere; }
+  .meta .db { color: var(--text); font-size: 15px; font-weight: 600; }
+  .empty-note { text-align: center; color: var(--dim); font-size: 15px; min-height: 22px; }
+  .banner { text-align: center; font-weight: 700; color: #0b0e13; background: var(--yellow);
+    border-radius: 10px; padding: 6px; letter-spacing: 1px; }
+  .banner.alarm { background: var(--red); color: #fff; letter-spacing: 0; line-height: 1.3; padding: 9px 10px; }
+  footer { padding: 10px 16px 14px; color: var(--dim); font-size: 12px; text-align: center; border-top: 1px solid var(--line); }
+  .overlay { position: fixed; inset: 0; background: rgba(5,7,10,.92); display: grid; place-items: center; z-index: 10; padding: 24px; }
+  .overlay .card { max-width: 360px; text-align: center; }
+  .overlay h1 { font-size: 22px; margin: 0 0 8px; }
+  .overlay p { color: var(--dim); margin: 0 0 20px; }
+  .big { width: 100%; padding: 16px; font-size: 18px; font-weight: 700; background: var(--green); color: #0b0e13; border: 0; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--line);
+    border-radius: 18px 18px 0 0; padding: 18px 18px calc(18px + env(safe-area-inset-bottom)); z-index: 9;
+    display: grid; gap: 14px; box-shadow: 0 -12px 40px rgba(0,0,0,.5); }
+  .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
+  .row label { font-size: 15px; }
+  .row output { color: var(--dim); font-size: 13px; min-width: 48px; text-align: right; }
+  input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--green); }
+  .btns { display: flex; gap: 10px; flex-wrap: wrap; }
+  .btns button { flex: 1; }
+  .on-btn { background: var(--green); color: #0b0e13; border-color: transparent; font-weight: 600; }
+  .hint { color: var(--dim); font-size: 12px; }
+  /* style-src is nonce-only: element.style is blocked, so states are classes. */
+  .hint.bad { color: var(--red); }
+  .sep { border: 0; border-top: 1px solid var(--grey); margin: 14px 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo idle" id="logo">S17</div>
+  <div class="status"><b id="stTitle">Connecting…</b><span id="stSub">&nbsp;</span></div>
+  <button class="icon" id="muteBtn" aria-label="Mute for 30 seconds">
+    <svg id="spkOn" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/></svg>
+    <svg id="spkOff" viewBox="0 0 24 24" hidden><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>
+    <small id="muteLeft"></small>
+  </button>
+  <button class="icon" id="gearBtn" aria-label="Settings">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+  </button>
+</header>
+
+<main>
+  <div class="banner" id="demoBanner" hidden>DEMO · NOT REAL DETECTIONS</div>
+  <div class="banner alarm" id="antennaBanner" hidden></div>
+  <div class="meters" id="meters"></div>
+  <div class="empty-note" id="emptyNote"></div>
+</main>
+
+<footer>Signal strength above channel noise — not distance, not a specific vehicle.<span id="updateNote"></span></footer>
+
+<div class="overlay" id="startOverlay">
+  <div class="card">
+    <h1>Slot17 TETRA display</h1>
+    <p>Tap to start. Your browser needs one tap before it may play sound. Keep this page open with the screen on.</p>
+    <button class="big" id="startBtn">Start</button>
+    <!-- On a phone "sound works" cannot be assumed. An iPhone's ring/silent
+         switch mutes this page's chime while everything on screen looks healthy,
+         and the page has no way to detect that. So: check it here, on the
+         ground, once - not at 90 km/h. Deliberately a tap and not an automatic
+         chime, which would sound on every page open and read as a detection. -->
+    <button id="startTestBtn">Test the sound first</button>
+    <p class="hint" id="startSoundHint">If you hear nothing: check the phone's volume, and on an iPhone the
+      ring/silent switch — it silences this page even when the screen looks fine.</p>
+  </div>
+</div>
+
+<div class="sheet" id="sheet" hidden>
+  <div class="row"><label for="redTh">Red (beeps) from</label><output id="redOut"></output>
+    <input type="range" id="redTh" min="10" max="45" step="1"></div>
+  <div class="row"><label for="yelTh">Yellow from</label><output id="yelOut"></output>
+    <input type="range" id="yelTh" min="6" max="40" step="1"></div>
+  <div class="row"><label for="vol">Chime volume</label><output id="volOut"></output>
+    <input type="range" id="vol" min="0" max="100" step="5"></div>
+  <div class="btns">
+    <button id="testBtn">Test chime</button>
+    <button id="testUrgentBtn">Test urgent beep</button>
+    <button id="soundBtn">Sound: on</button>
+    <button id="demoBtn">Demo: off</button>
+    <button id="repeatBtn">Repeat needed: off</button>
+    <button id="urgentBtn">Urgent beep: on</button>
+    <button id="antennaBtn">Antenna warning: on</button>
+  </div>
+  <div class="hint" id="soundHint"></div>
+  <div class="hint" id="antennaHint"></div>
+  <div class="hint" id="repeatHint"></div>
+  <div class="hint" id="urgentHint"></div>
+  <div class="hint" id="covHint"></div>
+  <div class="hint" id="wakeHint"></div>
+  <hr class="sep">
+  <div class="btns"><button id="stopBtn">Stop the detector</button></div>
+  <div class="hint" id="stopHint"></div>
+  <button id="closeSheet">Done</button>
+</div>
+
+<script nonce="__NONCE__">
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  // "1.10.0" is newer than "1.9.0": compare the numbers, not the text.
+  const newerVersion = (a, b) => {
+    const x = String(a).split(".").map(n => parseInt(n, 10) || 0), y = String(b).split(".").map(n => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); }
+    return false;
+  };
+  const DEFAULTS = { red: 22, yellow: 12, vol: 100, sound: true, repeat: false, antennaWarn: true, urgent: true };
+  const LINK_LOST_MS = 6000;     // no message for this long: the link is down, whatever the last state said
+  const REOPEN_MS = 9000;        // a silent stream is reopened (a half-open mobile socket never errors)
+  const CLEAR_MS = 20000;        // after this, stale bars are removed entirely
+  const CAR_STALE_S = 8;         // the server has heard nothing from the car for this long (4 missed pushes)
+  const CHIME_MAX_AGE_S = 10;    // never chime for a burst older than this, measured end to end
+  // A provisional level from the 4 November drive, not a distance or a vehicle test.
+  // Each recognised burst this strong gets one beep when it arrives; there is no hold
+  // timer, so nothing sounds after the signal has stopped.
+  const URGENT_DB = 50;
+  const URGENT_MIN_GAP_MS = 1000;
+  // A radio in a call (normal bursts on every frame) below the chime level gets the soft call tone.
+  // Traffic on the channel, not a vehicle or a distance.
+  const CALL_DB = 18, CALL_GAP_CHANNEL_MS = 60000, CALL_GAP_ANY_MS = 15000;
+  const QUIET_ALARM_S = 60;      // the detector hearing nothing this long, if it does not say its own limit
+  const QUIET_ALARM_WINDOWS = 40;// that minute in 1.5 s windows, for a car that says neither its limit nor its window length
+  const QUIET_TONE_REPEAT_MS = 300000;
+  const CLOCK_TTL_S = 30, CLOCK_REFRESH_S = 10;
+  const store = {
+    get() { try { return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem("s17cfg") || "{}")); } catch (_) { return { ...DEFAULTS }; } },
+    set(c) { try { localStorage.setItem("s17cfg", JSON.stringify(c)); } catch (_) {} }
+  };
+  let cfg = store.get();
+  // Once only: the operator found the old 30 % default too quiet at full phone volume, and
+  // that value is saved in this browser. A level chosen after this is kept.
+  if (cfg.soundRev !== 2) { cfg.vol = 100; cfg.soundRev = 2; store.set(cfg); }
+  let audio = null, silentEl = null, mutedUntil = 0, started = false, demo = false;
+  const lastCall = {};                  // channel -> when its call tone last played
+  let lastSilenceReason = "";           // why the most recent red match did not chime
+  let msg = null, rxAt = 0, boot = null, lastSeq = -1, authFailed = false;
+  let clockSync = null, lastStamp = -Infinity, scope = null;
+  const retiredBoots = new Set();
+  let waitingMatches = [];
+  let lastDelay = null, pendingChime = null;               // a red that arrived before Start
+  let quietSince = 0, lastQuietTone = -1e12;               // receiver-hears-nothing warning
+  const lastBeep = {}; let lastAnyBeep = -1e12;
+  const seen = (() => { try { return new Set(JSON.parse(sessionStorage.getItem("s17seen") || "[]")); } catch (_) { return new Set(); } })();
+  function remember(id) {
+    seen.add(id);
+    if (seen.size > 400) seen.delete(seen.values().next().value);
+    try { sessionStorage.setItem("s17seen", JSON.stringify([...seen])); } catch (_) {}
+  }
+
+  /* ---------- sounds: pitched where phone speakers and ears are strongest ---------- */
+  // The limiter's make-up gain raises perceived loudness and keeps overlapping notes from
+  // clipping. Full phone volume and full slider are the ceiling: a page cannot go past them.
+  function output() {
+    if (!audio.__out) {
+      const c = audio.createDynamicsCompressor();
+      c.threshold.value = -12; c.knee.value = 0; c.ratio.value = 20;
+      c.attack.value = 0.002; c.release.value = 0.08;
+      c.connect(audio.destination);
+      audio.__out = c;
+    }
+    return audio.__out;
+  }
+  function chime() {
+    if (!audio) return;
+    const vol = Math.max(0.0001, (cfg.vol / 100) * 0.9);
+    const t = audio.currentTime + 0.02;
+    const lp = audio.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 5000;
+    lp.connect(output());
+    [[988.0, 0], [1319.0, 0.17]].forEach(([f, dt]) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.type = "triangle"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + dt);
+      g.gain.exponentialRampToValueAtTime(vol, t + dt + 0.015);
+      g.gain.setValueAtTime(vol, t + dt + 0.2);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.42);
+      o.connect(g).connect(lp); o.start(t + dt); o.stop(t + dt + 0.45);
+    });
+  }
+  function callTone() {                                    // two soft low notes, quieter than the chime
+    if (!audio) return;
+    const vol = Math.max(0.0001, (cfg.vol / 100) * 0.4);
+    const t = audio.currentTime + 0.02;
+    const lp = audio.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 2500;
+    lp.connect(output());
+    [[523.3, 0], [659.3, 0.22]].forEach(([f, dt]) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + dt);
+      g.gain.exponentialRampToValueAtTime(vol, t + dt + 0.04);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.5);
+      o.connect(g).connect(lp); o.start(t + dt); o.stop(t + dt + 0.55);
+    });
+  }
+  function warnTone() {                                     // lower and slower than the red chime
+    if (!audio) return;
+    const vol = Math.max(0.0001, (cfg.vol / 100) * 0.3);
+    const t = audio.currentTime + 0.02;
+    const lp = audio.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 1200;
+    lp.connect(audio.destination);
+    [[392.0, 0], [294.0, 0.26]].forEach(([f, dt]) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + dt);
+      g.gain.exponentialRampToValueAtTime(vol, t + dt + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.5);
+      o.connect(g).connect(lp); o.start(t + dt); o.stop(t + dt + 0.55);
+    });
+  }
+  function urgentBeep() {                                   // three hard pulses; never the chime
+    if (!audio) return;
+    const vol = Math.max(0.0001, cfg.vol / 100);
+    const t = audio.currentTime + 0.02;
+    const lp = audio.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 6000;
+    lp.connect(output());
+    [0, 0.17, 0.34].forEach(dt => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.type = "square"; o.frequency.value = 2000;
+      g.gain.setValueAtTime(0.0001, t + dt);
+      g.gain.exponentialRampToValueAtTime(vol, t + dt + 0.005);
+      g.gain.setValueAtTime(vol, t + dt + 0.12);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.135);
+      o.connect(g).connect(lp); o.start(t + dt); o.stop(t + dt + 0.14);
+    });
+  }
+  const soundAllowed = () => started && cfg.sound && performance.now() >= mutedUntil;
+
+  /* ---------- time: one clock for display and sound ---------- */
+  const sinceRx = () => (performance.now() - rxAt) / 1000;
+  const clockReady = () => demo || (clockSync && clockSync.boot === boot &&
+    performance.now() / 1000 - clockSync.at <= CLOCK_TTL_S);
+  // A timed GET brackets the offset between the server and phone monotonic
+  // clocks. Use its upper end, including network transit, plus 1 ms/s drift
+  // allowance. A slow calibration may suppress sound; it cannot freshen data.
+  function elapsed(m) {
+    if (!m || !clockReady()) return Infinity;
+    const now = performance.now() / 1000;
+    const transit = demo ? now - m.server_mono_s :
+      Math.max(0, now + clockSync.upper - m.server_mono_s) + 0.03 +
+      Math.max(0, now - clockSync.at) * 0.001;
+    return Math.max((m.server_age_s || 0) + transit,
+      m.ageFloor == null ? 0 : m.ageFloor + (performance.now() - m.acceptedAt) / 1000);
+  }
+  const ageNow = (x, m = msg) => x.age_s + elapsed(m);
+  const carAgeNow = () => (msg?.state?.snapshot_age_s || 0) + elapsed(msg);
+  function live() {
+    return !authFailed && !document.hidden && clockReady() && msg && sinceRx() * 1000 <= LINK_LOST_MS &&
+      carAgeNow() <= CAR_STALE_S && ["running", "degraded"].includes(msg.state?.detector?.state);
+  }
+  function clearSound() { pendingChime = null; waitingMatches = []; }
+  function resetContext() { clearSound(); lastDelay = null; }
+
+  /* ---------- incoming messages ---------- */
+  function accept(m) {
+    if (!m || !Number.isSafeInteger(m.seq) || typeof m.boot !== "string" || !Number.isFinite(m.server_mono_s)) return;
+    if (m.boot !== boot) {
+      if (retiredBoots.has(m.boot) || (boot && clockSync?.boot !== m.boot)) return;
+      if (boot) retiredBoots.add(boot);
+      boot = m.boot; lastSeq = -1; lastStamp = -Infinity; resetContext();
+    }
+    if (m.seq < lastSeq || m.server_mono_s <= lastStamp) return;
+    const fresh = m.seq > lastSeq;
+    const newScope = `${m.state?.source || ""}/${m.state?.session || ""}`;
+    if (scope !== newScope) { scope = newScope; resetContext(); }
+    const floor = !fresh && msg && clockReady() ? elapsed(msg) : 0;
+    m.ageFloor = floor; m.acceptedAt = performance.now();
+    lastStamp = m.server_mono_s;
+    lastSeq = m.seq; msg = m; rxAt = performance.now(); authFailed = false;
+    if (fresh) handleMatches(m);
+    flushMatches();
+    render();
+  }
+
+  function handleMatches(m) {
+    const st = m.state;
+    if (!st || !Array.isArray(st.matches)) return;
+    for (const x of st.matches) {
+      if (!x || !x.id || seen.has(x.id)) continue;
+      remember(x.id);
+      waitingMatches.push({x, frame: m, scope});
+      if (waitingMatches.length > 20) waitingMatches.shift();
+    }
+  }
+  // Optional alert-rate control: only chime for a channel that matched at least twice
+  // within the publisher's 60 s window. This is NOT a proximity test - a distant radio
+  // can repeat and a passing one can transmit once - so it is off by default.
+  function repeated(p) {
+    const row = (p.frame && p.frame.state && Array.isArray(p.frame.state.channels)
+      ? p.frame.state.channels : []).find(c => c.ch === p.x.ch);
+    return !!row && Number.isFinite(row.hits_60s) && row.hits_60s >= 2;
+  }
+
+  // Every `return` here is a chime that did not happen, and each one used to be
+  // indistinguishable from broken audio. Name the reason instead.
+  function silent(why) { lastSilenceReason = why; }
+
+  const isUrgent = x => cfg.urgent && x.strength_db != null && x.strength_db >= URGENT_DB;
+
+  function playCandidate(p) {
+    if (!p) return;                     // nothing was waiting; there is nothing to explain
+    if (p.scope !== scope || !live()) return silent("the link or the detector was not live");
+    if (cfg.repeat && !repeated(p)) return silent("“repeat needed” is on and this channel matched once");
+    const age = Math.max(ageNow(p.x, p.frame), p.age + (performance.now() - p.at) / 1000);
+    if (p.x.strength_db == null) return silent("the match had no usable strength");
+    const callTier = p.x.call === true && p.x.strength_db >= CALL_DB && p.x.strength_db < cfg.red;
+    if (p.x.strength_db < cfg.red && !callTier)
+      return silent(`${p.x.strength_db.toFixed(1)} dB is below the ${cfg.red} dB red threshold`);
+    if (age > CHIME_MAX_AGE_S)
+      return silent(`the match reached the phone ${age.toFixed(1)} s old (limit ${CHIME_MAX_AGE_S} s)`);
+    const now = performance.now();
+    const problem = audioProblem();
+    if (problem) return silent(problem);
+    if (performance.now() < mutedUntil) return silent("muted by the speaker button");
+    if (!soundAllowed()) return silent("sound is not armed");
+    if (callTier) {
+      if (now - (lastCall[p.x.ch] ?? -1e12) < CALL_GAP_CHANNEL_MS) return silent("this channel's call tone played under 60 s ago");
+      if (now - lastAnyBeep < CALL_GAP_ANY_MS) return silent("another sound played under 15 s ago");
+      callTone(); lastCall[p.x.ch] = lastAnyBeep = now; silent("");
+      return;
+    }
+    if (isUrgent(p.x)) {
+      // Skips the 30 s and 6 s chime limits, which would hide repeated strong bursts.
+      // A sound inside the gap is dropped, never queued to play late.
+      if (now - lastAnyBeep < URGENT_MIN_GAP_MS) return silent("another sound played under 1 s ago");
+      urgentBeep(); lastBeep[p.x.ch] = lastAnyBeep = now; silent("");
+      return;
+    }
+    if (now - (lastBeep[p.x.ch] ?? -1e12) < 30000) return silent("this channel chimed under 30 s ago");
+    if (now - lastAnyBeep < 6000) return silent("another chime played under 6 s ago");
+    chime(); lastBeep[p.x.ch] = lastAnyBeep = now; silent("");
+  }
+  function flushMatches() {
+    if (!live()) {
+      pendingChime = null;
+      // Only the initial clock probe may defer fresh matches. A stopped/stale
+      // detector, link loss or subsequent loss of timing discards them.
+      if (clockSync || authFailed || document.hidden || sinceRx() * 1000 > LINK_LOST_MS ||
+          !["running", "degraded"].includes(msg?.state?.detector?.state)) waitingMatches = [];
+      return;
+    }
+    // Urgent first: an ordinary chime in the same push must not use up the 1 s gap.
+    waitingMatches.sort((a, b) => isUrgent(b.x) - isUrgent(a.x));
+    for (const p of waitingMatches) {
+      p.age = ageNow(p.x, p.frame); p.at = performance.now();
+      lastDelay = p.age;
+      if (!started) {
+        // Hold it for the first tap, but only if it would have chimed.
+        if (p.x.strength_db != null && (p.x.strength_db >= cfg.red || (p.x.call === true && p.x.strength_db >= CALL_DB)) &&
+            p.age <= CHIME_MAX_AGE_S && !(cfg.repeat && !repeated(p)) &&
+            !(pendingChime && isUrgent(pendingChime.x) && !isUrgent(p.x))) pendingChime = p;
+        continue;
+      }
+      // Everything else goes through playCandidate, which is the one place that
+      // names why a match did not chime. Duplicating the gates here left the
+      // reason showing a stale "the link was not live" for a below-red match.
+      playCandidate(p);
+    }
+    waitingMatches = [];
+  }
+
+  /* ---------- meters ---------- */
+  const SEGS = 10;
+  const meters = [];
+  for (let i = 0; i < 3; i++) {
+    const m = document.createElement("div"); m.className = "meter empty";
+    const segs = document.createElement("div"); segs.className = "segs";
+    for (let s = 0; s < SEGS; s++) { const d = document.createElement("div"); d.className = "seg"; segs.appendChild(d); }
+    const ch = document.createElement("div"); ch.className = "ch"; ch.textContent = "—";
+    const meta = document.createElement("div"); meta.className = "meta";
+    m.append(segs, ch, meta); $("meters").appendChild(m);
+    meters.push({ m, segs: [...segs.children], ch, meta });
+  }
+  const level = s => s == null ? 0 : Math.min(SEGS, Math.max(1, Math.ceil((s - 6) / 3)));
+  const klass = s => s == null ? "grey" : s >= cfg.red ? "red" : s >= cfg.yellow ? "yellow" : "green";
+  const ago = s => s < 1 ? "now" : s < 90 ? `${Math.round(s)} s ago` : `${Math.round(s / 60)} min ago`;
+
+  // Three bars from everything the Pi sent: recent first, then strongest.
+  function pick(channels) {
+    const rows = channels.map(r => ({ ...r, age: ageNow(r) })).filter(r => r.age <= 60);
+    rows.sort((a, b) => ((b.age < 15) - (a.age < 15)) || ((b.strength_db ?? -1e9) - (a.strength_db ?? -1e9)) || (a.age - b.age));
+    return rows;
+  }
+
+  function renderMeters(rows, grey) {
+    meters.forEach((v, i) => {
+      const r = rows[i];
+      if (!r) {
+        v.m.className = "meter empty"; v.segs.forEach(d => d.classList.remove("on"));
+        v.ch.textContent = "—"; v.meta.textContent = ""; v.m.style.opacity = ""; return;
+      }
+      const lit = level(r.strength_db);
+      v.m.className = "meter " + (grey ? "grey" : klass(r.strength_db));
+      v.segs.forEach((d, s) => d.classList.toggle("on", s < lit));
+      v.ch.textContent = "L" + r.ch;
+      v.meta.innerHTML = "";
+      const db = document.createElement("div"); db.className = "db";
+      db.textContent = r.strength_db == null ? "strength n/a" : `${r.strength_db.toFixed(1)} dB`;
+      const f = document.createElement("div"); f.textContent = `${r.freq_mhz.toFixed(4)} MHz`;
+      const marks = (r.rising ? " ↑ rising" : "") + (r.call ? " · in a call" : "");
+      const a = document.createElement("div"); a.textContent = `${r.approx_time ? "≈ " : ""}${ago(r.age)} · ${r.hits_60s}×/min${marks}`;
+      v.meta.append(db, f, a);
+      v.m.style.opacity = String(Math.max(0.35, 1 - Math.max(0, r.age - 10) / 50 * 0.65));
+    });
+  }
+
+  /* ---------- status ---------- */
+  function setStatus(cls, title, sub) {
+    $("logo").className = "logo " + cls; $("stTitle").textContent = title; $("stSub").textContent = sub || " ";
+  }
+
+  function render() {
+    flushMatches();
+    // Shown again below only if fresh data still says so: an old fault must not look current.
+    $("antennaBanner").hidden = true;
+    if (authFailed) {
+      setStatus("bad", "Not authorised", "Open the private link once on this phone");
+      renderMeters([], true); $("emptyNote").textContent = ""; return;
+    }
+    if (!msg) { setStatus("idle", "Connecting…", " "); renderMeters([], true); return; }
+    const st = msg.state, rx = sinceRx();
+    const release = msg.release, running = st && st.software;
+    $("updateNote").textContent = release && running && newerVersion(release.software, running)
+      ? ` Car computer software ${release.software} is available: run the installer again.` : "";
+    const channels = (st && Array.isArray(st.channels)) ? pick(st.channels) : [];
+    const more = channels.length > 3 ? `+${channels.length - 3} more channel${channels.length > 4 ? "s" : ""}` : "";
+    if (rx * 1000 > LINK_LOST_MS) {
+      setStatus("idle", "Connection lost", `No update for ${Math.round(rx)} s — reconnecting`);
+      renderMeters(rx * 1000 > CLEAR_MS ? [] : channels, true);
+      $("emptyNote").textContent = ""; return;
+    }
+    if (msg.server_age_s == null || !st) {
+      setStatus("idle", "Waiting for the car", "No data received yet"); renderMeters([], true);
+      $("emptyNote").textContent = ""; return;
+    }
+    if (!clockReady()) {
+      setStatus("idle", "Checking connection timing", "Waiting for a fresh timing sample");
+      renderMeters([], true); $("emptyNote").textContent = ""; return;
+    }
+    const carAge = carAgeNow();
+    if (carAge > CAR_STALE_S) {
+      setStatus("idle", "No data from the car", `Last update ${ago(carAge)} — hotspot or Pi offline`);
+      renderMeters([], true); $("emptyNote").textContent = ""; return;
+    }
+    const d = st.detector || {};
+    const live = d.state === "running" || d.state === "degraded";
+    antennaWarning(d, live);
+    const delay = lastDelay == null ? `${d.windows ?? "?"} windows analysed` : `Delay up to ${(Math.ceil(lastDelay * 10) / 10).toFixed(1)} s after the burst`;
+    switch (d.state) {
+      case "running": setStatus("ok", demo ? "Demo running" : "Detector running",
+                                demo ? "Fake data — nothing is being detected" : delay); break;
+      case "starting": setStatus("idle", "Detector starting", "Waiting for the first analysis"); break;
+      case "degraded": setStatus("warn", "Detector degraded", (d.reasons || []).join(", ") || "see status on the Pi"); break;
+      case "stale": setStatus("bad", "Detector not responding", `Heartbeat unchanged for ${Math.round(d.heartbeat_unchanged_s || 0)} s`); break;
+      case "stopped": setStatus("idle", "Detector stopped", "Start it with the service command"); break;
+      default: setStatus("idle", "Unknown state", "");
+    }
+    renderMeters(live ? channels : [], !live);
+    $("emptyNote").textContent = !live ? "" : channels.length ? more : "No TETRA detected";
+    const cov = [d.hits != null && `${d.hits} candidates`, d.unchecked != null && `${d.unchecked} unchecked`,
+                 d.partial != null && `${d.partial} partly checked`].filter(Boolean).join(", ");
+    $("covHint").textContent = cov ? `This session: ${cov} (advisory — not every burst is inspected).` : "";
+  }
+
+  // The receiver hearing nothing wastes a whole drive and the detector only logs it.
+  function antennaWarning(d, live) {
+    const quiet = Number.isFinite(d.quiet_windows) ? d.quiet_windows : 0;
+    // The operator starts the Pi at home with no antenna on purpose, to test.
+    // A warning that is right every time is still a warning you learn to ignore,
+    // so it can be switched off - in the page only. The detector keeps recording
+    // the fault either way; this hides the banner and the tone, not the evidence.
+    const limit = Number.isFinite(d.quiet_alarm_windows) ? d.quiet_alarm_windows
+      : Number.isFinite(d.window_s) && d.window_s > 0 ? Math.max(1, Math.round(QUIET_ALARM_S / d.window_s))
+      : QUIET_ALARM_WINDOWS;
+    const alarm = live && !demo && cfg.antennaWarn && quiet >= limit;
+    const banner = $("antennaBanner");
+    banner.hidden = !alarm;
+    if (!alarm) { quietSince = 0; return; }
+    const mins = Math.floor(quiet * (Number.isFinite(d.window_s) ? d.window_s : 1.5) / 60);
+    const peak = Number.isFinite(d.input_peak_counts) ? `, peak ${Math.round(d.input_peak_counts)} counts` : "";
+    banner.textContent = `RECEIVER HEARS NOTHING for ${mins} min${peak} — check the Airspy antenna and cable`;
+    const now = performance.now();
+    if (!quietSince) quietSince = now;
+    if (soundAllowed() && now - lastQuietTone >= QUIET_TONE_REPEAT_MS) { lastQuietTone = now; warnTone(); }
+  }
+
+  /* ---------- transport: live stream, watchdog, auth probe, polling fallback ---------- */
+  function timeoutSignal(ms) {
+    if (AbortSignal.timeout) return AbortSignal.timeout(ms);
+    const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal;
+  }
+  let es = null, openedAt = 0, probing = false, lastProbeAt = -Infinity;
+  async function probe() {                                       // why did the stream fail?
+    if (probing || demo || authFailed) return; probing = true;
+    const begin = performance.now() / 1000;
+    lastProbeAt = begin;
+    try {
+      const r = await fetch("/api/state", { cache: "no-store", credentials: "same-origin", signal: timeoutSignal(4000) });
+      if (r.status === 401) { authFailed = true; clearSound(); if (es) { es.close(); es = null; } render(); return; }
+      if (r.ok && !demo) {
+        const m = await r.json(), end = performance.now() / 1000;
+        if (Number.isFinite(m.server_mono_s) && typeof m.boot === "string" &&
+            !retiredBoots.has(m.boot) && end - begin <= 4) {
+          const floor = msg && clockReady() ? elapsed(msg) : 0;
+          clockSync = {boot: m.boot, upper: m.server_mono_s - begin, at: end};
+          if (msg && msg.boot === m.boot) { msg.ageFloor = floor; msg.acceptedAt = performance.now(); }
+          accept(m); flushMatches(); render();
+        }
+      }
+    } catch (_) { /* network: the watchdog and EventSource retry handle it */ }
+    finally { probing = false; }
+  }
+  function openStream() {
+    if (authFailed || !window.EventSource) return;
+    if (es) es.close();
+    openedAt = performance.now();
+    es = new EventSource("/api/stream");
+    es.onmessage = e => { if (demo) return; try { accept(JSON.parse(e.data)); } catch (_) {} };
+    es.onerror = () => { probe(); };
+  }
+  async function pollOnce() {                                    // only without EventSource
+    if (performance.now() / 1000 - lastProbeAt >= 1) await probe();
+  }
+  function watchdog() {
+    if (!demo && !authFailed && window.EventSource) {
+      const silentMs = msg ? performance.now() - rxAt : performance.now() - openedAt;
+      if (silentMs > REOPEN_MS && performance.now() - openedAt > REOPEN_MS) openStream();
+    }
+    if (!window.EventSource) pollOnce();
+    else if (performance.now() / 1000 - lastProbeAt >= CLOCK_REFRESH_S) probe();
+  }
+
+  // Demo: one channel slowly strengthens green -> yellow -> red over ~50 s, two others idle.
+  const demoStart = performance.now(); let demoSeq = 0, demoRegs = 0;
+  function demoMessage() {
+    const t = ((performance.now() - demoStart) / 1000) % 70;
+    const s = +(t < 50 ? 8 + t * 0.55 : 35.5 - (t - 50) * 1.2).toFixed(1);
+    const reg = Math.floor(t / 4);                               // a "registration" every ~4 s
+    const matches = reg !== demoRegs ? [{ id: `demo/${Math.floor(performance.now())}`, ch: 154, strength_db: s, age_s: 0.4, delay_s: 0.4 }] : [];
+    demoRegs = reg;
+    return { boot: "demo", seq: ++demoSeq, server_mono_s: performance.now() / 1000, server_age_s: 0,
+      state: { source: "demo", session: "demo", snapshot_age_s: 0, detector: { state: "running", windows: 0 }, matches,
+      channels: [
+        { ch: 154, id: "d154", freq_mhz: 383.8625, strength_db: s, age_s: 1, hits_60s: 14, approx_time: false },
+        { ch: 60, id: "d60", freq_mhz: 381.5125, strength_db: 14.2, age_s: 9, hits_60s: 3, approx_time: false },
+        { ch: 119, id: "d119", freq_mhz: 382.9875, strength_db: null, age_s: 31, hits_60s: 1, approx_time: true }] } };
+  }
+
+  /* ---------- controls ---------- */
+  function syncControls() {
+    $("redTh").value = cfg.red; $("redOut").textContent = cfg.red + " dB";
+    $("yelTh").value = cfg.yellow; $("yelOut").textContent = cfg.yellow + " dB";
+    $("vol").value = cfg.vol; $("volOut").textContent = cfg.vol + "%";
+    $("soundBtn").textContent = "Sound: " + (cfg.sound ? "on" : "off");
+    $("soundBtn").classList.toggle("on-btn", cfg.sound);
+    $("demoBtn").textContent = "Demo: " + (demo ? "on" : "off");
+    $("demoBtn").classList.toggle("on-btn", demo);
+    $("repeatBtn").textContent = "Repeat needed: " + (cfg.repeat ? "on" : "off");
+    $("repeatBtn").classList.toggle("on-btn", cfg.repeat);
+    $("repeatHint").textContent = cfg.repeat
+      ? "Chime only when a channel matched twice within a minute. Fewer chimes; a vehicle that transmits once stays silent."
+      : "Every new red match can chime. Turn on “repeat needed” for fewer chimes, at the cost of missing single bursts.";
+    $("urgentBtn").textContent = "Urgent beep: " + (cfg.urgent ? "on" : "off");
+    $("urgentBtn").classList.toggle("on-btn", cfg.urgent);
+    $("urgentHint").textContent = cfg.urgent
+      ? `A different beep for each recognised signal of ${URGENT_DB} dB or more. Strong signal only: not police, not a distance, and a quiet radio gives no beep.`
+      : "Very strong signals use the normal chime and its limits.";
+    if (performance.now() - stopArmed > 6000) {
+      stopArmed = -Infinity;
+      $("stopBtn").textContent = "Stop the detector";
+      const cmd = msg && msg.command;
+      $("stopHint").textContent =
+        cmd && cmd.state === "pending" ? "Stop queued — waiting for the car to collect it."
+        : cmd && cmd.state === "sent" ? "The car has the stop; it should go quiet within a few seconds."
+        : cmd && cmd.state === "done" ? "Stopped from the phone. Start it again at the Pi or over SSH."
+        : "Ends the session cleanly. There is no start button — starting stays at the Pi.";
+    }
+    $("antennaBtn").textContent = "Antenna warning: " + (cfg.antennaWarn ? "on" : "off");
+    $("antennaBtn").classList.toggle("on-btn", cfg.antennaWarn);
+    $("antennaHint").textContent = cfg.antennaWarn
+      ? "Warns when the receiver has heard nothing for about a minute. Turn it off while testing at home with no antenna connected."
+      : "Off: no banner and no warning tone for a receiver that hears nothing. The detector still records the fault, and the Pi may still send one message per session.";
+    const problem = audioProblem();
+    $("soundHint").textContent = problem
+      ? "NO SOUND: " + problem
+      : "Sound ready" + (lastSilenceReason ? ` · last match stayed silent because ${lastSilenceReason}` : "");
+    $("soundHint").classList.toggle("bad", !!problem);
+    // Audio state as DOM state, so it can be read without opening a console and
+    // styled without a second source of truth.
+    document.body.dataset.audio = !started ? "idle" : audio ? audio.state : "unavailable";
+    $("demoBanner").hidden = !demo;
+    const left = Math.ceil((mutedUntil - performance.now()) / 1000), muted = !cfg.sound || left > 0;
+    $("spkOn").hidden = muted; $("spkOff").hidden = !muted;
+    $("muteLeft").textContent = cfg.sound && left > 0 ? left : "";
+  }
+  $("redTh").addEventListener("input", e => { cfg.red = +e.target.value; if (cfg.yellow > cfg.red) cfg.yellow = cfg.red; store.set(cfg); syncControls(); render(); });
+  $("yelTh").addEventListener("input", e => { cfg.yellow = Math.min(+e.target.value, cfg.red); store.set(cfg); syncControls(); render(); });
+  $("vol").addEventListener("input", e => { cfg.vol = +e.target.value; store.set(cfg); syncControls(); });
+  $("testBtn").addEventListener("click", () => { unlockAudio(); chime(); });
+  $("testUrgentBtn").addEventListener("click", () => { unlockAudio(); urgentBeep(); });
+  $("urgentBtn").addEventListener("click", () => { cfg.urgent = !cfg.urgent; store.set(cfg); syncControls(); });
+  $("soundBtn").addEventListener("click", () => { cfg.sound = !cfg.sound; store.set(cfg); syncControls(); });
+  $("repeatBtn").addEventListener("click", () => { cfg.repeat = !cfg.repeat; store.set(cfg); syncControls(); });
+  $("demoBtn").addEventListener("click", () => {
+    demo = !demo; msg = null; boot = null; lastSeq = -1; lastStamp = -Infinity; clockSync = null;
+    retiredBoots.clear(); resetContext();
+    syncControls(); if (!demo) { openStream(); probe(); } render();
+  });
+  $("muteBtn").addEventListener("click", () => {                  // one tap = 30 s quiet
+    mutedUntil = performance.now() < mutedUntil ? 0 : performance.now() + 30000; clearSound(); syncControls();
+  });
+  $("antennaBtn").addEventListener("click", () => {
+    cfg.antennaWarn = !cfg.antennaWarn; store.set(cfg);
+    if (!cfg.antennaWarn) { $("antennaBanner").hidden = true; quietSince = 0; }
+    syncControls(); render();
+  });
+
+  /* ---------- stopping the detector from the phone ----------
+     Two taps, because this ends the capture and the drive's evidence with it.
+     There is no start button on purpose: the publisher only runs while the
+     detector does, so after a stop there is no channel left to start over - and
+     a start button would invite the repeated Airspy cycling that wedges this
+     board. Starting stays with boot autostart or SSH. */
+  let stopArmed = -Infinity;      // NOT 0: performance.now() starts near zero
+  async function requestStop() {
+    const now = performance.now();
+    if (now - stopArmed > 6000) {
+      stopArmed = now;
+      $("stopBtn").textContent = "Tap again to confirm";
+      $("stopHint").textContent = "This ends the recording session. It cannot be restarted from the phone.";
+      setTimeout(syncControls, 6000);
+      return;
+    }
+    stopArmed = -Infinity;
+    $("stopBtn").disabled = true;
+    $("stopHint").textContent = "Sending…";
+    try {
+      const r = await fetch("/api/command", {
+        method: "POST", cache: "no-store", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "stop", note: "from the phone display" }),
+        signal: timeoutSignal(6000)
+      });
+      $("stopHint").textContent = r.ok
+        ? "Stop queued. The car collects it on its next push — watch the status turn to “stopped”."
+        : `The server refused the stop (HTTP ${r.status}).`;
+    } catch (_) {
+      $("stopHint").textContent = "Could not reach the server. Stop it over SSH.";
+    } finally {
+      $("stopBtn").disabled = false;
+      $("stopBtn").textContent = "Stop the detector";
+    }
+  }
+  $("stopBtn").addEventListener("click", requestStop);
+  $("startTestBtn").addEventListener("click", () => {
+    unlockAudio();
+    const problem = !cfg.sound ? "Sound is switched off in settings."
+      : !audio ? "This browser gave no audio device."
+      : audio.state !== "running" ? "The browser is still blocking audio — tap again."
+      : "";
+    $("startSoundHint").textContent = problem ||
+      "Playing the chime now. Nothing? Check the volume and, on an iPhone, the ring/silent switch.";
+    $("startSoundHint").classList.toggle("bad", !!problem);
+    if (!problem) chime();
+  });
+  $("gearBtn").addEventListener("click", () => { $("sheet").hidden = !$("sheet").hidden; });
+  $("closeSheet").addEventListener("click", () => { $("sheet").hidden = true; });
+
+  /* ---------- keeping the phone able to make a sound ----------
+     A laptop unlocks audio once and stays unlocked. A phone does not, and the
+     two ways it goes quiet are both silent failures:
+
+     1. iOS routes Web Audio through the "ambient" session, which the hardware
+        ring/silent switch mutes - so the page looks alive and chimes nothing
+        while the switch is set to silent. A looping, near-silent <audio>
+        element promotes the page to a playback session and the chime is
+        audible either way. It is a no-op on desktop and on Android.
+     2. Backgrounding the page, locking the screen or taking a call suspends the
+        AudioContext. resume() only works from a user gesture, and
+        visibilitychange is NOT one - so the old code's resume() on returning to
+        the tab quietly failed and the chime stayed dead for the rest of the
+        drive. Every tap now re-arms it, and audioProblem() says so out loud. */
+  function silentTrack() {
+    // 0.1 s of 8-bit silence (0x80), built here so there is no opaque blob in
+    // the page and nothing to fetch - the CSP blocks external media anyway.
+    const rate = 8000, n = 800, buf = new Uint8Array(44 + n), view = new DataView(buf.buffer);
+    const tag = (off, s) => { for (let i = 0; i < s.length; i++) buf[off + i] = s.charCodeAt(i); };
+    tag(0, "RIFF"); view.setUint32(4, 36 + n, true); tag(8, "WAVEfmt ");
+    view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, rate, true); view.setUint32(28, rate, true);
+    view.setUint16(32, 1, true); view.setUint16(34, 8, true);
+    tag(36, "data"); view.setUint32(40, n, true); buf.fill(0x80, 44);
+    return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  }
+  function unlockAudio() {
+    try {
+      if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+      if (!silentEl) {
+        silentEl = new Audio(silentTrack());
+        silentEl.id = "silentAudio";
+        silentEl.loop = true; silentEl.volume = 0.02;
+        silentEl.setAttribute("playsinline", "");
+        silentEl.hidden = true;
+        document.body.appendChild(silentEl);
+      }
+      if (silentEl.paused) silentEl.play().catch(() => {});
+      if (audio.state === "suspended") audio.resume().catch(() => {});
+      if (!audio.onstatechange) audio.onstatechange = () => syncControls();
+    } catch (_) {}
+  }
+  /* Why the phone is silent right now, in the operator's words - or "" if it
+     is fine. Shown in the settings sheet and as a banner, because "it works on
+     the laptop but not on the phone" must never again need a code read. */
+  function audioProblem() {
+    if (!cfg.sound) return "Sound is switched off in settings.";
+    if (!started) return "Tap Start — a browser needs one tap before it may play sound.";
+    if (!audio) return "This browser gave no audio device.";
+    if (audio.state !== "running") return "Sound is suspended by the phone — tap anywhere to re-arm it.";
+    if (performance.now() < mutedUntil) return "";
+    return "";
+  }
+  async function keepAwake() {
+    if (!("wakeLock" in navigator)) {
+      $("wakeHint").textContent = "This browser cannot keep the screen on for a plain http page — set a long screen timeout while driving.";
+      return;
+    }
+    try { await navigator.wakeLock.request("screen"); $("wakeHint").textContent = "Screen kept on while this page is open."; }
+    catch (_) { $("wakeHint").textContent = "Could not keep the screen on — set a long screen timeout."; }
+  }
+  document.addEventListener("visibilitychange", () => {
+    clearSound();
+    if (!demo) { clockSync = null; probe(); }
+    if (document.visibilityState !== "visible") return;
+    if (started) { unlockAudio(); keepAwake(); }
+    if (!demo && msg && performance.now() - rxAt > LINK_LOST_MS) openStream();
+  });
+  // Any gesture re-arms audio. iOS suspends the context on backgrounding, a
+  // call or a screen lock, and resume() is only honoured from a gesture - so
+  // without this the chime dies the first time the phone is put down and never
+  // comes back, with nothing on screen to say so.
+  for (const kind of ["pointerdown", "touchend", "keydown"]) {
+    document.addEventListener(kind, () => { if (started) unlockAudio(); }, { passive: true });
+  }
+  $("startBtn").addEventListener("click", () => {
+    started = true; unlockAudio(); keepAwake(); $("startOverlay").hidden = true;
+    syncControls();
+    const ready = audio && audio.state === "suspended" ? audio.resume() : Promise.resolve();
+    ready.catch(() => {}).then(() => {
+      const p = pendingChime; pendingChime = null;
+      playCandidate(p);
+    });
+  });
+
+  syncControls();
+  openStream();
+  probe();                                                       // first state (and auth) at once
+  setInterval(() => { if (demo) accept(demoMessage()); watchdog(); render(); syncControls(); }, 250);
+})();
+</script>
+</body>
+</html>

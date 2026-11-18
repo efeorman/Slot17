@@ -1,0 +1,13 @@
+# Runs the 4G stick check shortly after boot and then every 30 seconds.
+
+[Unit]
+Description=Slot17 - check the 4G stick every 30 seconds
+
+[Timer]
+OnBootSec=40
+OnUnitInactiveSec=30
+AccuracySec=2
+Unit=slot17-modem.service
+
+[Install]
+WantedBy=timers.target

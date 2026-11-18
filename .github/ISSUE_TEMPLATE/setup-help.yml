@@ -1,0 +1,45 @@
+name: Help with setting up
+description: Something does not work while installing or using Slot17.
+labels: [setup]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste your private link, car computer key, Pushover keys or passwords here. Replace them with XXXX.
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where is the problem?
+      options:
+        - Car computer (Raspberry Pi, receiver, antenna)
+        - Display server
+        - iPhone app
+        - Web page
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `bash ~/Slot17/setup.sh doctor`
+      description: Run it on the car computer (or `bash ~/Slot17/setup.sh doctor server` on the server). It only looks and contains no keys.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versions
+      description: The software version (first line of the doctor) and the app version (app, Settings, About).
+      placeholder: "1.2.9, app 1.6.0"
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware, if it differs from the README
+      description: Computer, receiver, antenna, network (hotspot or 4G stick).

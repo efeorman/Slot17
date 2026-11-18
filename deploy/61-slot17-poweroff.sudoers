@@ -1,0 +1,11 @@
+# Lets the display publisher power the Pi off when the operator asks from the app.
+#
+# Install to /etc/sudoers.d/61-slot17-poweroff, owner root:root, mode 0440, and
+# validate with `visudo -c -f` before moving it into place - a malformed file
+# there breaks sudo for every user on the machine.
+#
+# Deliberately one exact command. Poweroff only, never reboot: this Airspy wedges on a
+# warm reboot (rule 3 in CONTRIBUTING.md). Coming back needs the ignition, which removes power.
+# systemd stops the detector cleanly first. --no-block because systemd is about to
+# stop the publisher that runs this.
+pi ALL=(root) NOPASSWD: /usr/bin/systemctl --no-block poweroff

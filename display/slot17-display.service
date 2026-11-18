@@ -1,0 +1,19 @@
+# Phone display server (runs on the display host as an ordinary user, not root).
+# Install: ~/.config/systemd/user/slot17-display.service, then
+#   systemctl --user daemon-reload && systemctl --user enable --now slot17-display
+# Survives reboot only with `loginctl enable-linger <user>`.
+[Unit]
+Description=Slot17 TETRA phone display
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/slot17-display
+ExecStart=/usr/bin/python3 %h/slot17-display/server.py
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

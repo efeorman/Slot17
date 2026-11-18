@@ -1,0 +1,62 @@
+# One drive command: offline checks, one receiver attempt, continuous diagnostics.
+# This Airspy has a documented stop/start wedge. Neither supervision layer may
+# automatically reopen it after failure. Autostart remains separately opt-in.
+#
+# The __TOKENS__ are filled in by deploy/install-service.sh. Do not enable this
+# file directly - run the installer so the paths match your Pi.
+
+[Unit]
+Description=TETRA RF activity monitor (Airspy)
+# StartLimitIntervalSec/StartLimitBurst are [Unit] options. They used to sit
+# in [Service] below, where modern systemd silently ignores them ("Unknown
+# key name ... in section 'Service'"), so the brownout protection the comment
+# promised was never actually in force. Manual starts are not rate-limited here;
+# the explicit Restart=no below disables automatic retries.
+StartLimitIntervalSec=0
+Documentation=file:__PROJECT__/README.md
+After=network.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=__USER__
+# USB access to the Airspy without root (libairspy udev rules put it in plugdev).
+SupplementaryGroups=plugdev
+WorkingDirectory=__PROJECT__/p0
+
+# Heartbeat lives on tmpfs (/run/tetra), so the once-a-second liveness write
+# never touches the SD card. systemd creates and cleans up this directory.
+RuntimeDirectory=tetra
+RuntimeDirectoryMode=0755
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+TimeoutStopSec=45
+TimeoutStartSec=200
+
+# Uplink RF activity does not identify a vehicle or measure its distance.
+# Tests use saved/synthetic samples and fake receiver/notification transports.
+# Failure of this command prevents ExecStart; it never opens the real Airspy.
+# Signed updates: finish, fetch briefly and install before the receiver is opened. The leading
+# minus means a failure here never stops the detector; without a release key it does nothing.
+ExecStartPre=-__PYTHON__ -B __PROJECT__/p0/update.py start
+# The full suite runs only for a tree that has not passed it (and every 20th start); otherwise a few
+# seconds of smoke tests. Needs preflight.py from 1.2.8: install this line only after that release.
+ExecStartPre=__PYTHON__ -B __PROJECT__/p0/preflight.py --offline --tests-if-changed --require-idle
+# READY is reported only after the current child's first completed analysis.
+ExecStart=__PYTHON__ __PROJECT__/p0/supervise.py \
+    --no-restart \
+    --heartbeat /run/tetra/watch.heartbeat \
+    --log __PROJECT__/logs/supervise.log \
+    -- --band uplink --sensitivity highway --save-power
+
+# A receiver/software failure requires inspection while parked. No reopen loop.
+Restart=no
+
+# Sample loss in the field was traced to host load, not the radio
+#, so give the detector a small scheduling edge over
+# whatever else wakes up on the Pi.
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.env
+
+# Secrets: created on each machine, never committed
+display/config.json
+*pushover*.json
+*.pem
+*.key
+
+# Anything a session or a run creates
+captures/
+logs/
+run/
+runtime/
+releases/
+tools/
+display/logs/
+display/sounds/
+*.heartbeat*
+*spool*
+*.sqlite3*
+*.log
+*.iq
+*.power
+*.tmp
+
+# Generated documents
+*.pdf
+
+# App build output
+ios/build/
+ios/*.xcodeproj/
+ios/Slot17/Info.plist
+ios/Slot17Live/Info.plist
+.DS_Store
+
+# This machine's own calibration and channel list
+p0/*.local.json
+
+# Release files built by scripts/make_release.sh
+dist/
+
+# Confidential working papers never belong in this repository (patent and legal analysis).
+*VERTROUWELIJK*
+*CONFIDENTIAL*
+*OCTROOI*
+PATENT-*
+*patent-review*
+*patent-check*

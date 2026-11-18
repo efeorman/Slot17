@@ -1,0 +1,100 @@
+name: Slot17
+options:
+  bundleIdPrefix: nl.slot17
+  deploymentTarget:
+    iOS: "16.2"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.6.1"
+    CURRENT_PROJECT_VERSION: "19"
+    TARGETED_DEVICE_FAMILY: "1"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+targets:
+  Slot17:
+    type: application
+    platform: iOS
+    sources: [Slot17, Shared]
+    dependencies:
+      - target: Slot17Live
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: nl.slot17.app
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) SLOT17_APP"
+        # The App Group lets the widget show the last sighting. A signing that drops it only loses that.
+        CODE_SIGN_ENTITLEMENTS: Slot17/Slot17.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: Slot17/Info.plist
+      properties:
+        CFBundleDisplayName: Slot17
+        CFBundleShortVersionString: "1.6.1"
+        CFBundleVersion: "19"
+        NSSupportsLiveActivities: true
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIBackgroundModes: [audio, location]
+        NSLocationWhenInUseUsageDescription: "Slot17 records where alerts and sightings happen, so you can later see which roads and distances they come with. It stays on your phone and your own server, and never changes when a sound plays."
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # The display server is plain HTTP at an IP address, at the operator's choice.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+  # The Live Activity: Lock Screen, Dynamic Island and (iOS 26) the CarPlay Dashboard.
+  # iOS 18 for the .small family CarPlay uses; on older iOS the app runs without it.
+  Slot17Live:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources: [Slot17Live, Shared]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: nl.slot17.app.live
+        CODE_SIGN_ENTITLEMENTS: Slot17Live/Slot17Live.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
+    info:
+      path: Slot17Live/Info.plist
+      properties:
+        CFBundleDisplayName: Slot17
+        CFBundleShortVersionString: "1.6.1"
+        CFBundleVersion: "19"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+  Slot17Tests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Slot17Tests
+      - Slot17/Core
+      - Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: nl.slot17.tests
+        GENERATE_INFOPLIST_FILE: YES
+  Slot17UITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Slot17UITests]
+    dependencies:
+      - target: Slot17
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: nl.slot17.uitests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Slot17:
+    build:
+      targets:
+        Slot17: all
+    test:
+      config: Debug
+      targets:
+        - Slot17Tests
+        - Slot17UITests

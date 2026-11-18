@@ -1,0 +1,38 @@
+# Push a start-up message to the phone once the Pi has a network.
+#
+# Separate from tetra-detector.service on purpose: you may want to know the box
+# came up and where to reach it without the detector auto-starting.
+#
+# The __TOKENS__ are filled in by deploy/install-notify.sh. Do not enable this
+# file directly - run the installer so the paths match your Pi.
+
+[Unit]
+Description=TETRA detector - start-up notification to the phone
+Documentation=file:__PROJECT__/p0/notify.py
+# network-online.target is a best effort; notify.py --boot waits for a default
+# route itself and then keeps retrying, because in a car the hotspot can appear
+# minutes after boot and can flap. Belt and braces, deliberately.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__PROJECT__/p0
+Environment=PYTHONUNBUFFERED=1
+
+# Waits up to 180 s for a network to appear, then keeps retrying for up to
+# 900 s before giving up and spooling the message to disk - where the next
+# watch.py run will flush it. TimeoutStartSec must exceed wait + deadline or
+# systemd kills it mid-retry.
+ExecStart=__PYTHON__ __PROJECT__/p0/notify.py --boot --wait 180 --deadline 900
+TimeoutStartSec=1500
+
+# Deliberately no Restart=. A non-zero exit here means Pushover *rejected* the
+# request (bad credentials, say), and repeating a rejected request is exactly
+# what gets an IP temporarily blocked. Transient failures are already retried
+# inside notify.py, and anything still undeliverable is spooled, not lost.
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

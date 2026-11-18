@@ -1,0 +1,15 @@
+# Lets the display publisher carry out one operator command: stop the detector.
+#
+# Install to /etc/sudoers.d/60-slot17-stop, owner root:root, mode 0440, and
+# validate with `visudo -c -f` before moving it into place - a malformed file
+# there breaks sudo for every user on the machine.
+#
+# Deliberately one exact command and nothing else. Not ALL, not a wildcard, not
+# `systemctl *`: `stop` closes the Airspy once and leaves it closed, while start
+# or restart from a phone would invite the repeated open/close cycling this
+# board wedges on (rule 3 in CONTRIBUTING.md). Starting stays at the Pi or over SSH.
+#
+# --no-block: the publisher that runs this is PartOf= the detector, so a blocking
+# stop waits on a job that SIGTERMs the caller itself - and the killed systemctl
+# then reads as "stop failed" although the detector did stop.
+pi ALL=(root) NOPASSWD: /usr/bin/systemctl --no-block stop tetra-detector.service

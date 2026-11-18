@@ -1,0 +1,58 @@
+{
+  "measured_utc": "2026-09-04",
+  "note": "Live C2000 downlink carriers. An uplink hit on TETRA channel n is only credible if n appears here - the paired uplink frequency is exactly 10 MHz lower.",
+  "channels": [
+    60,
+    90,
+    104,
+    119,
+    135,
+    145,
+    151,
+    163,
+    177,
+    188
+  ],
+  "detail": {
+    "60": {
+      "snr_db": 13.4,
+      "frequency_hz": 391512500
+    },
+    "90": {
+      "snr_db": 13.5,
+      "frequency_hz": 392262500
+    },
+    "104": {
+      "snr_db": 20.1,
+      "frequency_hz": 392612500
+    },
+    "119": {
+      "snr_db": 15.2,
+      "frequency_hz": 392987500
+    },
+    "135": {
+      "snr_db": 20.2,
+      "frequency_hz": 393387500
+    },
+    "145": {
+      "snr_db": 15.9,
+      "frequency_hz": 393637500
+    },
+    "151": {
+      "snr_db": 9.3,
+      "frequency_hz": 393787500
+    },
+    "163": {
+      "snr_db": 16.7,
+      "frequency_hz": 394087500
+    },
+    "177": {
+      "snr_db": 21.6,
+      "frequency_hz": 394437500
+    },
+    "188": {
+      "snr_db": 20.6,
+      "frequency_hz": 394712500
+    }
+  }
+}

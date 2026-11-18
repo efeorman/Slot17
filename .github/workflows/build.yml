@@ -1,0 +1,66 @@
+name: Build
+# macOS minutes count ten times on a private repository, so nothing runs by itself on a push.
+# Start it by hand or through the API, and choose only as much testing as the change needs:
+#   none  - the installable app only (about 5 minutes)
+#   quick - plus unit tests and pictures of the Live screen and tile (about 8 minutes)
+#   full  - plus the whole pretend-drive test and every screen (about 20 minutes): before big changes
+on:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: How much testing
+        type: choice
+        options: [none, quick, full]
+        default: none
+
+# A newer run replaces an older one, so an out-of-date run never keeps using minutes.
+concurrency:
+  group: build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    defaults:
+      run:
+        working-directory: ios
+    runs-on: macos-15
+    timeout-minutes: ${{ inputs.tests == 'full' && 30 || 15 }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - uses: actions/checkout@v4
+      # The app's Liquid Glass needs the iOS 26 SDK (Xcode 26). The code also builds with older Xcode,
+      # without the glass, so an image without Xcode 26 still gives a working app.
+      - name: Use the newest Xcode 26 on this image
+        run: |
+          newest=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -n "$newest" ]; then sudo xcode-select -s "$newest"; else echo "::warning::no Xcode 26 here; building without Liquid Glass"; fi
+          xcodebuild -version
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: Build the unsigned IPA
+        run: bash scripts/build-ipa.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Slot17-ipa
+          path: ios/build/Slot17-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+      - name: Quick tests
+        if: inputs.tests == 'quick'
+        run: bash scripts/run-quick.sh
+      - name: All tests
+        if: inputs.tests == 'full'
+        run: bash scripts/run-tests.sh
+      - uses: actions/upload-artifact@v4
+        if: always() && inputs.tests != 'none'
+        with:
+          name: test-results
+          path: |
+            ios/build/check/
+            !ios/build/check/*.xcresult
+          if-no-files-found: warn
+          retention-days: 14
