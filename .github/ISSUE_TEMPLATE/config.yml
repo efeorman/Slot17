@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Slot17 Discord
+    url: https://discord.gg/rSFPWSWNfh
+    about: Questions, help with your setup, and ideas. Chat with other users here.
   - name: Security problem
     url: https://github.com/efeorman/Slot17/blob/main/SECURITY.md
     about: Please don't report security problems in a public issue; read SECURITY.md first.

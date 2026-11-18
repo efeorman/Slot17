@@ -12,6 +12,8 @@ It only receives. It never transmits, and it never decodes, decrypts or listens 
 
 **Status:** it works in daily drives, but how far away it reliably hears a radio has not been measured. See [Limits](#limits).
 
+**Questions, help or ideas?** Join the [Slot17 Discord](https://discord.gg/rSFPWSWNfh).
+
 <table>
 <tr>
 <td align="center" width="33%"><img src="docs/images/app-live.png" alt="The app's Live screen with three signal bars" width="230"><br>The app</td>
@@ -39,7 +41,8 @@ These show demo data. More pictures are in [SCREENSHOTS.md](docs/SCREENSHOTS.md)
 13. [Security](#security)
 14. [Limits](#limits)
 15. [Repository layout](#repository-layout)
-16. [License](#license)
+16. [Community](#community)
+17. [License](#license)
 
 ## How it works
 
@@ -431,6 +434,10 @@ Read [SECURITY.md](SECURITY.md) before relying on this. The main points:
 | [docs/](docs) | How it works ([design](docs/design)) and how to test and debug it ([operations](docs/operations)) |
 
 To work on the code, read [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Community
+
+Join the [Slot17 Discord](https://discord.gg/rSFPWSWNfh) to ask questions, get help with your setup, share how it works in your country, or suggest ideas. Bugs can also go in [GitHub issues](https://github.com/efeorman/Slot17/issues).
 
 ## License
 

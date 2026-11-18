@@ -58,6 +58,6 @@ Run the doctor and read its first problem:
 bash ~/Slot17/setup.sh doctor
 ```
 
-Then see **Troubleshooting** in the README. When you ask for help in an
+Then see **Troubleshooting** in the README. When you ask for help, in the [Slot17 Discord](https://discord.gg/rSFPWSWNfh) or in an
 [issue](https://github.com/efeorman/Slot17/issues/new/choose), include the doctor's output; it contains no
 keys.
