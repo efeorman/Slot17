@@ -68,14 +68,45 @@ chroot "$mnt" systemctl enable slot17-firstboot.service ssh >/dev/null 2>&1
 touch "$mnt/boot/firmware/ssh"   # SSH on from the first start, on top of Imager's own setting
 
 echo "== Slot17's offline checks inside the image (ARM emulation, slow)"
+# Emulation runs about ten times slower than a Pi 5. The detector has a real-time deadline (90 % of each
+# window) and skips what it can't finish in time, so under emulation the checks that send bursts through
+# the live pipeline find nothing, and the update check's 120 s limit runs out. Those few are left out here
+# only: the Pi runs the full suite, them included, on its first start, before it opens the receiver
+# (no test record yet, so --tests-if-changed runs everything). Every other check runs here.
+cat >"$mnt/tmp/slot17-image-checks.py" <<'PY'
+import json, subprocess, sys, unittest
+REALTIME = (
+    "test_own_burst.GeneratedSignal.test_a_real_burst_beside_a_broadband_spike_is_inspected_first_and_matched",
+    "test_overlap.OverlappingWindows.test_every_burst_is_recognised_exactly_once_at_its_time",
+    "test_overlap.OverlappingWindows.test_the_old_windows_lost_the_burst_on_their_edge",
+    "test_update.RealChecks.test_the_real_offline_checks_refuse_a_release_that_breaks_the_detector",
+)
+pre = subprocess.run([sys.executable, "-B", "p0/preflight.py", "--offline"], capture_output=True, text=True)
+out = pre.stdout
+result = json.loads(out[out.index("{"):])
+if not result["offline_preflight_pass"]:
+    print(out, pre.stderr[-3000:]); sys.exit("offline checks failed: %s" % result["errors"])
+sys.path.insert(0, "tests")
+def flat(suite):
+    for t in suite:
+        yield from (flat(t) if isinstance(t, unittest.TestSuite) else [t])
+tests = list(flat(unittest.defaultTestLoader.discover("tests")))
+kept = unittest.TestSuite(t for t in tests if t.id() not in REALTIME)
+left_out = len(tests) - kept.countTestCases()
+print(f"{len(tests)} tests, {left_out} left out here (real-time speed; the Pi runs them at first start)")
+if left_out != len(REALTIME):
+    sys.exit("the list of real-time checks no longer matches the tests: update build_image.sh")
+ok = unittest.TextTestRunner(verbosity=1).run(kept).wasSuccessful()
+sys.exit(0 if ok else "regression tests failed")
+PY
 chroot "$mnt" bash -euo pipefail -c '
 d="$(mktemp -d)"; tar -xzf /opt/slot17/slot17.tar.gz -C "$d"
-cd "$d/slot17" && python3 -B p0/preflight.py --offline --tests >"$d/checks.log" 2>&1 || {
-    grep -E "^(FAIL|ERROR):|^Traceback|Error|^Ran [0-9]|^FAILED|offline_preflight_pass" -A 4 "$d/checks.log" | head -120
-    python3 -c "import json,sys; t=open(sys.argv[1]).read(); print(\"errors:\", json.loads(t[t.rindex(\"\n{\"):])[\"errors\"])" "$d/checks.log" || true
+cd "$d/slot17" && python3 -B /tmp/slot17-image-checks.py >"$d/checks.log" 2>&1 || {
+    grep -E "^(FAIL|ERROR):|^Traceback|Error|^Ran [0-9]|failed|no longer matches" -A 4 "$d/checks.log" | head -120
     exit 1; }
-grep -E "^Ran [0-9]+ tests" "$d/checks.log"; rm -rf "$d"
+grep -E "left out here|^Ran [0-9]+ tests" "$d/checks.log"; rm -rf "$d"
 '
+rm -f "$mnt/tmp/slot17-image-checks.py"
 
 echo "== Packing"
 umount -l "$mnt/etc/resolv.conf" 2>/dev/null || true
