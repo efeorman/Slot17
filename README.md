@@ -12,7 +12,7 @@ It only receives. It never transmits, and it never decodes, decrypts or listens 
 
 **Status:** it works in daily drives, but how far away it reliably hears a radio has not been measured. See [Limits](#limits).
 
-**Questions, help or ideas?** Join the [Slot17 Discord](https://discord.gg/rSFPWSWNfh). The website is [slot17.cloud](https://slot17.cloud).
+**Questions?** The [FAQ](docs/FAQ.md) answers the common ones: range, false beeps, which receiver, which countries, hosted servers and the apps. For help or ideas, join the [Slot17 Discord](https://discord.gg/rSFPWSWNfh). The website is [slot17.cloud](https://slot17.cloud).
 
 <table>
 <tr>
@@ -463,6 +463,7 @@ Read [SECURITY.md](SECURITY.md) before relying on this. The main points:
 | [shared/](shared) | Test cases both apps must pass in the same way |
 | [tests/](tests) | Detector tests and small saved signals |
 | [scripts/](scripts) | Release, test and documentation tools |
+| [docs/FAQ.md](docs/FAQ.md) | Questions we get a lot, with short answers |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | What changed in each release, why, and what was tried and left out |
 | [docs/](docs) | How it works ([design](docs/design)) and how to test and debug it ([operations](docs/operations)) |
 
@@ -470,7 +471,7 @@ To work on the code, read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Community
 
-Join the [Slot17 Discord](https://discord.gg/rSFPWSWNfh) to ask questions, get help with your setup, share how it works in your country, or suggest ideas. Bugs can also go in [GitHub issues](https://github.com/efeorman/Slot17/issues).
+Read the [FAQ](docs/FAQ.md) first, then join the [Slot17 Discord](https://discord.gg/rSFPWSWNfh) to ask questions, get help with your setup, share how it works in your country, or suggest ideas. Bugs can also go in [GitHub issues](https://github.com/efeorman/Slot17/issues).
 
 ## License
 
