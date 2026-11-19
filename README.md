@@ -12,7 +12,7 @@ It only receives. It never transmits, and it never decodes, decrypts or listens 
 
 **Status:** it works in daily drives, but how far away it reliably hears a radio has not been measured. See [Limits](#limits).
 
-**Questions, help or ideas?** Join the [Slot17 Discord](https://discord.gg/rSFPWSWNfh).
+**Questions, help or ideas?** Join the [Slot17 Discord](https://discord.gg/rSFPWSWNfh). The website is [slot17.cloud](https://slot17.cloud).
 
 <table>
 <tr>
@@ -32,7 +32,7 @@ These show demo data. More pictures are in [SCREENSHOTS.md](docs/SCREENSHOTS.md)
 4. [Step 1: Prepare the car computer](#step-1-prepare-the-car-computer)
 5. [Step 2: Set up the display server](#step-2-set-up-the-display-server)
 6. [Step 3: Set up the car computer](#step-3-set-up-the-car-computer)
-7. [Step 4: Install the iPhone app](#step-4-install-the-iphone-app)
+7. [Step 4: Install the app](#step-4-install-the-app)
 8. [Daily use](#daily-use)
 9. [Updating](#updating)
 10. [Troubleshooting](#troubleshooting)
@@ -88,8 +88,8 @@ These are the parts we use. Equivalent parts should work too.
 | **Receiver** | [Airspy Mini](https://itead.cc/product/airspy-mini/) | Its antenna socket is SMA. Other receivers aren't supported |
 | **Antenna** | [Motorola GMAE4258B](https://www.firecom.nl/merken/motorola/motorola-gmae4258b/), a hidden TETRA antenna for 380–410 MHz, stuck inside the front windscreen | Any antenna made for 380–400 MHz works. **An antenna on the outside of the car, such as a magnetic roof antenna, receives better** than one inside. Some windscreens have a metal coating that blocks radio signals. You may need an adapter to the Airspy's SMA socket |
 | **Internet in the car** | The iPhone's personal hotspot, or a ZTE MF833N 4G USB stick with its own SIM | Any hotspot or car Wi-Fi works and needs nothing extra. A 4G stick spares the phone's battery; ours needs one extra setup command on a Raspberry Pi 5, see [the optional step](#optional-a-4g-stick-instead-of-the-hotspot). A stick that Linux recognises by itself needs no setup at all |
-| **Display server** | A small rented Linux server (VPS) | Any Debian or Ubuntu machine with a public address that the car and phone can reach, such as a cheap VPS. A home computer works if you forward a port on your router |
-| **Phone** | iPhone with iOS 16.2 or newer | The Live Activity and widget need iOS 18, and showing them on CarPlay needs iOS 26. Android and computers can use the web page instead of the app |
+| **Display server** | A hosted server from us, or your own | Ours: one command in the Discord, nothing to rent; see [step 2](#step-2-set-up-the-display-server). Your own: any Debian or Ubuntu machine with a public address that the car and phone can reach, such as a cheap VPS. A home computer works if you forward a port on your router |
+| **Phone** | iPhone with iOS 16.2 or newer | An Android phone with Android 8 or newer works too, with its own app. The iPhone's Live Activity and widget need iOS 18, and showing them on CarPlay needs iOS 26. Computers can use the web page |
 | **Notifications (optional)** | [Pushover](https://pushover.net) | Only for fault messages, such as "receiver hears nothing". From 1.2.9 the iPhone app can show the same faults itself (Settings, Fault messages) and switch Pushover off and on; the app's notifications work only while the app runs |
 
 You also need a computer to set things up. Windows, macOS and Linux all work.
@@ -135,7 +135,27 @@ sudo nmcli device wifi connect "Your home Wi-Fi" password "your-wifi-password"
 
 ## Step 2: Set up the display server
 
-Do this first, because it gives you the address and key that the car computer needs.
+Do this first, because it gives you the address and key that the car computer needs. There are two ways: a server we host for you, or your own.
+
+### Option A: a hosted server from us
+
+1. **Join the [Slot17 Discord](https://discord.gg/rSFPWSWNfh).**
+2. **Type `/server create`** in any channel. The bot answers in a message only you can see, with:
+   - your **private link**, for the app and the web page;
+   - your **server address**, such as `https://k7f2q.slot17.cloud`, and your **car computer key**, for the next step.
+3. **Copy them somewhere safe.** They aren't shown again. Anyone with the private link can see your car's data and stop the detector.
+
+The server is linked to your Discord account. Other commands, again only visible to you:
+
+| Command | What it does |
+|---|---|
+| `/server info` | Your server's address, whether it runs, when your car computer last sent something, the detector's state and what is stored |
+| `/server new-keys` | New keys; the old link and car computer key stop working |
+| `/server delete` | Deletes your server and everything on it. The address is never handed out again |
+
+Each hosted server is a separate copy with its own address, keys and folder; other people's servers can't reach it. What it stores and who can see it: [slot17.cloud/privacy.html](https://slot17.cloud/privacy.html). Then go on to [step 3](#step-3-set-up-the-car-computer).
+
+### Option B: your own server
 
 1. **Log in to your server** with the details from your hosting provider, for example `ssh root@203.0.113.5`.
 2. **Use a normal user, not root.** If the provider only gave you root, create a user first:
@@ -206,7 +226,11 @@ It installs a USB fix made by someone else and a small check of ours that keeps 
 - **Plug the stick into the other pair of USB sockets**, not the pair the receiver is in. On the same pair, the receiver lost samples while the stick started, on three of four starts.
 - **Leave the hotspot switched on for the first drives.** On our first drive the stick lost its mobile connection once for eight minutes, and with no hotspot the phone had nothing from the car for that time.
 
-## Step 4: Install the iPhone app
+## Step 4: Install the app
+
+There is an app for iPhone and one for Android. Without either, open your private link in any browser and tap **Start**.
+
+### iPhone
 
 Apple only allows App Store apps to be installed normally, and Slot17 isn't in the App Store, so you sign it yourself.
 
@@ -223,12 +247,19 @@ We used Sideloadly at first and use Signulous now (since app 1.5.1). With Signul
 3. **On iOS 16 and newer, turn on Developer Mode** if the iPhone asks: **Settings > Privacy & Security > Developer Mode**, then restart.
 4. **Open Slot17 and paste your private link** from step 2. It's stored in the iPhone's Keychain.
 
-Without an iPhone, open your private link in any browser and tap **Start**.
+### Android
+
+1. **Download the app file.** On the [latest release](https://github.com/efeorman/Slot17/releases/latest), open **Slot17.apk** on the phone.
+2. **Install it.** Android asks once whether your browser or file manager may install apps; allow it for this one install. The app is signed with our own key, so later versions install over it and keep your settings.
+3. **Open Slot17 and paste your private link** from step 2.
+4. **Allow notifications, then in Settings tap Let Slot17 run in the background.** It keeps a notification while it listens, which lets it play the beeps with the screen off. Some phones (Samsung, Xiaomi, Huawei) also need battery optimisation turned off for Slot17 in the phone's own settings.
+
+It does the same as the iPhone app; [android/README.md](android/README.md) lists where it differs (a notification instead of the Live Activity, Quick Settings tiles instead of Control Center controls).
 
 ## Daily use
 
 1. **Start the car.** The car computer powers up, joins your phone's hotspot and starts listening by itself. Keep your hotspot on.
-2. **Open the Slot17 app once, then lock the phone.** iOS doesn't let an app start sound from the background, so opening it is what arms the sound. On CarPlay you hear it through the car, and a Live Activity shows the status.
+2. **Open the Slot17 app once, then lock the phone.** iOS doesn't let an app start sound from the background, so opening it is what arms the sound. On CarPlay you hear it through the car, and a Live Activity shows the status. On Android the app keeps a notification while it runs and the sound follows the phone's audio, over Bluetooth or Android Auto.
 3. **Strong signals give a sound:** a chime at 35 dB above the background, and an urgent beep at 50 dB. These are signal strengths, not distances.
    - **A radio in a call** (normal bursts on every TETRA frame, which is what speech or a data call looks like) gets a soft, lower two-note tone from 18 dB, below the chime level. It is traffic on that channel; it says nothing about who or how far.
    - The meters also say **Rising** when a channel's newest match is at least 6 dB above the weakest of the last minute and the strongest so far. Louder is not nearer: a radio sets its power by its own mast.
@@ -428,6 +459,8 @@ Read [SECURITY.md](SECURITY.md) before relying on this. The main points:
 | [display/](display) | The car computer's link to the server, the server, the web page and their tests |
 | [deploy/](deploy) | Setup scripts, service files, permission rules and `doctor.py` (`bash setup.sh doctor`) |
 | [ios/](ios) | The iPhone app, with its Live Activity and widget |
+| [android/](android) | The Android app, with its notification, widget and Quick Settings tiles |
+| [shared/](shared) | Test cases both apps must pass in the same way |
 | [tests/](tests) | Detector tests and small saved signals |
 | [scripts/](scripts) | Release, test and documentation tools |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | What changed in each release, why, and what was tried and left out |

@@ -64,6 +64,52 @@ workflows:
       - ios/build/check/*.log
       - ios/build/check/screens/*.png
 
+  # Android: the core rules' tests (with shared/parity), the debug and release APKs, and pictures
+  # of every screen, in one build. On the Mac machine because Linux machines are not on this plan; it
+  # shares the free Mac minutes with iOS, so it stays small: no emulator, caches kept between builds.
+  # The release is signed with the key in the android_signing group (Codemagic, secure variables).
+  android:
+    name: Android tests and APK
+    instance_type: mac_mini_m2
+    max_build_duration: 25
+    environment:
+      java: 21
+      groups:
+        - android_signing   # the release key; secure variables, never in the repository
+    cache:
+      cache_paths:
+        - ~/.gradle/caches
+        - ~/.gradle/wrapper
+        - ~/.m2/repository
+    scripts:
+      - name: Gradle wrapper
+        script: bash android/scripts/gradle-bootstrap.sh
+      - name: Core tests, debug APK and release APK
+        script: |
+          cd android
+          if [ -n "${SLOT17_KEYSTORE_B64:-}" ]; then
+            echo "$SLOT17_KEYSTORE_B64" | base64 --decode > "$CM_BUILD_DIR/release.jks"
+            export SLOT17_KEYSTORE_PATH="$CM_BUILD_DIR/release.jks"
+          fi
+          mkdir -p "$CM_BUILD_DIR/out"
+          ./gradlew --no-daemon --stacktrace :core:test :app:assembleDebug :app:assembleRelease > "$CM_BUILD_DIR/out/build.log" 2>&1             || { grep -E "^e: |What went wrong|FAILED" "$CM_BUILD_DIR/out/build.log" | head -60; tail -80 "$CM_BUILD_DIR/out/build.log"; exit 1; }
+          tail -30 "$CM_BUILD_DIR/out/build.log"
+          cp app/build/outputs/apk/debug/app-debug.apk "$CM_BUILD_DIR/out/Slot17-debug.apk"
+          cp app/build/outputs/apk/release/*.apk "$CM_BUILD_DIR/out/"
+      - name: Pictures of every screen
+        script: |
+          cd android
+          ./gradlew --no-daemon :app:testDebugUnitTest > "$CM_BUILD_DIR/out/screens.log" 2>&1 || { tail -120 "$CM_BUILD_DIR/out/screens.log"; exit 1; }
+          ls app/build/screenshots
+        ignore_failure: true
+    artifacts:
+      - out/*.apk
+      - out/*.log
+      - android/core/build/test-results/test/*.xml
+      - android/app/build/test-results/testDebugUnitTest/*.xml
+      - android/app/build/screenshots/*.png
+      - android/app/build/outputs/mapping/release/mapping.txt
+
   # The Linux setup test. Same script as GitHub Actions: scripts/test_setup.sh.
   linux-setup:
     name: Linux setup test

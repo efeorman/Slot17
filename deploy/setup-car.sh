@@ -161,8 +161,13 @@ if [ "$DISPLAY_LINK" = yes ]; then
         [ -n "$SERVER" ] || SERVER="$(ask_text "Server address (for example 203.0.113.5):")"
         [ -n "$PI_KEY" ] || PI_KEY="$(ask_text "Car computer key (pi_token):")"
         [ -n "$SERVER" ] && [ -n "$PI_KEY" ] || die "both the server address and the key are needed. Run the setup again when you have them."
-        case "$SERVER" in http://*|https://*) ;; *) SERVER="http://$SERVER" ;; esac
-        case "${SERVER#*://}" in *:*) ;; *) SERVER="$SERVER:5732" ;; esac
+        # A hosted server (name.slot17.cloud) is HTTPS on the normal port; your own server is
+        # plain HTTP on 5732 unless you give a scheme or a port.
+        case "$SERVER" in http://*|https://*) ;; *.slot17.cloud|*.slot17.cloud/) SERVER="https://$SERVER" ;; *) SERVER="http://$SERVER" ;; esac
+        case "$SERVER" in
+            https://*) ;;
+            *) case "${SERVER#*://}" in *:*) ;; *) SERVER="$SERVER:5732" ;; esac ;;
+        esac
         SERVER="${SERVER%/}"
         [ "${#PI_KEY}" -ge 32 ] || die "that key is too short. Copy the whole pi_token the server setup printed."
         mkdir -p "$(dirname "$DISPLAY_CONFIG")"

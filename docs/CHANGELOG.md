@@ -2,6 +2,15 @@
 
 What changed, why, and what was tried and left out. Newest first. Figures come from our own car, receiver and drives; yours will differ.
 
+## 1.3.0 and Android app 1.7.0 (19 November 2026)
+
+The detector, the server and the iPhone app are unchanged; only the version number of the car computer software moves, so it matches the release.
+
+- **Android app 1.7.0.** The functions of the iPhone app, built the Android way (Kotlin, Jetpack Compose, Material 3): the live meters and sounds, the Pi screen with its controls, sightings, logs, settings, update and fault notices. With the screen off a foreground service keeps the link and plays the sounds, with an ongoing notification (Live Updates on Android 16); a home screen widget and two Quick Settings tiles take the place of the Lock Screen widgets and Control Center controls. The rules that decide sounds, link timing and status words are a port of `ios/Slot17/Core` without Android in them (`android/core`), tested against the same cases as the iPhone app (`shared/parity`: 20 alert scenarios and a server message). Signed with our own key. Built and tested on Codemagic; every screen is drawn as a picture in the build. *Not yet done:* a drive with a real Android phone, and running `shared/parity` in the iPhone tests too.
+- **Hosted display servers.** `/server create` in the Discord makes a server for you on `name.slot17.cloud`: its own system user, folder (closed to others), keys and port on 127.0.0.1, behind Cloudflare with HTTPS; `/server info` shows whether it runs, when the car computer last sent something and what is stored; `/server new-keys` and `/server delete` do what they say, and a deleted address is never reused. Running your own server stays as it was.
+- **The car computer's setup accepts a hosted address**: `name.slot17.cloud` becomes `https://name.slot17.cloud` on the normal port, where an address of your own still gets `http://` and port 5732.
+- *Known limit:* the update notice compares the app with the iPhone app's version in `versions.json`, so the Android app does not yet hear about a newer Android app.
+
 ## App 1.6.1 (18 November 2026)
 
 - **Update notices.** The display server asks GitHub every 6 hours for the newest release (`releases/latest`, then `versions.json` at that tag, which states the software and app versions; a test keeps it equal to `VERSION` and the app's version). It opens only GitHub's own https addresses, sends nothing about the server or car, keeps the last good answer when a check fails, and can be turned off (`"release_check": false`) or pointed at a fork (`"release_repo"`). The app shows a newer app in Settings > About with a link to the release, newer car computer software on the Pi screen, and one notification per new version where fault notifications are already allowed (it never asks for permission just for this). The web page says it in its footer. While the repository is private GitHub answers 404, and nothing is shown. 6 server tests, 4 app tests.

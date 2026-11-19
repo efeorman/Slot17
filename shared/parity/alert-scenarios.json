@@ -1,0 +1,92 @@
+{
+  "about": "Sound decisions both phone apps must make identically. Each step ingests its matches and flushes once. Defaults: live true, may_hold false, scope 'pi/s1' (ingest_scope defaults to scope), armed true, muted_until 0, audio_problem null, refuse null (the player plays). A match's age_s is its age when it reaches the rule. Settings not given keep the app's defaults.",
+  "scenarios": [
+    {"name": "chime above the red level", "steps": [
+      {"now": 100, "matches": [{"id": "m1", "ch": 5, "strength_db": 30.0, "age_s": 1.0}],
+       "expect": [{"id": "m1", "played": "chime"}]}]},
+
+    {"name": "below the red level stays silent", "steps": [
+      {"now": 100, "matches": [{"id": "m1", "ch": 5, "strength_db": 15.0, "age_s": 1.0}],
+       "expect": [{"id": "m1", "silent": "15.0 dB is below the 22 dB red level"}]}]},
+
+    {"name": "urgent goes first in the same push", "steps": [
+      {"now": 100, "matches": [{"id": "a", "ch": 5, "strength_db": 30.0, "age_s": 1.0}, {"id": "b", "ch": 6, "strength_db": 55.0, "age_s": 1.0}],
+       "expect": [{"id": "b", "played": "urgent"}, {"id": "a", "silent": "another chime played under 6 s ago"}]}]},
+
+    {"name": "chime gaps per channel and overall", "steps": [
+      {"now": 100, "matches": [{"id": "x1", "ch": 5, "strength_db": 30.0, "age_s": 1.0}], "expect": [{"id": "x1", "played": "chime"}]},
+      {"now": 104, "matches": [{"id": "x2", "ch": 7, "strength_db": 30.0, "age_s": 1.0}], "expect": [{"id": "x2", "silent": "another chime played under 6 s ago"}]},
+      {"now": 110, "matches": [{"id": "x3", "ch": 5, "strength_db": 31.0, "age_s": 1.0}], "expect": [{"id": "x3", "silent": "this channel chimed under 30 s ago"}]},
+      {"now": 131, "matches": [{"id": "x4", "ch": 5, "strength_db": 30.0, "age_s": 1.0}], "expect": [{"id": "x4", "played": "chime"}]}]},
+
+    {"name": "urgent gap", "steps": [
+      {"now": 100, "matches": [{"id": "u1", "ch": 1, "strength_db": 55.0, "age_s": 0.5}], "expect": [{"id": "u1", "played": "urgent"}]},
+      {"now": 100.5, "matches": [{"id": "u2", "ch": 2, "strength_db": 60.0, "age_s": 0.5}], "expect": [{"id": "u2", "silent": "another urgent beep played under 1 s ago"}]},
+      {"now": 101.2, "matches": [{"id": "u3", "ch": 3, "strength_db": 52.0, "age_s": 0.5}], "expect": [{"id": "u3", "played": "urgent"}]}]},
+
+    {"name": "a chime never holds back an urgent beep (8 November 2026)", "steps": [
+      {"now": 100, "matches": [{"id": "c", "ch": 4, "strength_db": 30.0, "age_s": 1.0}], "expect": [{"id": "c", "played": "chime"}]},
+      {"now": 100.014, "matches": [{"id": "u", "ch": 5, "strength_db": 51.0, "age_s": 1.0}], "expect": [{"id": "u", "played": "urgent"}]}]},
+
+    {"name": "too old to be useful", "steps": [
+      {"now": 100, "matches": [{"id": "m1", "ch": 5, "strength_db": 30.0, "age_s": 12.0}],
+       "expect": [{"id": "m1", "silent": "it reached the phone 12.0 s old (limit 10 s)"}]}]},
+
+    {"name": "call tone below the chime level", "steps": [
+      {"now": 100, "matches": [{"id": "k1", "ch": 9, "strength_db": 20.0, "age_s": 1.0, "call": true}], "expect": [{"id": "k1", "played": "call"}]},
+      {"now": 105, "matches": [{"id": "k2", "ch": 10, "strength_db": 19.0, "age_s": 1.0, "call": true}], "expect": [{"id": "k2", "silent": "another call tone played under 15 s ago"}]},
+      {"now": 130, "matches": [{"id": "k3", "ch": 9, "strength_db": 20.0, "age_s": 1.0, "call": true}], "expect": [{"id": "k3", "silent": "this channel's call tone played under 60 s ago"}]},
+      {"now": 131, "matches": [{"id": "k4", "ch": 11, "strength_db": 17.0, "age_s": 1.0, "call": true}], "expect": [{"id": "k4", "silent": "17.0 dB is below the 22 dB red level"}]}]},
+
+    {"name": "quiet mode raises chimes only", "settings": {"quiet": true}, "steps": [
+      {"now": 100, "matches": [{"id": "q1", "ch": 1, "strength_db": 25.0, "age_s": 1.0}], "expect": [{"id": "q1", "silent": "25.0 dB is below the 28 dB red level (Quiet mode)"}]},
+      {"now": 101, "matches": [{"id": "q2", "ch": 2, "strength_db": 55.0, "age_s": 1.0}], "expect": [{"id": "q2", "played": "urgent"}]},
+      {"now": 102, "matches": [{"id": "q3", "ch": 3, "strength_db": 29.0, "age_s": 1.0}], "expect": [{"id": "q3", "silent": "another chime played under 30 s ago"}]}]},
+
+    {"name": "not live drops waiting matches", "steps": [
+      {"now": 100, "live": false, "matches": [{"id": "m1", "ch": 5, "strength_db": 30.0, "age_s": 1.0}], "expect": []},
+      {"now": 101, "matches": [], "expect": []},
+      {"now": 102, "matches": [{"id": "m1", "ch": 5, "strength_db": 30.0, "age_s": 1.0}], "expect": []}]},
+
+    {"name": "held for the first clock sample", "steps": [
+      {"now": 100, "live": false, "may_hold": true, "matches": [{"id": "m1", "ch": 5, "strength_db": 30.0, "age_s": 1.0}], "expect": []},
+      {"now": 101, "matches": [], "expect": [{"id": "m1", "played": "chime"}]}]},
+
+    {"name": "a new session or link discards old matches", "steps": [
+      {"now": 100, "ingest_scope": "pi/s1", "scope": "pi/s2", "matches": [{"id": "m1", "ch": 5, "strength_db": 30.0, "age_s": 1.0}],
+       "expect": [{"id": "m1", "silent": "the link or the detector was not live"}]}]},
+
+    {"name": "sound switched off", "settings": {"sound": false}, "steps": [
+      {"now": 100, "matches": [{"id": "m1", "ch": 5, "strength_db": 55.0, "age_s": 1.0}], "expect": [{"id": "m1", "silent": "sound is switched off"}]}]},
+
+    {"name": "sound not armed", "steps": [
+      {"now": 100, "armed": false, "matches": [{"id": "m1", "ch": 5, "strength_db": 30.0, "age_s": 1.0}], "expect": [{"id": "m1", "silent": "sound is not armed"}]}]},
+
+    {"name": "muted, and an audio problem comes first", "steps": [
+      {"now": 100, "muted_until": 200, "matches": [{"id": "m1", "ch": 5, "strength_db": 30.0, "age_s": 1.0}], "expect": [{"id": "m1", "silent": "muted by the speaker button"}]},
+      {"now": 101, "muted_until": 200, "audio_problem": "the speaker is in use by a call", "matches": [{"id": "m2", "ch": 6, "strength_db": 30.0, "age_s": 1.0}],
+       "expect": [{"id": "m2", "silent": "the speaker is in use by a call"}]}]},
+
+    {"name": "a match without strength", "steps": [
+      {"now": 100, "matches": [{"id": "m1", "ch": 5, "age_s": 1.0}], "expect": [{"id": "m1", "silent": "the match had no usable strength"}]}]},
+
+    {"name": "repeat needed", "settings": {"repeatNeeded": true}, "steps": [
+      {"now": 100, "matches": [{"id": "m1", "ch": 5, "strength_db": 30.0, "age_s": 1.0}],
+       "channels": [{"ch": 5, "freq_mhz": 380.1375, "age_s": 1.0, "hits_60s": 1}],
+       "expect": [{"id": "m1", "silent": "“repeat needed” is on and this channel matched once"}]},
+      {"now": 140, "matches": [{"id": "m2", "ch": 5, "strength_db": 30.0, "age_s": 1.0}],
+       "channels": [{"ch": 5, "freq_mhz": 380.1375, "age_s": 1.0, "hits_60s": 2}],
+       "expect": [{"id": "m2", "played": "chime"}]}]},
+
+    {"name": "a refused sound does not use up the gap", "steps": [
+      {"now": 100, "refuse": "audio session interrupted", "matches": [{"id": "m1", "ch": 5, "strength_db": 30.0, "age_s": 1.0}],
+       "expect": [{"id": "m1", "silent": "audio session interrupted"}]},
+      {"now": 100.5, "matches": [{"id": "m2", "ch": 5, "strength_db": 30.0, "age_s": 1.0}], "expect": [{"id": "m2", "played": "chime"}]}]},
+
+    {"name": "urgent switched off chimes instead", "settings": {"urgent": false}, "steps": [
+      {"now": 100, "matches": [{"id": "m1", "ch": 5, "strength_db": 55.0, "age_s": 1.0}], "expect": [{"id": "m1", "played": "chime"}]}]},
+
+    {"name": "rounding ties like iOS", "steps": [
+      {"now": 100, "matches": [{"id": "m1", "ch": 5, "strength_db": 15.25, "age_s": 1.0}], "expect": [{"id": "m1", "silent": "15.2 dB is below the 22 dB red level"}]}]}
+  ]
+}

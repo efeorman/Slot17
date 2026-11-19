@@ -1,5 +1,5 @@
 {
-  "software": "1.2.9",
+  "software": "1.3.0",
   "app": "1.6.1",
   "note": "The versions in each release. The display server reads this file at the newest release tag to tell the app and web page about updates. Tests keep it equal to VERSION and ios/project.yml."
 }

@@ -5,7 +5,10 @@
 | `install.sh` | The installer. On the car computer or server, run: `curl -fsSL https://github.com/efeorman/Slot17/releases/latest/download/install.sh \| bash` |
 | `slot17.tar.gz` | Everything else. The installer downloads this by itself |
 | `Slot17.ipa` | The iPhone app, unsigned. Sign and install it with Signulous or Sideloadly; see the README's step 4 |
+| `Slot17.apk` | The Android app, signed. Open it on the phone to install; see the README's step 4 |
 | `SHA256SUMS` | Checksums, to check a download with `sha256sum -c SHA256SUMS` |
+
+**New in 1.3.0:** an Android app (1.7.0) with the same functions as the iPhone app, and hosted display servers: type `/server create` in the [Discord](https://discord.gg/rSFPWSWNfh) instead of renting a server. The car computer's setup accepts a hosted address (`name.slot17.cloud`, over HTTPS). Detection and the iPhone app are unchanged; a car computer that updates itself gets the new version number and nothing else.
 
 **New in 1.2.9 (app 1.6.0):** switch the car computer's Pushover messages off and on from the app, and let the app show the same faults as its own notifications; `bash setup.sh doctor` gives a plain verdict per part; the server setup shows the private link as a QR code; the web page installs as a home-screen app; each match records which rule recognised it. The app adds Liquid Glass on iOS 26, Control Center controls and Lock Screen widgets for I SAW. Detection is unchanged. Signed updates bring the detector and publisher; for `doctor` and the QR code, run the installer again.
 
