@@ -269,9 +269,9 @@ class ReleaseNotice(Base):
         return get, asked
 
     def test_the_newest_release_and_its_app_version(self):
-        get, asked = self.fake(versions={"software": "1.3.0", "app": "1.7.0"})
+        get, asked = self.fake(versions={"software": "1.3.0", "app": "1.7.0", "android": "1.8.0"})
         found = srv.fetch_latest_release("efeorman/Slot17", get=get)
-        self.assertEqual(found, {"software": "1.3.0", "app": "1.7.0", "tag": "v1.3.0",
+        self.assertEqual(found, {"software": "1.3.0", "app": "1.7.0", "android": "1.8.0", "tag": "v1.3.0",
                                  "url": "https://github.com/efeorman/Slot17/releases/tag/v1.3.0"})
         self.assertEqual(asked, ["https://api.github.com/repos/efeorman/Slot17/releases/latest",
                                  "https://raw.githubusercontent.com/efeorman/Slot17/v1.3.0/versions.json"])
@@ -317,6 +317,77 @@ class ReleaseNotice(Base):
         self.assertEqual(versions["software"], (root / "VERSION").read_text().strip())
         project = (root / "ios/project.yml").read_text(encoding="utf-8")
         self.assertIn(f'MARKETING_VERSION: "{versions["app"]}"', project)
+        android = (root / "android/app/build.gradle.kts").read_text(encoding="utf-8")
+        self.assertIn(f'versionName = "{versions["android"]}"', android)
+
+
+class RelayUpdate(unittest.TestCase):
+    """The team's signed car computer update, copied from the newest GitHub release (release_updates)."""
+    BUNDLE = b"\x1f\x8b pretend signed bundle " * 50
+    REPO = "efeorman/Slot17"
+
+    def setUp(self):
+        import hashlib
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name) / "release"
+        self.meta = {"seq": 19, "commit": "a" * 40, "sha256": hashlib.sha256(self.BUNDLE).hexdigest(),
+                     "size": len(self.BUNDLE), "signature": "ab" * 64, "created": "2026-11-19T12:00:00Z"}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def fake(self, meta=None, bundle=None, assets=None):
+        base = f"https://api.github.com/repos/{self.REPO}/releases/assets/"
+        release = {"tag_name": "v1.3.1", "assets": assets if assets is not None else [
+            {"name": "slot17-update.json", "url": base + "1"}, {"name": "slot17-update.tar.gz", "url": base + "2"}]}
+        asked = []
+
+        def get(url, accept="application/vnd.github+json", limit=0):
+            asked.append((url, accept))
+            if url.endswith("/releases/latest"):
+                return json.dumps(release).encode()
+            if url == base + "1":
+                return json.dumps(meta or self.meta).encode()
+            if url == base + "2":
+                return self.BUNDLE if bundle is None else bundle
+            raise AssertionError(url)
+        return get, asked
+
+    def test_copies_it_once(self):
+        get, asked = self.fake()
+        self.assertEqual(srv.relay_update(self.REPO, self.dir, get=get), "release 19 is ready for the car computer")
+        self.assertEqual((self.dir / "bundle.tar.gz").read_bytes(), self.BUNDLE)
+        self.assertEqual(json.loads((self.dir / "release.json").read_text())["seq"], 19)
+        self.assertEqual(asked[1][1], "application/octet-stream")
+        get, asked = self.fake()
+        self.assertEqual(srv.relay_update(self.REPO, self.dir, get=get), "release 19 is current")
+        self.assertEqual(len(asked), 2, "the bundle isn't downloaded again")
+
+    def test_a_bundle_that_differs_from_its_description_is_refused(self):
+        for bundle in (self.BUNDLE + b"x", b"other" * 200):
+            with self.assertRaises(ValueError):
+                srv.relay_update(self.REPO, self.dir, get=self.fake(bundle=bundle)[0])
+        self.assertFalse((self.dir / "release.json").exists())
+
+    def test_odd_addresses_and_descriptions_are_refused(self):
+        odd = [{"name": "slot17-update.json", "url": "https://evil.example/1"},
+               {"name": "slot17-update.tar.gz", "url": f"https://api.github.com/repos/{self.REPO}/releases/assets/2"}]
+        with self.assertRaises(ValueError):
+            srv.relay_update(self.REPO, self.dir, get=self.fake(assets=odd)[0])
+        for meta in (dict(self.meta, signature="zz"), dict(self.meta, size=srv.RELEASE_MAX + 1), dict(self.meta, sha256="x")):
+            with self.assertRaises(ValueError):
+                srv.relay_update(self.REPO, self.dir, get=self.fake(meta=meta)[0])
+
+    def test_a_release_without_an_update_changes_nothing(self):
+        said = srv.relay_update(self.REPO, self.dir, get=self.fake(assets=[])[0])
+        self.assertEqual(said, "the newest release has no car computer update")
+        self.assertFalse(self.dir.exists())
+
+    def test_new_servers_pass_updates_on(self):
+        path = Path(self.tmp.name) / "config.json"
+        with unittest.mock.patch("builtins.print"):
+            srv.init_config(path)
+        self.assertIs(json.loads(path.read_text())["release_updates"], True)
 
 
 class SoftwareUpdate(Base):

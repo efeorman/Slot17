@@ -12,6 +12,7 @@ struct PiView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 ScreenTitle(text: "Pi")
+                setupCheck
                 Card(title: "Connection") {
                     ChainView()
                     NetworkDetails()
@@ -36,6 +37,42 @@ struct PiView: View {
                 .accessibilityIdentifier("confirm-stop")
         } message: {
             Text("This ends the recording session. It cannot be started from this phone, and after this the app cannot reach the Pi.")
+        }
+    }
+
+    @ViewBuilder private var setupCheck: some View {
+        Card(title: "Setup check") {
+            let phone = model.setupRows
+            let car = model.carRows
+            if let first = SetupCheck.first(phone + car) {
+                Text("Start here: \(first.name)").font(.subheadline.weight(.semibold)).foregroundColor(Theme.text)
+                if let fix = first.fix { Text(fix).font(.caption).foregroundColor(Theme.dim) }
+                Divider().overlay(Theme.line)
+            }
+            ForEach(phone) { checkLine($0) }
+            Divider().overlay(Theme.line)
+            Text("Car computer, its own check").font(.footnote.weight(.semibold)).foregroundColor(Theme.dim)
+            if let doctor = model.piState?.doctor {
+                Text("Checked \(Format.duration(doctor.age)) ago").font(.caption2).foregroundColor(Theme.dim)
+            }
+            ForEach(car) { checkLine($0) }
+            actionBlock(feature: "doctor", state: model.doctorAction) {
+                Button { model.requestDoctor() } label: {
+                    Label("Check the car computer again", systemImage: "arrow.clockwise")
+                }
+                .accessibilityIdentifier("check-again")
+            }
+        }
+        .accessibilityIdentifier("setup-check")
+    }
+
+    private func checkLine(_ row: CheckRow) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            StatusDot(level: row.level, size: 9).padding(.top, 5)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(row.name): \(row.text)").font(.subheadline).foregroundColor(Theme.text)
+                if let fix = row.fix, row.level != .ok { Text(fix).font(.caption).foregroundColor(Theme.dim) }
+            }
         }
     }
 

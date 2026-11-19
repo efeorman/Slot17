@@ -28,7 +28,7 @@ Android Gradle Plugin 8.13, Kotlin 2.2, Gradle 8.14.
 | Live Activity | An ongoing notification (Live Updates on Android 16) |
 | Lock Screen and Home Screen widgets | Home screen widgets |
 | Control Center controls | Quick Settings tiles |
-| CarPlay | No CarPlay app on iOS either: the sound follows the phone's audio to the car (Bluetooth or Android Auto) |
+| Live Activity on CarPlay | Urgent beeps as messages on the Android Auto screen, read out by Android Auto; a spoken reply ("police", "nothing") is a sighting. Settings, Android Auto. The sounds follow the phone's audio to the car either way |
 | Liquid Glass | Material 3, dark |
 
 ## Status
@@ -36,5 +36,6 @@ Android Gradle Plugin 8.13, Kotlin 2.2, Gradle 8.14.
 1.7.0: every screen, the live link, sound with the screen off (foreground service), the ongoing notice,
 the home screen widget and two Quick Settings tiles. The build draws every screen as a picture
 (`app/build/screenshots`). The release is signed with the key in Codemagic's `android_signing` group.
-Published with release 1.3.0 as `Slot17.apk`. Still to do: a drive with a real phone, and running
+1.8.0: urgent beeps on Android Auto (`AutoMessages.kt`, rules in `core/CarMessages.kt`).
+Published with release 1.3.0 as `Slot17.apk` (1.7.0). Still to do: a drive with a real phone, and running
 `shared/parity` in the iOS tests too.

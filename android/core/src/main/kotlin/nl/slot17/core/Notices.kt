@@ -4,7 +4,15 @@ import kotlinx.serialization.Serializable
 
 /** The newest published Slot17 release, as the display server read it from GitHub. Port of Updates.swift. */
 @Serializable
-data class ReleaseInfo(val software: String, val app: String? = null, val tag: String? = null, val url: String? = null)
+data class ReleaseInfo(
+    val software: String,
+    /** The iPhone app's version. */
+    val app: String? = null,
+    val tag: String? = null,
+    val url: String? = null,
+    /** The Android app's own version (releases from 1.3.1 on; older ones leave it out). */
+    val android: String? = null,
+)
 
 /** Which updates to mention. Versions compare by their numbers, so 1.10.0 is newer than 1.9.0. */
 object Updates {

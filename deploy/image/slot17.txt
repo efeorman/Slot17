@@ -1,0 +1,16 @@
+# Slot17: fill this in after flashing the card, save it, then put the card in the Raspberry Pi.
+# Open it with Notepad (Windows) or TextEdit (Mac). Lines starting with # are only notes.
+#
+# Your display server. From /server create in the Slot17 Discord (or your own server's setup):
+# the server address, like https://k7f2q.slot17.cloud, and the car computer key.
+server=
+car_key=
+#
+# Your phone's hotspot, so the car computer goes online in the car.
+# On an iPhone, the name is under Settings > General > About > Name.
+hotspot_name=
+hotspot_password=
+#
+# At the first start the car computer reads this, sets itself up (about 5 minutes) and then removes the
+# key and the password from this card. If something goes wrong, the reason is in slot17-setup.log,
+# next to this file. You can fill in what's missing and start the car computer again.

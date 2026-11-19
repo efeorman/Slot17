@@ -6,7 +6,11 @@
 | `slot17.tar.gz` | Everything else. The installer downloads this by itself |
 | `Slot17.ipa` | The iPhone app, unsigned. Sign and install it with Signulous or Sideloadly; see the README's step 4 |
 | `Slot17.apk` | The Android app, signed. Open it on the phone to install; see the README's step 4 |
+| `slot17-…-raspios-lite-arm64.img.xz` | The ready-made image for the Raspberry Pi: flash it with Raspberry Pi Imager and fill in `slot17.txt` on the card. See the README's step 1 |
+| `slot17-update.json`, `slot17-update.tar.gz` | The signed update your server passes on to your car computer, so it updates itself |
 | `SHA256SUMS` | Checksums, to check a download with `sha256sum -c SHA256SUMS` |
+
+**New in 1.3.1:** a ready-made Raspberry Pi image (flash it, fill in one text file, start the Pi); the setup saves your phone's hotspot; the car computer updates itself with versions signed by the Slot17 team; `/server create` gives the car computer's whole setup as one line; a **Setup check** on the apps' Pi screen with the car computer's own check; the Android app updates itself.
 
 **New in 1.3.0:** an Android app (1.7.0) with the same functions as the iPhone app, and hosted display servers: type `/server create` in the [Discord](https://discord.gg/rSFPWSWNfh) instead of renting a server. The car computer's setup accepts a hosted address (`name.slot17.cloud`, over HTTPS). Detection and the iPhone app are unchanged; a car computer that updates itself gets the new version number and nothing else.
 

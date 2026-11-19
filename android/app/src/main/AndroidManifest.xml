@@ -12,8 +12,15 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Updates from inside the app (Settings > About); Android asks before it allows this. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Android 16's Live Updates for the ongoing notice. -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+
+    <!-- Whether Android Auto is connected (what androidx.car.app's CarConnection reads). -->
+    <queries>
+        <provider android:authorities="androidx.car.app.connection" />
+    </queries>
 
     <application
         android:name=".Slot17App"
@@ -45,6 +52,11 @@
             android:foregroundServiceType="mediaPlayback|location" />
 
         <receiver android:name=".ActionReceiver" android:exported="false" />
+
+        <!-- Urgent beeps as messages on Android Auto: its reply and mark-as-read buttons. -->
+        <service android:name=".AutoReplyService" android:exported="false" />
+        <receiver android:name=".InstallResultReceiver" android:exported="false" />
+        <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
 
         <receiver android:name=".MarkWidget" android:exported="true" android:label="Slot17 sightings">
             <intent-filter>

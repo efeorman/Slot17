@@ -129,6 +129,11 @@ fun SettingsScreen(model: AppModel, editLink: () -> Unit) {
             ToggleRow("Show the strongest channel and the last beep", s.liveActivity) { v -> model.updateSettings { it.copy(liveActivity = v) } }
             Hint("In the notification shade and on the lock screen, with Saw police, Saw nothing and Mute buttons. On Android 16 it can show as a Live Update.")
         }
+        Card("Android Auto") {
+            ToggleRow("Show urgent beeps on the car screen", s.carMessages) { v -> model.updateSettings { it.copy(carMessages = v) } }
+            Hint("An urgent beep becomes a message from Slot17, which Android Auto shows and reads out, at most one every 30 seconds and only while Android Auto is connected. Reply police, ambulance, fire or nothing to mark what you saw.")
+            Hint("Slot17 isn't from Google Play, so Android Auto only shows it with Unknown sources on: in the Android Auto settings on your phone, tap Version 10 times, then open Developer settings from the menu and tick Unknown sources.")
+        }
         Card("Fault messages") {
             ToggleRow("Show faults as notifications from this app", s.faultNotices) { v -> model.updateSettings { it.copy(faultNotices = v) } }
             if (s.faultNotices) LabelledRow("Android permission", model.noticePermission)
@@ -161,8 +166,10 @@ fun SettingsScreen(model: AppModel, editLink: () -> Unit) {
                 val newer = model.appUpdate
                 if (newer != null) {
                     Text("App $newer is available", color = C.green, fontSize = 15.sp)
-                    Hint("Download Slot17.apk from the release and install it over this one. Your settings stay.")
-                } else r.app?.let { LabelledRow("Newest release", "app $it, software ${r.software}") }
+                    ActionButton("Download and install $newer", model::installUpdate, enabled = !model.demo)
+                    model.updateState?.let { Hint(it) }
+                    Hint("Android asks you to confirm. It installs over this app, so your settings stay.")
+                } else r.android?.let { LabelledRow("Newest release", "app $it, software ${r.software}") }
                 r.url?.let { url -> ActionButton("Open the release on GitHub", { open(context, url) }, icon = Icons.Filled.Public) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

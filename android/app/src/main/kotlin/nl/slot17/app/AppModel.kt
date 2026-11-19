@@ -48,6 +48,9 @@ import nl.slot17.core.ServerLink
 import nl.slot17.core.ServerLogEntry
 import nl.slot17.core.ServerMessage
 import nl.slot17.core.Sighting
+import nl.slot17.core.CarMessages
+import nl.slot17.core.SetupCheck
+import nl.slot17.core.CheckRow
 import nl.slot17.core.SoundKind
 import nl.slot17.core.SoundSynth
 import nl.slot17.core.StatusBuilder
@@ -99,6 +102,7 @@ class AppModel(private val context: Context) {
     val audio = SoundPlayer(context) { note(it) }
     val location = LocationTracker(context, store) { note(it) }
     val notices = Notices(context)
+    private val car = AutoMessages(context)
     private val client = ServerClient(scope, ::received, ::note, ::unauthorised)
     private val tracker = LinkTracker()
     private var engine = AlertEngine()
@@ -146,6 +150,7 @@ class AppModel(private val context: Context) {
     var stopAction by mutableStateOf(ActionState())
         private set
     var pushoverAction by mutableStateOf(ActionState())
+    var doctorAction by mutableStateOf(ActionState())
         private set
     var pushoverWanted by mutableStateOf<Boolean?>(null)
         private set
@@ -180,6 +185,9 @@ class AppModel(private val context: Context) {
         private set
     var demo by mutableStateOf(false)
         private set
+    /** The in-app update, as words for the Settings screen; null when none is going on. */
+    var updateState by mutableStateOf<String?>(null)
+    val updater = AppUpdater(context)
     /** The wall clock in whole seconds, so "12 s ago" lines move on by themselves. */
     var nowMs by mutableStateOf(System.currentTimeMillis())
         private set
@@ -536,6 +544,10 @@ class AppModel(private val context: Context) {
             is AlertDecision.Outcome.Played -> {
                 sound = o.kind
                 note("${o.kind.name.lowercase()} for L${d.channel}, ${db(d.strength)}, ${Fmt.fixed(d.age, 1)} s old")
+                if (o.kind == SoundKind.URGENT && settings.carMessages && !demo) {
+                    car.post(CarMessages.text(d.channel, d.strength), mono(), notices.allowed)
+                        ?.takeIf { it != AutoMessages.NOT_CONNECTED }?.let { note("android auto: not shown, $it") }
+                }
             }
             is AlertDecision.Outcome.Silent -> {
                 reason = o.reason
@@ -937,6 +949,16 @@ class AppModel(private val context: Context) {
         refresh()
     }
 
+    /** A spoken reply in Android Auto: "police", "nothing"... The reply's own words are not logged. */
+    fun carReply(text: String) {
+        val label = CarMessages.label(text)
+        if (label != null) mark(label, "android auto")
+        note("android auto reply: ${label?.wire ?: "not understood"}")
+        car.answered(CarMessages.answer(label))
+    }
+
+    fun carRead() = car.clear()
+
     /** A notice, widget or tile button: a normal sighting plus a short sound, because the driver is not looking. */
     fun markFromWidget(label: Sighting.Label, tappedAtMs: Long) {
         mark(label, "widget", max(0.0, (System.currentTimeMillis() - tappedAtMs) / 1000.0))
@@ -994,6 +1016,8 @@ class AppModel(private val context: Context) {
             "poweroff" -> if (op.id == powerOff.id) powerOff = actionState(op, "Waiting for the Pi…", "Powering off")
             "notify" -> if (op.id == pushoverAction.id) pushoverAction = actionState(op, "Waiting for the car computer…",
                 op.detail.ifEmpty { "Saved on the car computer" })
+            "doctor" -> if (op.id == doctorAction.id) doctorAction = actionState(op, "The car computer is checking itself…",
+                op.detail.ifEmpty { "Checked" })
             "logs" -> if (op.id == piLogs.id) {
                 if (piLogs.busy && op.state == "done") refreshServerLogs()
                 piLogs = actionState(op, "Waiting for the Pi…", op.detail.ifEmpty { "Saved on the server" })
@@ -1058,6 +1082,12 @@ class AppModel(private val context: Context) {
         if (pushoverOnCar?.pushover == wanted || pushoverAction.level == Level.BAD) pushoverWanted = null
     }
 
+    /** The Pi screen's setup check: this phone's side, then the car computer's own. */
+    val setupRows: List<CheckRow> get() = SetupCheck.phone(hasLink || demo, chain, notices.allowed, ignoringBatteryOptimisation, settings.sound)
+    val carRows: List<CheckRow> get() = SetupCheck.car(piState?.doctor)
+
+    fun requestDoctor() { note("setup check requested"); sendOp("doctor") { doctorAction = it } }
+
     fun requestPiLogs() { note("Pi log requested"); sendOp("logs") { piLogs = it } }
 
     fun requestStop() {
@@ -1073,8 +1103,24 @@ class AppModel(private val context: Context) {
     // Updates
 
     val release: ReleaseInfo? get() = lastMessage?.release
-    val appUpdate: String? get() = Updates.newer(release?.app, version)
+    val appUpdate: String? get() = Updates.newer(release?.android, version)
     val piUpdate: String? get() = Updates.newer(release?.software, lastMessage?.state?.software)
+
+    /** Settings > About: download the newer APK and let Android install it over this one. */
+    fun installUpdate() {
+        val tag = release?.tag ?: return
+        if (!updater.allowed) {
+            updateState = "Allow Slot17 to install apps, then tap again"
+            updater.askPermission()
+            return
+        }
+        updateState = "Downloading..."
+        scope.launch {
+            runCatching { updater.install(tag) { pct -> scope.launch { updateState = "Downloading... $pct %" } } }
+                .onSuccess { note("app update: $tag handed to Android's installer") }
+                .onFailure { updateState = "Not downloaded: ${it.message}"; note("app update failed: ${it.message}") }
+        }
+    }
 
     private fun announceUpdates() {
         if (demo || notices.permission != "Allowed") return

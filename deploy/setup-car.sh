@@ -9,6 +9,10 @@
 #     --yes                 accept the default answer to every question
 #     --server ADDRESS      display server, for example 203.0.113.5 or http://203.0.113.5:5732
 #     --pi-key KEY          the car computer's key, printed by the server setup
+#     --hotspot NAME        your phone's hotspot; the password is asked, or read from
+#                           SLOT17_HOTSPOT_PASSWORD (never put it on the command line)
+#     --no-hotspot          don't ask about the phone's hotspot
+#     --updates / --no-updates      install the Slot17 team's signed updates by themselves, or not
 #     --no-display          don't connect to a display server
 #     --notify / --no-notify        set up phone notifications through Pushover, or not
 #     --calibrate / --no-calibrate  measure this receiver's frequency error, or not
@@ -21,13 +25,17 @@ PROJECT="$(cd "$HERE/.." && pwd)"
 # shellcheck source=deploy/common.sh
 . "$HERE/common.sh"
 
-SERVER=""; PI_KEY=""; DISPLAY_LINK=ask; NOTIFY=ask; CALIBRATE=ask; START=ask
+SERVER=""; PI_KEY=""; HOTSPOT=""; HOTSPOT_STEP=ask; UPDATES=ask; DISPLAY_LINK=ask; NOTIFY=ask; CALIBRATE=ask; START=ask
 AUTOSTART=1; NO_SERVICES=0; CHECK=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --yes) YES=1 ;;
         --server) SERVER="$2"; shift ;;
         --pi-key) PI_KEY="$2"; shift ;;
+        --hotspot) HOTSPOT="$2"; HOTSPOT_STEP=yes; shift ;;
+        --no-hotspot) HOTSPOT_STEP=no ;;
+        --updates) UPDATES=yes ;;
+        --no-updates) UPDATES=no ;;
         --no-display) DISPLAY_LINK=no ;;
         --notify) NOTIFY=yes ;;
         --no-notify) NOTIFY=no ;;
@@ -82,7 +90,7 @@ This takes a few minutes. Nothing here opens the receiver unless you agree to ca
 EOF
 
 # --- 1. packages ------------------------------------------------------------
-packages=(python3 python3-numpy python3-scipy python3-psutil usbutils)
+packages=(python3 python3-numpy python3-scipy python3-psutil python3-cryptography usbutils)
 [ "$NO_SERVICES" = 1 ] || packages+=(airspy libairspy0)
 apt_install "${packages[@]}"
 # Lets you type "python" instead of "python3". Optional: not every system has it.
@@ -141,7 +149,63 @@ else
 fi
 ok "$SERVICE installed$([ "$AUTOSTART" = 1 ] && echo ', starts at power-up')"
 
-# --- 6. display server --------------------------------------------------------
+# --- 6. the phone's hotspot ---------------------------------------------------
+step "Your phone's hotspot"
+if [ "$HOTSPOT_STEP" = ask ]; then
+    if [ -f /etc/NetworkManager/system-connections/slot17-hotspot.nmconnection ]; then
+        HOTSPOT_STEP=no; ok "already saved; run the setup with --hotspot NAME to change it"
+    elif [ "$YES" = 1 ] || ! command -v nmcli >/dev/null; then
+        HOTSPOT_STEP=no
+        command -v nmcli >/dev/null || note "NetworkManager isn't here; add the hotspot with this system's own Wi-Fi settings."
+    else
+        echo "  In the car, this computer goes online through your phone's hotspot. Save it now and it joins"
+        echo "  by itself every drive. On an iPhone: Settings > Personal Hotspot, with Maximise Compatibility on."
+        ask_yes "Save your phone's hotspot as a Wi-Fi network?" y && HOTSPOT_STEP=yes || HOTSPOT_STEP=no
+    fi
+fi
+if [ "$HOTSPOT_STEP" = yes ]; then
+    [ -n "$HOTSPOT" ] || HOTSPOT="$(ask_text "Hotspot name (on an iPhone: Settings > General > About > Name):")"
+    password="${SLOT17_HOTSPOT_PASSWORD:-}"
+    if [ -z "$password" ] && [ -t 0 ] && [ "$YES" != 1 ]; then
+        read -r -s -p "  Hotspot password (not shown): " password; echo
+    fi
+    if [ -n "$HOTSPOT" ] && [ -n "$password" ]; then
+        if printf '%s' "$password" | sudo bash "$HERE/hotspot.sh" "$HOTSPOT" >/dev/null; then
+            ok "saved \"$HOTSPOT\"; this computer joins it whenever it's in range"
+        else
+            note "not saved (see the reason above). Add it later with: sudo nmtui"
+        fi
+    else
+        note "skipped: both the name and the password are needed. Run the setup again to add it."
+    fi
+    unset password
+fi
+
+# --- 7. updates by themselves --------------------------------------------------
+step "Updates by themselves"
+KEY_FILE="$HOME/.config/slot17-release-key.pub"
+TEAM_KEY="$(tr -d '[:space:]' <"$HERE/slot17-release-key.pub")"
+if [ -f "$KEY_FILE" ] && [ "$(tr -d '[:space:]' <"$KEY_FILE")" != "$TEAM_KEY" ]; then
+    ok "this car computer trusts its own release key; leaving it as it is"
+elif [ "$UPDATES" = no ]; then
+    rm -f "$KEY_FILE"
+    note "off. Update by running the install line again when the app says there's a new version."
+else
+    if [ "$UPDATES" = ask ] && [ ! -f "$KEY_FILE" ]; then
+        echo "  The car computer can install new Slot17 versions by itself, at a start, from your server."
+        echo "  It only takes a version signed by the Slot17 team, and tests it before it replaces anything."
+        ask_yes "Install updates by themselves (recommended)?" y && UPDATES=yes || UPDATES=no
+    fi
+    if [ "$UPDATES" = no ]; then
+        note "off. Update by running the install line again when the app says there's a new version."
+    else
+        mkdir -p "$(dirname "$KEY_FILE")"
+        printf '%s\n' "$TEAM_KEY" > "$KEY_FILE"
+        ok "on: signed updates from your server install at the next start"
+    fi
+fi
+
+# --- 8. display server --------------------------------------------------------
 step "Connecting to your display server"
 if [ "$DISPLAY_LINK" = ask ]; then
     if [ -n "$SERVER" ] || [ -f "$DISPLAY_CONFIG" ]; then
@@ -188,7 +252,7 @@ else
     note "skipped. You can connect later by running the setup again."
 fi
 
-# --- 7. notifications ---------------------------------------------------------
+# --- 9. notifications ---------------------------------------------------------
 step "Phone notifications (optional)"
 if [ "$NOTIFY" = ask ]; then
     if [ "$YES" = 1 ]; then NOTIFY=no
@@ -204,7 +268,7 @@ else
     note "skipped"
 fi
 
-# --- 8. calibration -----------------------------------------------------------
+# --- 10. calibration ----------------------------------------------------------
 step "Calibrating the receiver (recommended once)"
 if ! airspy_present; then
     note "no Airspy found on USB, so this is skipped. Plug it in and run: bash setup.sh car --calibrate --no-display --no-notify"
@@ -225,7 +289,7 @@ if [ "$CALIBRATE" = yes ]; then
     fi
 fi
 
-# --- 9. start -----------------------------------------------------------------
+# --- 11. start ----------------------------------------------------------------
 step "Starting the detector"
 if [ "$START" = ask ]; then
     if airspy_present; then

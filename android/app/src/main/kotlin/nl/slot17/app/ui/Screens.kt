@@ -54,6 +54,10 @@ import nl.slot17.core.Format
 import nl.slot17.core.MarkSummary
 import nl.slot17.core.Sighting
 import nl.slot17.core.SignalWords
+import androidx.compose.foundation.layout.Box
+import nl.slot17.core.Level
+import nl.slot17.core.SetupCheck
+import nl.slot17.core.CheckRow
 
 private val when_ = SimpleDateFormat("d MMM HH:mm:ss", Locale.UK)
 private fun time(ms: Long) = when_.format(Date(ms))
@@ -172,6 +176,23 @@ fun PiScreen(model: AppModel) {
     var confirmStop by remember { mutableStateOf(false) }
     Screen {
         ScreenTitle("Pi")
+        Card("Setup check") {
+            val phone = model.setupRows
+            val car = model.carRows
+            SetupCheck.first(phone + car)?.let { first ->
+                Text("Start here: ${first.name}", color = C.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                first.fix?.let { Hint(it) }
+                Rule()
+            }
+            for (row in phone) CheckLine(row)
+            Rule()
+            Text("Car computer, its own check", color = C.dim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            model.piState?.doctor?.let { Hint("Checked ${Format.duration(it.age)} ago") }
+            for (row in car) CheckLine(row)
+            ActionBlock(model, "doctor", model.doctorAction) {
+                ActionButton("Check the car computer again", model::requestDoctor, icon = Icons.Filled.Refresh, enabled = it && !model.doctorAction.busy)
+            }
+        }
         Card("Connection") {
             ChainView(model)
             NetworkDetails(model)
@@ -237,6 +258,17 @@ fun PiScreen(model: AppModel) {
         "Power off", { model.requestPowerOff() }) { confirmPowerOff = false }
     if (confirmStop) Confirm("Stop the detector?", "This ends the recording session. It cannot be started from this phone, and after this the app cannot reach the Pi.",
         "Stop the detector", { model.requestStop() }) { confirmStop = false }
+}
+
+@Composable
+private fun CheckLine(row: CheckRow) {
+    Row(verticalAlignment = Alignment.Top, modifier = Modifier.padding(vertical = 3.dp)) {
+        Box(Modifier.padding(top = 6.dp)) { StatusDot(row.level, 9) }
+        Column(Modifier.padding(start = 10.dp)) {
+            Text("${row.name}: ${row.text}", color = C.text, fontSize = 14.sp)
+            row.fix?.takeIf { row.level != Level.OK }?.let { Hint(it) }
+        }
+    }
 }
 
 @Composable

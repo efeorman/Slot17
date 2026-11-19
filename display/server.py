@@ -114,7 +114,7 @@ class AppConfig:
 # its moment must never fire at the start of some later drive; a sighting stays
 # useful, and the phone keeps its own copy until it hears the Pi saved it.
 # A Pushover switch made while the car is off waits for the next drive, like a sighting.
-OP_TTL_S = {"poweroff": 30.0, "logs": 120.0, "mark": 86400.0, "notify": 86400.0}
+OP_TTL_S = {"poweroff": 30.0, "logs": 120.0, "mark": 86400.0, "notify": 86400.0, "doctor": 120.0}
 STOP_TTL_S = 60.0
 OP_RESEND_S = 30.0          # a sighting the Pi took but never answered is offered again
 MAX_OPS = 64
@@ -138,6 +138,11 @@ RELEASE_REPO = "efeorman/Slot17"          # config "release_repo" for a fork; "r
 RELEASE_FIRST_CHECK_S = 60.0
 RELEASE_CHECK_EVERY_S = 6 * 3600.0
 RELEASE_MAX_BYTES = 256 * 1024
+# Updates for everyone (1.3.1): the newest GitHub release carries the car computer update the Slot17 team
+# signed. With "release_updates": true (new servers) this server copies it into release/, where the car
+# computer fetches it. The server checks only size and checksum; the car computer checks the signature
+# against the public key it was given at setup, so this server can't supply code of its own.
+UPDATE_JSON, UPDATE_BUNDLE = "slot17-update.json", "slot17-update.tar.gz"
 MATCH_RULES = ("standard", "weak", "coherent")   # how a match was recognised; anything else is dropped
 PI_ON_WITHIN_S = 30
 SOCKET_TIMEOUT_S = 15.0     # idle limit for any read or write on a connection
@@ -159,6 +164,7 @@ class Store:
         self.release = None                    # the newest published release, from ReleaseCheck
         self.seq = 0
         self.latest = None
+        self.doctor = None                      # (verdicts, monotonic time received)
         self.received_mono = None
         self.source = None
         self.source_seq = -1
@@ -327,6 +333,12 @@ class Store:
             state["snapshot_age_s"] += upper
             for row in state["channels"] + state["matches"]:
                 row["age_s"] += upper
+            # The doctor's verdicts come now and then, not with every push: keep the last ones.
+            if "doctor" in state:
+                self.doctor = (state["doctor"], now)
+            elif self.doctor is not None:
+                verdicts, at = self.doctor
+                state["doctor"] = dict(verdicts, age_s=round(verdicts["age_s"] + now - at, 1))
             self.seq += 1
             self.latest, self.received_mono = state, now
             self.cond.notify_all()
@@ -480,6 +492,11 @@ def clean_state(p):
         out["software"] = p["software"]
     if isinstance(p.get("notify"), dict) and isinstance(p["notify"].get("pushover"), bool):
         out["notify"] = {"pushover": p["notify"]["pushover"], "configured": p["notify"].get("configured") is True}
+    if "doctor" in p:
+        try:
+            out["doctor"] = clean_doctor(p["doctor"])
+        except ValueError:
+            pass                                # an odd detail never refuses the push it came with
     if "update" in p:
         u = p["update"]
         if not isinstance(u, dict) or not isinstance(u.get("state"), str) or u["state"] not in UPDATE_STATES:
@@ -490,6 +507,19 @@ def clean_state(p):
 
 
 LINK_KINDS = {"cable", "4G stick", "Wi-Fi", "none"}
+DOCTOR_LEVELS = {"ok", "note", "PROBLEM"}
+
+
+def clean_doctor(d):
+    """The car computer's `setup.sh doctor` verdicts (1.3.1): a few lines of plain words, bounded."""
+    if not isinstance(d, dict) or not isinstance(d.get("items"), list) or len(d["items"]) > 16:
+        raise ValueError
+    items = []
+    for row in d["items"]:
+        if not isinstance(row, list) or len(row) != 3 or row[1] not in DOCTOR_LEVELS:
+            raise ValueError
+        items.append([_str(row[0], 40), row[1], _str(row[2], 240)])
+    return {"items": items, "age_s": _num(d.get("age_s", 0), 0, 86400 * 30, 1)}
 
 
 def clean_link(link):
@@ -1067,7 +1097,9 @@ def init_config(path=CONFIG, port=5732):
         raise SystemExit(f"{path} exists; refusing to overwrite its secrets")
     cfg = {"host": "0.0.0.0", "port": port,  # noqa: S104 - the phone and the Pi must reach it
            "pi_token": secrets.token_urlsafe(32), "viewer_key": secrets.token_urlsafe(18),
-           "pi_status_key": secrets.token_urlsafe(18)}
+           "pi_status_key": secrets.token_urlsafe(18),
+           # Pass the team's signed car computer updates on (see relay_update); "false" stops that.
+           "release_updates": True}
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=1)
@@ -1089,16 +1121,60 @@ def release_version(text):
     return found.group(1) if found else None
 
 
-def _https_get(url):
+def _https_get(url, accept="application/vnd.github+json", limit=RELEASE_MAX_BYTES):
     if not url.startswith(("https://api.github.com/", "https://raw.githubusercontent.com/")):
         raise ValueError("only GitHub's own https addresses")
     req = urllib.request.Request(url, headers={"User-Agent": "Slot17-release-check",  # noqa: S310 - checked above
-                                               "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310 - fixed https hosts only
-        body = resp.read(RELEASE_MAX_BYTES + 1)
-    if len(body) > RELEASE_MAX_BYTES:
+                                               "Accept": accept})
+    with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 - fixed https hosts only
+        body = resp.read(limit + 1)
+    if len(body) > limit:
         raise ValueError("answer too large")
     return body
+
+
+def relay_update(repo, release_dir, get=_https_get):
+    """Copy the newest release's signed car computer update into release_dir. Returns a short word for the log.
+
+    Only a release asset of `repo` itself is fetched (GitHub hands it out through its own download
+    servers). The bundle must have exactly the size and SHA-256 its description states; the older or
+    same number already here is left alone. Both files are swapped in whole, the description last, so
+    the car computer never sees a description without its bundle.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,39}/[A-Za-z0-9_.-]{1,100}", repo or ""):
+        raise ValueError("release_repo must look like owner/name")
+    info = json.loads(get(f"https://api.github.com/repos/{repo}/releases/latest"))
+    if not isinstance(info, dict) or info.get("draft") or info.get("prerelease"):
+        return "no release"
+    assets = {a.get("name"): str(a.get("url") or "") for a in info.get("assets") or [] if isinstance(a, dict)}
+    if UPDATE_JSON not in assets or UPDATE_BUNDLE not in assets:
+        return "the newest release has no car computer update"
+    for url in (assets[UPDATE_JSON], assets[UPDATE_BUNDLE]):
+        if not re.fullmatch(rf"https://api\.github\.com/repos/{re.escape(repo)}/releases/assets/\d{{1,15}}", url):
+            raise ValueError("odd asset address")
+    raw = get(assets[UPDATE_JSON], accept="application/octet-stream", limit=4096)
+    meta = json.loads(raw)
+    seq, size, sha = int(meta["seq"]), int(meta["size"]), str(meta["sha256"])
+    if not re.fullmatch(r"[0-9a-f]{128}", str(meta.get("signature", ""))) or not re.fullmatch(r"[0-9a-f]{64}", sha):
+        raise ValueError("update description malformed")
+    release_dir = Path(release_dir)
+    try:
+        have = int(json.loads((release_dir / "release.json").read_text(encoding="utf-8")).get("seq", 0))
+    except (OSError, ValueError, TypeError):
+        have = 0
+    if have >= seq:
+        return f"release {have} is current"
+    if not 0 < size <= RELEASE_MAX:
+        raise ValueError("update too large")
+    bundle = get(assets[UPDATE_BUNDLE], accept="application/octet-stream", limit=RELEASE_MAX)
+    if len(bundle) != size or hashlib.sha256(bundle).hexdigest() != sha:
+        raise ValueError("the bundle differs from its description")
+    release_dir.mkdir(parents=True, exist_ok=True)
+    for name, data in (("bundle.tar.gz", bundle), ("release.json", raw)):
+        tmp = release_dir / f".{name}.new"
+        tmp.write_bytes(data)
+        os.replace(tmp, release_dir / name)
+    return f"release {seq} is ready for the car computer"
 
 
 def fetch_latest_release(repo, get=_https_get):
@@ -1119,23 +1195,35 @@ def fetch_latest_release(repo, get=_https_get):
     url = str(info.get("html_url") or "")
     if not url.startswith(f"https://github.com/{repo}/") or len(url) > 200:
         url = f"https://github.com/{repo}/releases/latest"
-    app = None
+    app = android = None
     try:
         versions = json.loads(get(f"https://raw.githubusercontent.com/{repo}/{tag}/versions.json"))
         if isinstance(versions, dict):
             app = release_version(versions.get("app"))
+            android = release_version(versions.get("android"))      # releases from 1.3.1 on
             software = release_version(versions.get("software")) or software
     except (OSError, ValueError):
         pass
-    return {"software": software, "app": app, "tag": tag, "url": url}
+    return {"software": software, "app": app, "android": android, "tag": tag, "url": url}
 
 
 class ReleaseCheck(threading.Thread):
     """Asks GitHub for the newest release now and then; keeps the last good answer on the store."""
 
-    def __init__(self, store, repo, fetch=fetch_latest_release):
+    def __init__(self, store, repo, fetch=fetch_latest_release, relay=None):
         super().__init__(daemon=True, name="release-check")
-        self.store, self.repo, self.fetch = store, repo, fetch
+        self.store, self.repo, self.fetch, self.relay = store, repo, fetch, relay
+
+    def relay_once(self):
+        """The signed car computer update, if this server passes them on (release_updates)."""
+        if self.relay is None:
+            return None
+        try:
+            said = self.relay()
+        except (OSError, ValueError, KeyError, TypeError, urllib.error.URLError) as exc:
+            said = f"not passed on: {type(exc).__name__}: {str(exc)[:100]}"
+        print(f"car computer update: {said}", flush=True)
+        return said
 
     def check_once(self):
         try:
@@ -1155,6 +1243,7 @@ class ReleaseCheck(threading.Thread):
         time.sleep(RELEASE_FIRST_CHECK_S)
         while True:
             self.check_once()
+            self.relay_once()
             time.sleep(RELEASE_CHECK_EVERY_S)
 
 
@@ -1168,7 +1257,9 @@ def main():
     cfg = load_config()
     store = Store()
     if cfg.get("release_check", True) is not False:
-        ReleaseCheck(store, str(cfg.get("release_repo") or RELEASE_REPO)).start()
+        repo = str(cfg.get("release_repo") or RELEASE_REPO)
+        relay = (lambda: relay_update(repo, HERE / "release")) if cfg.get("release_updates") is True else None
+        ReleaseCheck(store, repo, relay=relay).start()
     httpd = CappedServer((cfg["host"], int(cfg["port"])), make_handler(cfg, store, PAGE.read_bytes()))
     print(f"Slot17 display listening on {cfg['host']}:{cfg['port']}", flush=True)
     try:

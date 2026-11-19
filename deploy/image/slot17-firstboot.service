@@ -1,0 +1,17 @@
+[Unit]
+Description=Slot17: finish the setup on the first start (from slot17.txt on the boot partition)
+After=network-online.target userconfig.service systemd-user-sessions.service
+Wants=network-online.target
+ConditionPathExists=!/var/lib/slot17/firstboot-done
+
+[Service]
+Type=oneshot
+ExecStart=/opt/slot17/firstboot.sh
+# 75: the user isn't there yet, try again shortly. 1: the setup stopped; it runs again at the next start.
+Restart=on-failure
+RestartSec=20
+RestartPreventExitStatus=1
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

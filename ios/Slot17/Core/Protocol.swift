@@ -35,9 +35,11 @@ struct PiState: Decodable {
     var notify: NotifySwitch? = nil
     /// The detector's software version, for example "1.2.9" (1.2.9 and later).
     var software: String? = nil
+    /// The car computer's own setup check (1.3.1 and later); the server keeps the last one between pushes.
+    var doctor: DoctorReport? = nil
 
     enum CodingKeys: String, CodingKey {
-        case source, session, detector, channels, matches, features, pi, update, link, notify, software
+        case source, session, detector, channels, matches, features, pi, update, link, notify, software, doctor
         case snapshotAge = "snapshot_age_s"
     }
 }

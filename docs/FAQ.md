@@ -77,7 +77,7 @@ It only receives, and it never decodes, decrypts or transmits anything. The rule
 ## Setting it up
 
 ### Do I need to know Linux?
-It helps, but you don't have to. The installer is one line and the [README](https://github.com/efeorman/Slot17#readme) goes step by step. Not used to it? [SETUP-WITH-AI.md](https://github.com/efeorman/Slot17/blob/main/docs/SETUP-WITH-AI.md) has a prompt that lets any AI chat assistant walk you through it.
+No. Use the ready-made image: flash it with Raspberry Pi Imager, fill in one text file on the card, and start the Pi. [BUILD.md](https://github.com/efeorman/Slot17/blob/main/docs/BUILD.md) walks through it. Doing it by hand is one install line, and the [README](https://github.com/efeorman/Slot17#readme) goes step by step. Not used to it? [SETUP-WITH-AI.md](https://github.com/efeorman/Slot17/blob/main/docs/SETUP-WITH-AI.md) has a prompt that lets any AI chat assistant walk you through it.
 
 ### Why does it need a server?
 The Pi sits behind your phone's hotspot, so your phone can't reach it directly. Both can reach a small server on the internet, and that's all the server is for.
@@ -92,7 +92,7 @@ What your car computer and app send it: the latest state of the detector, and th
 Type `/server new-keys` in the Discord. The old link and car computer key stop working, so put the new ones in the app and on the car computer.
 
 ### How do I update?
-Run the same install line again. It keeps your keys, settings, calibration and recordings. The app tells you when there's a new version. See [Updating](https://github.com/efeorman/Slot17#updating).
+From 1.3.1 the car computer installs new versions by itself, if you said yes to that in its setup (the default). Otherwise run the same install line again; it keeps your keys, settings, calibration and recordings. The Android app updates itself from Settings, About; the iPhone app you install again the same way. See [Updating](https://github.com/efeorman/Slot17#updating).
 
 ## The apps
 
@@ -106,7 +106,7 @@ It isn't in the App Store, so you sign it yourself with Signulous (paid, works f
 Open **Slot17.apk** from the latest release on your phone and allow the install. Then in the app's Settings, tap **Let Slot17 run in the background**, so it keeps beeping with the screen off.
 
 ### Does it work with CarPlay or Android Auto?
-The sound comes through your car either way. On CarPlay the iPhone shows a Live Activity with the status (iOS 26). On Android the sound follows the phone's audio over Bluetooth or Android Auto; there's no Android Auto screen.
+The sound comes through your car either way. On CarPlay the iPhone shows a Live Activity with the status (iOS 26). In Android Auto an urgent beep shows as a message from Slot17 that Android Auto reads out, and you can say "police", "ambulance", "fire" or "nothing" to mark what you saw. For that, turn on **Unknown sources** in Android Auto's developer settings once (tap **Version** 10 times in the Android Auto settings), because the app isn't from Google Play. Don't want the messages? Switch them off in the app's Settings, Android Auto.
 
 ### Why do I have to open the iPhone app before driving?
 iOS doesn't let an app start sound from the background. Open it once, then lock the phone; that's what arms the sound.
@@ -114,7 +114,7 @@ iOS doesn't let an app start sound from the background. Open it once, then lock 
 ## Help and helping out
 
 ### Something doesn't work
-Run `bash ~/Slot17/setup.sh doctor` on the car computer. It gives a plain verdict per part, and the first problem is usually the cause of the rest. Paste the output in the Discord or in a [GitHub issue](https://github.com/efeorman/Slot17/issues).
+Open the app's Pi screen: the **Setup check** shows every link from your phone to the receiver, and the car computer's own check, with what to do about each problem. Or run `bash ~/Slot17/setup.sh doctor` on the car computer. It gives a plain verdict per part, and the first problem is usually the cause of the rest. Paste the output in the Discord or in a [GitHub issue](https://github.com/efeorman/Slot17/issues).
 
 ### How can I help?
 Test it in your country, report bugs, and post your setup and clips in the Discord. If you drive with a passenger, mark what you see with **I SAW** in the app, including vehicles that gave no beep. That's the only way to learn what Slot17 misses.

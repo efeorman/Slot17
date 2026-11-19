@@ -63,7 +63,7 @@ QUIET_REPEAT_S = 900.0
 BACKFILL_BYTES = 512 << 10
 READ_CAP = 4 << 20
 TIMEOUT_S = 2.5
-FEATURES = ["mark", "poweroff", "logs", "notify"]
+FEATURES = ["mark", "poweroff", "logs", "notify", "doctor"]
 MARK_LABELS = {"police", "ambulance", "fire", "unknown", "noise", "antenna-change"}
 MAX_ACKS = 32                 # in one push: the server's limit
 MAX_ACKS_WAITING = 256        # held until sent
@@ -886,6 +886,7 @@ class Publisher:
         self.pi_health = {}
         self.last_health = -1e9
         self.updater = load_updater()
+        self.doctor = Doctor()      # the setup check's verdicts for the apps
         self.update_status = None
         self.software = None
         self.last_update_status = -1e9
@@ -1047,6 +1048,13 @@ class Publisher:
             out["link"] = self.link
         if getattr(self, "notify_state", None):
             out["notify"] = self.notify_state
+        doctor = getattr(self, "doctor", None)
+        if doctor is not None:
+            if doctor.due(now_mono):
+                doctor.start(now_mono)
+            verdicts = doctor.for_push(now_mono)
+            if verdicts:
+                out["doctor"] = verdicts
         if self.updater is not None:
             if now_mono - self.last_update_status >= UPDATE_STATUS_EVERY_S:
                 self.last_update_status = now_mono
@@ -1267,6 +1275,66 @@ def upload_pi_log(op, pub, cfg, opener=None, collect=collect_pi_log):
     return thread
 
 
+DOCTOR_FIRST_S = 90.0       # after the publisher starts: the detector is up by then
+DOCTOR_EVERY_S = 900.0
+DOCTOR_LIMIT_S = 25.0
+
+
+class Doctor:
+    """`setup.sh doctor --json` in the background: its verdicts go to the apps' setup check.
+
+    It only looks (it never opens the receiver or touches a service) and reads the heartbeat twice,
+    two seconds apart, so it runs in its own thread and never holds up a push.
+    """
+
+    def __init__(self, root=None, run=None):
+        self.root = Path(root) if root else Path(__file__).resolve().parents[1]
+        self.run = run or self._run
+        self.result = None          # {"items": [...], "at": monotonic}
+        self.sent_at = None         # when the current result last went out with a push
+        self.busy = False
+        self.started = time.monotonic()
+        self.last = None
+
+    def _run(self):
+        done = subprocess.run([sys.executable, "-B", str(self.root / "deploy/doctor.py"), "car", "--json"],
+                              capture_output=True, text=True, timeout=DOCTOR_LIMIT_S)
+        return json.loads(done.stdout)
+
+    def due(self, now):
+        if self.busy:
+            return False
+        if self.last is None:
+            return now - self.started >= DOCTOR_FIRST_S
+        return now - self.last >= DOCTOR_EVERY_S
+
+    def start(self, now, then=None):
+        """Run it in the background; `then(ok, detail)` afterwards, for an op's answer."""
+        self.busy, self.last = True, now
+
+        def work():
+            try:
+                found = self.run()
+                items = [list(map(str, row))[:3] for row in found["items"]][:16]
+                self.result, self.sent_at = {"items": items, "at": time.monotonic()}, None
+                problems = sum(1 for row in items if row[1] == "PROBLEM")
+                if then:
+                    then(True, f"{problems} problem(s)" if problems else "no problems")
+            except Exception as exc:        # noqa: BLE001 - a check that fails is a detail, never a crash
+                if then:
+                    then(False, f"doctor did not run: {type(exc).__name__}")
+            finally:
+                self.busy = False
+        threading.Thread(target=work, daemon=True, name="doctor").start()
+
+    def for_push(self, now):
+        """The verdicts for this push: only when new, and again every 5 minutes, not with every push."""
+        if self.result is None or (self.sent_at is not None and now - self.sent_at < 300):
+            return None
+        self.sent_at = now
+        return {"items": self.result["items"], "age_s": round(max(0.0, now - self.result["at"]), 1)}
+
+
 def handle_ops(sender, pub, cfg):
     """Carry out the app's operations. Returns False when the publisher should wind up."""
     keep_going = True
@@ -1282,6 +1350,12 @@ def handle_ops(sender, pub, cfg):
             keep_going = run_poweroff(op, pub) and keep_going
         elif op.get("kind") == "notify":
             run_notify(op, pub)
+        elif op.get("kind") == "doctor":
+            doctor = getattr(pub, "doctor", None)
+            if doctor is None or doctor.busy:
+                pub.ack(op["id"], "failed", "the check is already running" if doctor else "not available")
+            else:
+                doctor.start(time.monotonic(), then=lambda ok, detail, i=op["id"]: pub.ack(i, "done" if ok else "failed", detail))
     return keep_going
 
 

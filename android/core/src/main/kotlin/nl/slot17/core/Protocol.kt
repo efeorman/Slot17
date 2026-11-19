@@ -48,6 +48,8 @@ data class PiState(
     val notify: NotifySwitch? = null,
     /** The detector's software version, for example "1.2.9" (1.2.9 and later). */
     val software: String? = null,
+    /** The car computer's own setup check (1.3.1 and later); the server keeps the last one between pushes. */
+    val doctor: DoctorReport? = null,
 )
 
 @Serializable

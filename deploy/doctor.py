@@ -282,10 +282,15 @@ def guess_role(p):
 def main(argv=None, probe=None):
     ap = argparse.ArgumentParser(description="Plain verdicts on this Slot17 machine. Changes nothing.")
     ap.add_argument("role", nargs="?", choices=("car", "server"), help="which machine this is (guessed when left out)")
+    ap.add_argument("--json", action="store_true", help="the verdicts as JSON, for the apps (display_publisher.py)")
     args = ap.parse_args(argv)
     p = probe or Probe()
     role = args.role or guess_role(p)
     version = software_version(p)
+    if args.json:
+        results = diagnose(p, role)
+        print(json.dumps({"software": version, "items": [[name, level, text] for name, level, text in results]}))
+        return 1 if any(level == PROBLEM for _, level, _ in results) else 0
     print(f"Slot17 doctor, {role}, software {version}. Only looks; changes nothing.\n")
     results = diagnose(p, role)
     width = max((len(name) for name, _, _ in results), default=10)

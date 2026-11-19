@@ -39,6 +39,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var stopAction = ActionState()
     /// The Pushover switch on the car computer: what was last asked from this phone.
     @Published private(set) var pushoverAction = ActionState()
+    @Published private(set) var doctorAction = ActionState()
     @Published private(set) var noticePermission = "Not asked yet"
     /// What this phone asked for, until the car computer reports the same (or the request fails).
     @Published private(set) var pushoverWanted: Bool?
@@ -1216,6 +1217,10 @@ final class AppModel: ObservableObject {
                     pushoverAction = Self.actionState(op, waiting: "Waiting for the car computer…",
                                                       done: op.detail.ifEmpty("Saved on the car computer"))
                 }
+            case "doctor":
+                if op.id == doctorAction.id {
+                    doctorAction = Self.actionState(op, waiting: "The car computer is checking itself…", done: op.detail.ifEmpty("Checked"))
+                }
             case "logs":
                 if op.id == piLogs.id {
                     let done = op.detail.ifEmpty("Saved on the server")
@@ -1318,6 +1323,17 @@ final class AppModel: ObservableObject {
     private func settlePushoverWanted() {
         guard let wanted = pushoverWanted, !pushoverAction.busy else { return }
         if pushoverOnCar?.pushover == wanted || pushoverAction.level == .bad { pushoverWanted = nil }
+    }
+
+    /// The Pi screen's setup check: this phone's side, then the car computer's own.
+    var setupRows: [CheckRow] {
+        SetupCheck.phone(hasLink: hasLink || demo, chain: chain, notifications: noticePermission, armed: audio.armed, sound: settings.sound)
+    }
+    var carRows: [CheckRow] { SetupCheck.car(piState?.doctor) }
+
+    func requestDoctor() {
+        note("setup check requested")
+        sendOp(kind: "doctor") { [weak self] in self?.doctorAction = $0 }
     }
 
     func requestPiLogs() {

@@ -41,6 +41,8 @@ data class AlertSettings(
     val liveActivity: Boolean = true,
     /** The car computer's faults as notifications from this app (only while the app runs). */
     val faultNotices: Boolean = false,
+    /** Android only: urgent beeps as a message on the Android Auto screen (CarMessages). */
+    val carMessages: Boolean = true,
     /** Settings the operator changed in the app; the server's file leaves these alone. */
     val overrides: Set<String> = emptySet(),
 ) {

@@ -98,6 +98,10 @@ Not used to Linux? [SETUP-WITH-AI.md](docs/SETUP-WITH-AI.md) has a prompt for an
 
 ## Step 1: Prepare the car computer
 
+**The easy way: the ready-made image.** Each release has `slot17-VERSION-raspios-lite-arm64.img.xz`: Raspberry Pi OS Lite with Slot17 on it and SSH on. Flash it with [Raspberry Pi Imager](https://www.raspberrypi.com/software/) (**Use custom**, then the file), set a username, password and Wi-Fi in Imager's settings, and write it. Then open the card's **bootfs** drive on your computer, fill in **slot17.txt** (your server address and car computer key from step 2, and your phone's hotspot) and start the Pi with it. It sets itself up in about 5 minutes and then removes the key and the password from the card; if something goes wrong, **slot17-setup.log** on the card says what. Then go on to [step 4](#step-4-install-the-app). [BUILD.md](docs/BUILD.md) walks through the whole build, hardware included.
+
+The steps below do the same by hand.
+
 **1. Put an operating system on its storage.**
 1. Install [Raspberry Pi Imager](https://www.raspberrypi.com/software/) on your computer and open it.
 2. Choose your Raspberry Pi model, then **Raspberry Pi OS (other) > Raspberry Pi OS Lite (64-bit)**, then your microSD card or SSD.
@@ -256,6 +260,8 @@ We used Sideloadly at first and use Signulous now (since app 1.5.1). With Signul
 
 It does the same as the iPhone app; [android/README.md](android/README.md) lists where it differs (a notification instead of the Live Activity, Quick Settings tiles instead of Control Center controls).
 
+**In Android Auto** an urgent beep also shows as a message from Slot17, which Android Auto reads out; say "police", "ambulance", "fire" or "nothing" to mark what you saw. Because the app isn't from Google Play, Android Auto only shows these with **Unknown sources** on: in the Android Auto settings on your phone, tap **Version** 10 times, open **Developer settings** from the menu and tick **Unknown sources**. To switch the messages off: the app's **Settings > Android Auto**.
+
 ## Daily use
 
 1. **Start the car.** The car computer powers up, joins your phone's hotspot and starts listening by itself. Keep your hotspot on.
@@ -279,20 +285,21 @@ sudo systemctl stop tetra-detector.service
 curl -fsSL https://github.com/efeorman/Slot17/releases/latest/download/install.sh | bash -s -- car
 ```
 
-To update the app, download the new **Slot17.ipa** and install it the same way as before.
+To update the iPhone app, download the new **Slot17.ipa** and install it the same way as before. The Android app updates itself: **Settings > About > Download and install**, and Android asks you to confirm.
 
 **You hear about updates by yourself.** Every 6 hours the display server asks GitHub which Slot17 release is the newest (only the public release page is asked for; nothing about your server or car is sent). The app then says so in **Settings > About** for a new app, and on the **Pi** screen for new car computer software; the web page says it at the bottom. If you allowed the app's fault notifications, you also get one notification per new version. To turn the check off, set `"release_check": false` in the server's `config.json`; a fork can point it at its own repository with `"release_repo": "owner/name"`.
 
-### Updates by themselves (optional)
+### Updates by themselves
 
-The car computer can fetch software releases from your server and install them at its next start, so you don't have to connect to it. It is off until you put a public key on the car computer.
+From 1.3.1 the car computer can install new versions by itself, at its next start, so you don't have to connect to it. The setup asks (say yes, the default) and then puts the Slot17 team's public key on the car computer (`deploy/slot17-release-key.pub` becomes `~/.config/slot17-release-key.pub`). The car computer then takes only software signed with the team's key.
 
-- **How it works:** you sign a release on your own computer and upload it to the server's `release/` folder. The car computer asks the server for it at each start (if it already has a network) and a few times during a drive. It checks the signature, tests the complete new software in a copy, and only then replaces the files, before the receiver is opened.
+- **Where it comes from:** each release on GitHub carries the signed update (`slot17-update.json` and `slot17-update.tar.gz`). A server set up with 1.3.1 or later copies it into its `release/` folder (`"release_updates": true` in its `config.json`; set it to `false` to stop that), and so does a hosted server. An older server you set up yourself needs that line added.
+- **How it works:** the car computer asks the server at each start (if it already has a network) and a few times during a drive. The car computer asks the server for it at each start (if it already has a network) and a few times during a drive. It checks the signature, tests the complete new software in a copy, and only then replaces the files, before the receiver is opened.
 - **What it protects against:** the server holds no signing key, so neither the server nor anyone on the network can supply software. An older release is refused. A release that fails its tests is rejected and the installed software stays. A power cut during the replacement is finished at the next start.
 - **What it replaces:** `p0/`, `tests/` and `display/display_publisher.py`. Never your calibration or channel files, and never the service files.
 - **Where you see it:** the app's Pi screen shows the installed version, and the Live Activity says "Updated to …" for a few minutes after an update, or that one failed.
 
-To turn it on, create an Ed25519 key pair, put the public key as 64 hex characters in `~/.config/slot17-release-key.pub` on the car computer, and see `p0/update.py` for the release format (`manifest.json` plus the files in a signed tar.gz, described by `release.json`).
+Turn it off with `bash setup.sh car --no-updates`. With your own fork, put your own public key there instead (64 hex characters, Ed25519) and sign your releases yourself; `p0/update.py` describes the format (`manifest.json` plus the files in a signed tar.gz, described by `release.json`).
 
 ### Slower and faster computers
 
@@ -464,6 +471,7 @@ Read [SECURITY.md](SECURITY.md) before relying on this. The main points:
 | [tests/](tests) | Detector tests and small saved signals |
 | [scripts/](scripts) | Release, test and documentation tools |
 | [docs/FAQ.md](docs/FAQ.md) | Questions we get a lot, with short answers |
+| [docs/BUILD.md](docs/BUILD.md) | Building it into your car, from the parts to the first drive |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | What changed in each release, why, and what was tried and left out |
 | [docs/](docs) | How it works ([design](docs/design)) and how to test and debug it ([operations](docs/operations)) |
 

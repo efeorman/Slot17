@@ -1,0 +1,39 @@
+name: Pi image
+# The ready-made Raspberry Pi image for a release, attached to it as slot17-VERSION-raspios-lite-arm64.img.xz.
+# Run by the release workflow; or by hand (Actions > Pi image > Run workflow) for a release tag from
+# 1.3.1 on, the first with the image's first-start setup.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v1.3.1"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-user-static binfmt-support parted xz-utils e2fsprogs
+      - name: Release files of ${{ inputs.tag }}
+        run: bash scripts/make_release.sh "${{ inputs.tag }}"
+      - name: Build the image
+        run: sudo bash scripts/build_image.sh dist/slot17.tar.gz dist/install.sh "${{ inputs.tag }}" out
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.tag }}" out/*.img.xz out/*.img.xz.sha256 --clobber

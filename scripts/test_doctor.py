@@ -172,6 +172,17 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("+4.09 ppm, measured 2026-11-03", text)
         self.assertNotIn("shipped example", text)
 
+    def test_json_for_the_apps(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status = doctor.main(["car", "--json"], probe=Machine(answers=dict(Machine().answers, lsusb=(1, ""))))
+        found = json.loads(out.getvalue())
+        self.assertEqual(status, 1)
+        self.assertEqual(found["software"], "1.2.9")
+        self.assertTrue(all(len(row) == 3 and row[1] in ("ok", "note", "PROBLEM") for row in found["items"]))
+        self.assertIn("PROBLEM", [row[1] for row in found["items"]])
+        self.assertNotIn("x" * 40, out.getvalue(), "no key in what goes to the apps")
+
 
 if __name__ == "__main__":
     unittest.main()
