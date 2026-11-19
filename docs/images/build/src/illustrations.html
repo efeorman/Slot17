@@ -1,0 +1,304 @@
+<!doctype html>
+<!-- The build guide's illustrations (docs/BUILD.md). Drawn, not photographed, so they can be shared freely.
+     Checked against the real parts: Raspberry Pi 5 (port end, from the left: Ethernet, the two blue USB 3
+     ports, the two black USB 2 ports; USB-C power and two micro HDMI on the long side; each blue port on its
+     own USB controller), Airspy Mini (a metal dongle: antenna socket at one end, USB plug at the other),
+     a covert glass-mount TETRA antenna. Render: node scripts/render_build_images.mjs -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "Bricolage"; src: url("../../../../website/node_modules/@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-wght-normal.woff2") format("woff2"); font-weight: 200 800; }
+  html, body { margin: 0; background: #0b0e13; }
+  svg { display: block; margin: 0 0 24px; font-family: "Bricolage", system-ui, sans-serif; }
+  .t { fill: #eef2f8; font-size: 34px; font-weight: 750; letter-spacing: -0.5px; }
+  .s { fill: #a3aec0; font-size: 19px; }
+  .l { fill: #eef2f8; font-size: 18px; font-weight: 650; }
+  .d { fill: #a3aec0; font-size: 15px; }
+  .k { fill: #0b0e13; font-size: 13px; font-weight: 750; }
+  .lead { stroke: #5b6a80; stroke-width: 1.6; fill: none; stroke-dasharray: 4 4; }
+  .wire { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <radialGradient id="bg" cx="0.85" cy="0" r="1.1"><stop offset="0" stop-color="#1b2433"/><stop offset="0.55" stop-color="#0f141c"/><stop offset="1" stop-color="#0b0e13"/></radialGradient>
+    <linearGradient id="case" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b4555"/><stop offset="1" stop-color="#242b36"/></linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d9dee6"/><stop offset="0.5" stop-color="#a7b0bd"/><stop offset="1" stop-color="#7d8794"/></linearGradient>
+    <linearGradient id="dongle" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a6372"/><stop offset="0.45" stop-color="#3a414d"/><stop offset="1" stop-color="#2a3039"/></linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7dc8a"/><stop offset="0.5" stop-color="#d4a83c"/><stop offset="1" stop-color="#9c7420"/></linearGradient>
+    <linearGradient id="pcb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1f5a3a"/><stop offset="1" stop-color="#14402a"/></linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7fb4e0" stop-opacity="0.28"/><stop offset="1" stop-color="#2d4a66" stop-opacity="0.18"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.55"/></filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#2fd26b"/></marker>
+
+    <!-- Raspberry Pi 5 in its case, seen from above: port end on the right, USB-C and micro HDMI below -->
+    <g id="pi">
+      <rect x="0" y="0" width="300" height="200" rx="24" fill="url(#case)" stroke="#4a5568" stroke-width="2"/>
+      <rect x="16" y="16" width="268" height="168" rx="16" fill="none" stroke="#56627a" stroke-opacity="0.5"/>
+      <circle cx="104" cy="100" r="52" fill="#1a2029" stroke="#56627a" stroke-width="2"/>
+      <g stroke="#3d4757" stroke-width="5" stroke-linecap="round">
+        <path d="M104 58v84M62 100h84M74 70l60 60M134 70l-60 60"/>
+      </g>
+      <circle cx="104" cy="100" r="13" fill="#2a3240" stroke="#56627a"/>
+      <text x="176" y="105" class="d" style="fill:#8b97ab;font-size:14px">Raspberry Pi 5</text>
+      <rect x="300" y="18" width="16" height="44" rx="3" fill="#9aa3ae"/>
+      <rect x="300" y="78" width="16" height="44" rx="3" fill="#2f6fe0"/>
+      <rect x="300" y="138" width="16" height="44" rx="3" fill="#20252d" stroke="#59657a"/>
+      <rect x="40" y="200" width="30" height="12" rx="5" fill="#9aa3ae"/>
+      <rect x="96" y="200" width="20" height="10" rx="3" fill="#9aa3ae"/>
+      <rect x="128" y="200" width="20" height="10" rx="3" fill="#9aa3ae"/>
+    </g>
+
+    <!-- Airspy Mini: metal dongle, antenna (SMA) socket left, USB plug right -->
+    <g id="airspy">
+      <rect x="22" y="0" width="150" height="44" rx="10" fill="url(#dongle)" stroke="#6b7586" stroke-width="1.5"/>
+      <rect x="0" y="9" width="12" height="26" rx="2" fill="url(#gold)"/>
+      <polygon points="12,6 22,1 22,43 12,38" fill="url(#gold)"/>
+      <g stroke="#8a6a1c" stroke-width="1.2"><path d="M3 12v20M6 12v20M9 12v20"/></g>
+      <rect x="172" y="8" width="40" height="28" rx="2" fill="url(#metal)"/>
+      <rect x="180" y="14" width="26" height="16" rx="1" fill="#5c6573"/>
+      <text x="44" y="27" class="k" style="fill:#c8d0db;font-size:12px" letter-spacing="1.5">AIRSPY MINI</text>
+    </g>
+
+    <!-- Covert glass-mount antenna: a flat element, its coax, and the SMA plug -->
+    <g id="antenna">
+      <rect x="0" y="0" width="220" height="30" rx="7" fill="#151a22" stroke="#4a5568" stroke-width="1.5"/>
+      <path d="M14 15h190" stroke="#b07a3a" stroke-width="3" stroke-dasharray="18 6"/>
+      <rect x="196" y="6" width="22" height="18" rx="3" fill="#2a3140"/>
+    </g>
+
+    <!-- USB-C car charger, side view: socket tip left, USB-C port on the face -->
+    <g id="charger">
+      <rect x="18" y="4" width="92" height="40" rx="10" fill="#1c222c" stroke="#56627a" stroke-width="1.5"/>
+      <rect x="0" y="14" width="22" height="20" rx="4" fill="url(#metal)"/>
+      <circle cx="0" cy="24" r="5" fill="url(#metal)"/>
+      <rect x="110" y="0" width="22" height="48" rx="6" fill="#262e3a" stroke="#56627a"/>
+      <rect x="116" y="16" width="10" height="16" rx="4" fill="#0b0e13" stroke="#9aa3ae"/>
+      <text x="34" y="30" class="k" style="fill:#f5c542;font-size:13px">5V 5A</text>
+    </g>
+
+    <!-- NVMe SSD -->
+    <g id="ssd">
+      <rect x="0" y="0" width="160" height="40" rx="4" fill="url(#pcb)" stroke="#2d7a50"/>
+      <rect x="14" y="8" width="44" height="24" rx="2" fill="#11161d"/>
+      <rect x="66" y="8" width="44" height="24" rx="2" fill="#11161d"/>
+      <rect x="146" y="6" width="14" height="28" fill="url(#gold)"/>
+      <circle cx="6" cy="20" r="4" fill="#0b0e13" stroke="#9aa3ae"/>
+    </g>
+
+    <!-- 4G USB stick -->
+    <g id="stick">
+      <rect x="0" y="0" width="120" height="38" rx="12" fill="#e9edf2" stroke="#b9c2cd"/>
+      <rect x="120" y="8" width="30" height="22" rx="2" fill="url(#metal)"/>
+      <circle cx="22" cy="19" r="5" fill="#2fd26b"/>
+      <text x="40" y="24" class="k" style="font-size:13px">4G</text>
+    </g>
+
+    <!-- Clip-on ferrite -->
+    <g id="ferrite">
+      <rect x="0" y="0" width="46" height="28" rx="8" fill="#20252e" stroke="#4a5568"/>
+      <path d="M0 14h46" stroke="#4a5568"/>
+      <circle cx="23" cy="14" r="5" fill="#0b0e13"/>
+    </g>
+
+    <!-- A phone in a holder -->
+    <g id="phone">
+      <rect x="0" y="0" width="58" height="112" rx="12" fill="#05070a" stroke="#56627a" stroke-width="2"/>
+      <rect x="5" y="9" width="48" height="94" rx="7" fill="#0f141c"/>
+      <rect x="21" y="4" width="16" height="4" rx="2" fill="#000"/>
+      <g><rect x="10" y="40" width="9" height="40" rx="2" fill="#ff4d4f"/><rect x="24" y="56" width="9" height="24" rx="2" fill="#f5c542"/><rect x="38" y="66" width="9" height="14" rx="2" fill="#3a4452"/></g>
+      <circle cx="13" cy="20" r="3" fill="#2fd26b"/>
+    </g>
+  </defs>
+</svg>
+
+<!-- 1. The parts -->
+<svg id="parts" width="1200" height="675" viewBox="0 0 1200 675">
+  <rect width="1200" height="675" fill="url(#bg)"/>
+  <text x="56" y="76" class="t">The parts</text>
+  <text x="56" y="108" class="s">Everything that goes in the car. Similar parts work too, apart from the receiver.</text>
+
+  <use href="#pi" x="80" y="170" filter="url(#shadow)"/>
+  <text x="80" y="420" class="l">Raspberry Pi 5, in a case with a fan</text>
+  <text x="80" y="444" class="d">8 GB here; from 2 GB should do</text>
+
+  <use href="#airspy" x="520" y="196" filter="url(#shadow)"/>
+  <text x="520" y="280" class="l">Airspy Mini</text>
+  <text x="520" y="304" class="d">The receiver: antenna on the left, USB on the right</text>
+
+  <use href="#antenna" x="868" y="200" filter="url(#shadow)"/>
+  <path class="wire" d="M1086 215 C 1140 230, 1140 300, 1080 312 S 980 330, 960 350" stroke="#1d232c" stroke-width="7"/>
+  <rect x="930" y="342" width="30" height="16" rx="3" fill="url(#gold)"/>
+  <text x="868" y="400" class="l">Antenna for 380 to 400 MHz</text>
+  <text x="868" y="424" class="d">Ours sticks inside the windscreen</text>
+  <text x="868" y="446" class="d">SMA plug, or an adapter to SMA</text>
+
+  <use href="#charger" x="520" y="372" filter="url(#shadow)"/>
+  <path class="wire" d="M652 396 C 700 396, 720 380, 776 380" stroke="#3a4455" stroke-width="8"/>
+  <rect x="774" y="373" width="22" height="14" rx="4" fill="url(#metal)"/>
+  <text x="520" y="452" class="l">USB-C car charger, 5 V at 5 A</text>
+  <text x="520" y="476" class="d">With a short, thick USB-C cable</text>
+
+  <use href="#ssd" x="80" y="514" filter="url(#shadow)"/>
+  <text x="80" y="586" class="l">NVMe SSD, or a 128 GB+ microSD</text>
+  <text x="80" y="610" class="d">Recordings add up</text>
+
+  <use href="#stick" x="520" y="526" filter="url(#shadow)"/>
+  <text x="520" y="598" class="l">4G stick with its own SIM</text>
+  <text x="520" y="622" class="d">Optional: the phone's hotspot works too</text>
+
+  <use href="#ferrite" x="900" y="526" filter="url(#shadow)"/>
+  <use href="#ferrite" x="960" y="526" filter="url(#shadow)"/>
+  <text x="900" y="598" class="l">Clip-on ferrites</text>
+  <text x="900" y="622" class="d">Optional, less noise in the band</text>
+</svg>
+
+<!-- 2. Connected, on the table -->
+<svg id="connect" width="1200" height="675" viewBox="0 0 1200 675">
+  <rect width="1200" height="675" fill="url(#bg)"/>
+  <text x="56" y="76" class="t">Plug it together on the table first</text>
+  <text x="56" y="108" class="s">The Pi's port end, seen from the side. Each blue port has its own USB controller.</text>
+
+  <!-- port end of the case -->
+  <rect x="120" y="200" width="560" height="250" rx="28" fill="url(#case)" stroke="#4a5568" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="160" y="270" width="120" height="110" rx="8" fill="#b6bec9"/>
+  <rect x="178" y="290" width="84" height="60" rx="4" fill="#20252d"/>
+  <rect x="204" y="340" width="32" height="14" fill="#b6bec9"/>
+  <text x="220" y="412" text-anchor="middle" class="d">Ethernet</text>
+
+  <rect x="320" y="236" width="150" height="72" rx="8" fill="#2f6fe0" stroke="#7fa8f0" stroke-width="2"/>
+  <rect x="342" y="256" width="106" height="20" rx="3" fill="#0f2a5c"/>
+  <rect x="320" y="330" width="150" height="72" rx="8" fill="#2f6fe0" stroke="#7fa8f0" stroke-width="2"/>
+  <rect x="342" y="350" width="106" height="20" rx="3" fill="#0f2a5c"/>
+  <text x="395" y="430" text-anchor="middle" class="d">USB 3 (blue)</text>
+
+  <rect x="500" y="236" width="150" height="72" rx="8" fill="#1a1f27" stroke="#59657a" stroke-width="2"/>
+  <rect x="522" y="256" width="106" height="20" rx="3" fill="#07090c"/>
+  <rect x="500" y="330" width="150" height="72" rx="8" fill="#1a1f27" stroke="#59657a" stroke-width="2"/>
+  <rect x="522" y="350" width="106" height="20" rx="3" fill="#07090c"/>
+  <text x="575" y="430" text-anchor="middle" class="d">USB 2 (black)</text>
+
+  <!-- Airspy into the top blue port -->
+  <use href="#airspy" x="820" y="180" filter="url(#shadow)"/>
+  <path d="M812 214 C 700 190, 560 190, 470 262" class="wire" stroke="#2fd26b" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="820" y="262" class="l">Airspy Mini → a blue port</text>
+  <text x="820" y="286" class="d">Antenna into its other end</text>
+
+  <!-- antenna to the Airspy -->
+  <path class="wire" d="M820 202 C 790 170, 800 140, 840 130" stroke="#1d232c" stroke-width="6"/>
+  <text x="852" y="136" class="d">to the antenna</text>
+
+  <!-- 4G stick into the other blue port -->
+  <use href="#stick" x="820" y="380" filter="url(#shadow)"/>
+  <path d="M812 400 C 700 430, 560 430, 470 372" class="wire" stroke="#2fd26b" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="820" y="448" class="l">4G stick → the other blue port</text>
+  <text x="820" y="472" class="d">So it doesn't share the Airspy's controller</text>
+
+  <rect x="120" y="500" width="960" height="120" rx="22" fill="#151b25" stroke="#263042"/>
+  <circle cx="160" cy="560" r="18" fill="#2fd26b"/>
+  <text x="160" y="566" text-anchor="middle" class="k" style="font-size:16px">✓</text>
+  <text x="196" y="548" class="l">Then power it up at home and check the app</text>
+  <text x="196" y="576" class="d">The Pi screen's Setup check should go green within about a minute and a half. Only then does it go in the car.</text>
+</svg>
+
+<!-- 3. The antenna -->
+<svg id="antenna-place" width="1200" height="675" viewBox="0 0 1200 675">
+  <rect width="1200" height="675" fill="url(#bg)"/>
+  <text x="56" y="76" class="t">Where the antenna goes</text>
+  <text x="56" y="108" class="s">Seen from the driver's seat. High on the glass, away from the mirror and the Pi.</text>
+
+  <path d="M150 200 Q 600 140 1050 200 L 1110 530 Q 600 570 90 530 Z" fill="url(#glass)" stroke="#5b7aa0" stroke-width="3"/>
+  <path d="M150 200 L 90 530" stroke="#2a3445" stroke-width="26" stroke-linecap="round"/>
+  <path d="M1050 200 L 1110 530" stroke="#2a3445" stroke-width="26" stroke-linecap="round"/>
+  <rect x="520" y="178" width="80" height="54" rx="8" fill="#1a2029" stroke="#3a4555"/>
+  <rect x="500" y="230" width="120" height="34" rx="12" fill="#2a3240" stroke="#56627a"/>
+  <text x="560" y="292" text-anchor="middle" class="d">Mirror and its electronics</text>
+  <use href="#antenna" x="690" y="196" filter="url(#shadow)"/>
+  <circle cx="800" cy="211" r="56" fill="none" stroke="#2fd26b" stroke-width="2.5" stroke-dasharray="8 6"/>
+  <text x="690" y="300" class="l" style="fill:#2fd26b">Here: high, near the centre</text>
+  <text x="690" y="324" class="d">A hand's width from the mirror</text>
+  <path class="wire" d="M908 210 C 980 200, 1030 196, 1052 212 L 1090 500" stroke="#f5c542" stroke-width="3" stroke-dasharray="10 7"/>
+  <text x="1060" y="440" text-anchor="end" class="d" style="fill:#f5c542">Cable behind the headliner</text>
+  <text x="1060" y="462" text-anchor="end" class="d" style="fill:#f5c542">and the pillar trim</text>
+  <rect x="170" y="430" width="270" height="56" rx="14" fill="#ff4d4f" fill-opacity="0.12" stroke="#ff4d4f" stroke-opacity="0.6"/>
+  <text x="192" y="464" class="d" style="fill:#ff8a8c">Not low, near the dashboard</text>
+
+  <rect x="56" y="572" width="1088" height="76" rx="16" fill="#151b25" stroke="#263042"/>
+  <text x="82" y="604" class="d"><tspan style="fill:#eef2f8;font-weight:650">Hears more:</tspan> a magnetic roof antenna, with its cable in through a door seal.</text>
+  <text x="82" y="630" class="d">Some windscreens have a metal coating that blocks radio. Then the roof is the only good place.</text>
+</svg>
+
+<!-- 4. Power -->
+<svg id="power" width="1200" height="675" viewBox="0 0 1200 675">
+  <rect width="1200" height="675" fill="url(#bg)"/>
+  <text x="56" y="76" class="t">Power</text>
+  <text x="56" y="108" class="s">From a socket that switches off with the ignition. Cutting the power is fine: Slot17 is made for it.</text>
+
+  <g transform="translate(150 160)"><circle cx="20" cy="20" r="16" fill="none" stroke="#f5c542" stroke-width="4"/><path d="M36 20h44M64 20v12M76 20v8" stroke="#f5c542" stroke-width="4" stroke-linecap="round"/></g>
+  <rect x="90" y="220" width="200" height="200" rx="30" fill="#1a2029" stroke="#3a4555" stroke-width="2" filter="url(#shadow)"/>
+  <circle cx="190" cy="320" r="54" fill="#0b0e13" stroke="#56627a" stroke-width="4"/>
+  <circle cx="190" cy="320" r="12" fill="#56627a"/>
+  <text x="190" y="456" text-anchor="middle" class="l">Car socket</text>
+  <text x="190" y="480" text-anchor="middle" class="d">Off with the ignition</text>
+
+  <use href="#charger" x="330" y="296" filter="url(#shadow)"/>
+  <text x="330" y="380" class="l">Charger, 5 V at 5 A</text>
+  <text x="330" y="404" class="d">27 W with USB-C PD. Most only do</text>
+  <text x="330" y="426" class="d">3 A at 5 V, whatever the box says</text>
+
+  <path class="wire" d="M462 320 C 560 320, 600 240, 700 240 S 800 280, 820 360 S 880 470, 915 446" stroke="#3a4455" stroke-width="10"/>
+  <use href="#ferrite" x="790" y="320"/>
+  <text x="610" y="222" class="d">Short, thick cable</text>
+  <text x="700" y="384" class="d" style="fill:#a78bfa">Ferrite near the Pi</text>
+
+  <use href="#pi" x="860" y="230" filter="url(#shadow)"/>
+  <text x="1010" y="500" text-anchor="middle" class="l">Raspberry Pi 5</text>
+  <text x="1010" y="524" text-anchor="middle" class="d">USB-C power on its long side</text>
+
+  <rect x="90" y="530" width="560" height="96" rx="20" fill="#ff4d4f" fill-opacity="0.10" stroke="#ff4d4f" stroke-opacity="0.5"/>
+  <text x="116" y="568" class="l" style="fill:#ff8a8c">Not a socket that stays on</text>
+  <text x="116" y="596" class="d">The Pi keeps running and drains the car battery.</text>
+</svg>
+
+<!-- 5. In the car -->
+<svg id="installed" width="1200" height="675" viewBox="0 0 1200 675">
+  <rect width="1200" height="675" fill="url(#bg)"/>
+  <text x="56" y="76" class="t">In the car</text>
+  <text x="56" y="108" class="s">Seen from above, front to the right. Fix everything, so nothing works loose on a bumpy road.</text>
+
+  <path d="M90 230 C 90 180, 140 160, 220 160 L 650 160 C 760 160, 830 200, 860 270 L 860 460 C 830 530, 760 570, 650 570 L 220 570 C 140 570, 90 550, 90 500 Z" fill="#121822" stroke="#3a4555" stroke-width="3"/>
+  <path d="M640 182 C 690 200, 708 260, 708 365 C 708 470, 690 530, 640 548" fill="none" stroke="#5b7aa0" stroke-width="9" stroke-opacity="0.6"/>
+  <rect x="160" y="200" width="200" height="330" rx="34" fill="#1c2431" stroke="#2f3a4d"/>
+  <rect x="420" y="196" width="140" height="130" rx="28" fill="#1c2431" stroke="#2f3a4d"/>
+  <rect x="420" y="404" width="140" height="130" rx="28" fill="#1c2431" stroke="#2f3a4d"/>
+  <text x="490" y="266" text-anchor="middle" class="d">Driver</text>
+  <rect x="590" y="200" width="40" height="330" rx="12" fill="#18202b" stroke="#2a3445"/>
+
+  <rect x="694" y="320" width="12" height="90" rx="4" fill="#151a22" stroke="#b07a3a" stroke-width="2"/>
+  <use href="#phone" x="582" y="214" transform="rotate(90 611 270)"/>
+  <circle cx="610" cy="380" r="11" fill="#f5c542"/>
+  <g filter="url(#shadow)"><rect x="440" y="440" width="92" height="60" rx="10" fill="url(#case)" stroke="#4a5568"/><rect x="532" y="457" width="46" height="16" rx="4" fill="url(#dongle)"/></g>
+  <path class="wire" d="M700 410 C 690 470, 640 480, 580 466" stroke="#f5c542" stroke-width="3" stroke-dasharray="9 6"/>
+  <path class="wire" d="M610 391 C 600 420, 540 430, 520 440" stroke="#3a4455" stroke-width="6"/>
+  <g stroke="#4ea3ff" stroke-width="3" fill="none" stroke-linecap="round"><path d="M560 330 q 18 18 0 36"/><path d="M546 322 q 30 26 0 52"/></g>
+
+  <path class="lead" d="M660 262 L 900 222"/>
+  <text x="910" y="214" class="l">Phone in a holder</text>
+  <text x="910" y="238" class="d">Its hotspot gives the Pi internet;</text>
+  <text x="910" y="260" class="d">the beeps play through the car</text>
+  <path class="lead" d="M708 352 L 900 330"/>
+  <text x="910" y="324" class="l">Antenna</text>
+  <text x="910" y="348" class="d">High on the windscreen</text>
+  <path class="lead" d="M621 380 L 900 420"/>
+  <text x="910" y="416" class="l">Socket, off with the ignition</text>
+  <text x="910" y="440" class="d">5 V at 5 A charger</text>
+  <path class="lead" d="M560 500 L 900 512"/>
+  <text x="910" y="508" class="l">Pi and Airspy under a seat</text>
+  <text x="910" y="532" class="d">Or in the glovebox: some air, no sun</text>
+
+  <text x="90" y="626" class="d"><tspan style="fill:#eef2f8;font-weight:650">Then the first drive:</tspan> hotspot on, start the car, open the app. The Setup check names the first thing to fix, if anything.</text>
+</svg>
+</body>
+</html>
