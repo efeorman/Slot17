@@ -70,7 +70,10 @@ touch "$mnt/boot/firmware/ssh"   # SSH on from the first start, on top of Imager
 echo "== Slot17's offline checks inside the image (ARM emulation, slow)"
 chroot "$mnt" bash -euo pipefail -c '
 d="$(mktemp -d)"; tar -xzf /opt/slot17/slot17.tar.gz -C "$d"
-cd "$d/slot17" && python3 -B p0/preflight.py --offline --tests >"$d/checks.log" 2>&1 || { tail -40 "$d/checks.log"; exit 1; }
+cd "$d/slot17" && python3 -B p0/preflight.py --offline --tests >"$d/checks.log" 2>&1 || {
+    grep -E "^(FAIL|ERROR):|^Traceback|Error|^Ran [0-9]|^FAILED|offline_preflight_pass" -A 4 "$d/checks.log" | head -120
+    python3 -c "import json,sys; t=open(sys.argv[1]).read(); print(\"errors:\", json.loads(t[t.rindex(\"\n{\"):])[\"errors\"])" "$d/checks.log" || true
+    exit 1; }
 grep -E "^Ran [0-9]+ tests" "$d/checks.log"; rm -rf "$d"
 '
 
