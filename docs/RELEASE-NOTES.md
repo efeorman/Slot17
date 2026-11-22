@@ -10,6 +10,19 @@
 | `slot17-update.json`, `slot17-update.tar.gz` | The signed update your server passes on to your car computer, so it updates itself |
 | `SHA256SUMS` | Checksums, to check a download with `sha256sum -c SHA256SUMS` |
 
+**New in 1.4.0 (iPhone app 1.7.0, Android app 1.9.0):**
+- **Bluetooth to the app.** Besides the server, alerts also come straight from the car computer over Bluetooth: faster, and they keep coming where there is no internet.
+  - The setup asks about it (yes by default) and for the name phones show (**Slot17**).
+  - In the app, **Settings > Bluetooth to the car computer** sets it up, switches it on and off, and renames it. With the phone connected, off and renaming go over Bluetooth itself.
+  - Needs an iPhone with iOS 18 or an Android phone with Bluetooth. A match that comes both ways beeps once.
+- **No more hold-ups:** the car computer sends to the server on a separate thread, so a server that doesn't answer never holds anything up.
+- **Logs for whoever helps you:** `bash setup.sh logs` makes one zip with a plain report, the setup check and the logs, without keys or passwords. [SUPPORT.md](https://github.com/efeorman/Slot17/blob/main/docs/operations/SUPPORT.md) explains it.
+- **Detection is unchanged.**
+
+**To get it all:** run the installer again on the car computer and on your own server. Hosted servers are already up to date. A car computer that updates itself gets the new detector and Bluetooth by itself, but the setup question and `bash setup.sh logs` come only with the installer; until then, `python3 -B ~/Slot17/p0/support.py` makes the same zip.
+
+**Not yet tried with a phone in a car:** tell us how it goes.
+
 **New in 1.3.1:** a ready-made Raspberry Pi image (flash it, fill in one text file, start the Pi); the setup saves your phone's hotspot; the car computer updates itself with versions signed by the Slot17 team; `/server create` gives the car computer's whole setup as one line; a **Setup check** on the apps' Pi screen with the car computer's own check; the Android app updates itself.
 
 **New in 1.3.0:** an Android app (1.7.0) with the same functions as the iPhone app, and hosted display servers: type `/server create` in the [Discord](https://discord.gg/rSFPWSWNfh) instead of renting a server. The car computer's setup accepts a hosted address (`name.slot17.cloud`, over HTTPS). Detection and the iPhone app are unchanged; a car computer that updates itself gets the new version number and nothing else.
