@@ -53,7 +53,42 @@ data class PiState(
     val doctor: DoctorReport? = null,
     /** The car computer's Bluetooth link to the apps (1.4.0 and later). */
     val bluetooth: BluetoothState? = null,
+    /** Its newest drives, to choose a support package from (1.5.0 and later). */
+    val drives: List<DriveRow>? = null,
+    /** A support package on its way from the car computer (1.5.0 and later). */
+    val support: SupportProgress? = null,
 )
+
+/** One drive on the car computer (a session folder), with its corrected start: folder names can be wrong. */
+@Serializable
+data class DriveRow(
+    val session: String,
+    val start: String? = null,
+    val minutes: Double? = null,
+    val matches: Int? = null,
+    val faults: Int? = null,
+    val mb: Double? = null,
+    val recordings: Int? = null,
+)
+
+/** "building", or "uploading" with how far it got. */
+@Serializable
+data class SupportProgress(val state: String, val sent: Long? = null, val total: Long? = null)
+
+/** A support package kept on the server, as `GET /api/support` lists it. */
+@Serializable
+data class SupportPackage(
+    val name: String,
+    val size: Long,
+    @SerialName("age_s") val age: Double,
+    val choice: String = "",
+    val phone: List<String> = emptyList(),
+    @SerialName("team_code") val teamCode: String? = null,
+    @SerialName("team_expires") val teamExpires: String? = null,
+)
+
+@Serializable
+data class SupportListing(val packages: List<SupportPackage>)
 
 @Serializable
 data class DetectorState(

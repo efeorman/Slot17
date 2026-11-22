@@ -16,6 +16,8 @@ import nl.slot17.core.ServerLink
 import nl.slot17.core.ServerLogEntry
 import nl.slot17.core.ServerMessage
 import nl.slot17.core.SseParser
+import nl.slot17.core.SupportListing
+import nl.slot17.core.SupportPackage
 
 /** A non-200 answer from the server. */
 class HttpStatus(val code: Int) : IOException("the server answered $code")
@@ -158,6 +160,33 @@ class ServerClient(
     suspend fun fetchConfig(): Result<String> = perform(open("api/config", timeoutS = 10)).map { it.decodeToString() }
 
     suspend fun fetchSound(name: String): Result<ByteArray> = perform(open("api/sounds/$name", timeoutS = 20))
+
+    // Support packages (1.5.0)
+
+    suspend fun listSupport(): Result<List<SupportPackage>> = perform(open("api/support", timeoutS = 10)).mapCatching {
+        ProtocolJson.decodeFromString(SupportListing.serializer(), it.decodeToString()).packages
+    }
+
+    /** A package to a file, streamed: it can be 100 MB. */
+    suspend fun downloadSupport(name: String, dest: java.io.File): Result<java.io.File> = withContext(Dispatchers.IO) {
+        val c = open("api/support/$name", timeoutS = 120) ?: return@withContext Result.failure(IOException("no private link"))
+        try {
+            val status = c.responseCode
+            if (status != 200) return@withContext Result.failure(HttpStatus(status))
+            dest.parentFile?.mkdirs()
+            c.inputStream.use { input -> dest.outputStream().use { input.copyTo(it) } }
+            Result.success(dest)
+        } catch (e: IOException) {
+            dest.delete()
+            Result.failure(e)
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    /** Delete, send to the Slot17 team or take back: sending can take a minute, so a longer wait. */
+    suspend fun supportAction(action: String, json: JsonObject): Result<ByteArray> =
+        perform(open("api/support/$action", "POST", 150), json.toString().encodeToByteArray())
 
     companion object {
         fun status(error: Throwable?): Int? = (error as? HttpStatus)?.code

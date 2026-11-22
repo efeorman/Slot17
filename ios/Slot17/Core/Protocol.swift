@@ -39,9 +39,14 @@ struct PiState: Decodable {
     var doctor: DoctorReport? = nil
     /// The car computer's Bluetooth link to the apps (1.4.0 and later).
     var bluetooth: BluetoothState? = nil
+    /// Its newest drives, to choose a support package from (1.5.0 and later).
+    var drives: [DriveRow]? = nil
+    /// A support package on its way from the car computer (1.5.0 and later).
+    var support: SupportProgress? = nil
 
     enum CodingKeys: String, CodingKey {
         case source, session, detector, channels, matches, features, pi, update, link, notify, software, doctor, bluetooth
+        case drives, support
         case snapshotAge = "snapshot_age_s"
     }
 }

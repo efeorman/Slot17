@@ -165,6 +165,52 @@ final class ServerClient: NSObject, URLSessionDataDelegate {
 
     private struct Listing: Decodable { let logs: [ServerLogEntry] }
 
+    // MARK: Support packages (1.5.0)
+
+    func listSupport(done: @escaping (Result<[SupportPackage], Error>) -> Void) {
+        guard let request = request("api/support", timeout: 10) else { return done(.failure(HTTPError.noData)) }
+        perform(request) { [decoder] result in
+            done(result.flatMap { data -> Result<[SupportPackage], Error> in
+                Result(catching: { try decoder.decode(SupportListing.self, from: data).packages })
+            })
+        }
+    }
+
+    /// A package to a file in Caches/support, for the share sheet: it can be 100 MB, so it is not held in memory.
+    func downloadSupport(_ name: String, done: @escaping (Result<URL, Error>) -> Void) {
+        guard let request = request("api/support/\(name)", timeout: 120) else { return done(.failure(HTTPError.noData)) }
+        session.downloadTask(with: request) { temp, response, error in
+            let result: Result<URL, Error>
+            if let error {
+                result = .failure(error)
+            } else if let status = (response as? HTTPURLResponse)?.statusCode, status != 200 {
+                result = .failure(HTTPError.status(status))
+            } else if let temp {
+                result = Result {
+                    let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                        .appendingPathComponent("support", isDirectory: true)
+                    try? FileManager.default.removeItem(at: folder)          // only the newest one is kept
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    let dest = folder.appendingPathComponent(name)
+                    try FileManager.default.moveItem(at: temp, to: dest)
+                    return dest
+                }
+            } else {
+                result = .failure(HTTPError.noData)
+            }
+            DispatchQueue.main.async { done(result) }
+        }.resume()
+    }
+
+    /// Delete, send to the Slot17 team or take back: sending can take a minute, so a longer wait.
+    func supportAction(_ action: String, json: [String: Any], done: @escaping (Result<Data, Error>) -> Void) {
+        guard var request = request("api/support/\(action)", method: "POST", timeout: 150),
+              let body = try? JSONSerialization.data(withJSONObject: json) else { return done(.failure(HTTPError.noData)) }
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        perform(request, done)
+    }
+
     private func perform(_ request: URLRequest, _ done: @escaping (Result<Data, Error>) -> Void) {
         session.dataTask(with: request) { data, response, error in
             let result: Result<Data, Error>

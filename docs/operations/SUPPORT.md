@@ -1,8 +1,32 @@
 # A support package: everything someone needs to help you
 
 When something goes wrong (the detector is degraded, nothing reaches the phone, the connection keeps dropping),
-the person helping you needs more than a screenshot. One command on the car computer makes one zip with all
-of it, which you send them however you like.
+the person helping you needs more than a screenshot. A support package is one zip with all of it. Make it in the
+app, or with one command on the car computer.
+
+## From the app (1.5.0)
+
+On the **Pi** screen, card **Support package**:
+
+1. Choose **Quick**, **One drive** or **Everything** (see the choices below). For a drive, pick it from the list:
+   the car computer sends its newest drives with their real start times. You can keep only part of it, in
+   minutes after the start.
+2. **Include this phone's log** is on; **Include drive data with places** is off, and asks before it goes on:
+   it adds every place this phone recorded in the last day.
+3. **Create the package.** The car computer makes it at the lowest priority and uploads it to your display
+   server in pieces (a lost piece is sent again), and the app shows how far it is. Your server adds the phone's
+   files to it and keeps the newest three.
+4. Then, per package:
+   - **Share**: the phone's share sheet, to save it or send it with any app.
+   - **Send to team**: to the Slot17 team, after you agree. You get a code such as `S17-7K3Q9X` to tell them in
+     the Discord. It goes to the team's inbox at support.slot17.cloud, which nobody can read from the internet,
+     takes at most 50 MB and deletes it after 30 days. **Take back** deletes it there sooner.
+   - **Delete**: from your server, and from the team's inbox too if you sent it.
+
+The web page's settings list the packages with a **Download** link. It needs car computer software 1.5.0 and
+the app 1.8.0 (iPhone) or 1.10.0 (Android). Signed updates bring it to the car computer by themselves.
+
+## On the car computer
 
 ```bash
 bash ~/Slot17/setup.sh logs
@@ -50,7 +74,7 @@ python3 -B ~/Slot17/p0/support.py --drive SESSION --everything --recordings --ou
 
 The display server's key, Pushover's tokens, the Bluetooth key, the signing key, Wi-Fi passwords and SSH keys.
 Every line also passes a filter that removes anything that looks like a password, token or key. The car
-computer records no places. What is in it is still yours: drive times, network names and the base stations it
+computer records no places; a package has places only when you add the phone's drive data in the app. What is in it is still yours: drive times, network names and the base stations it
 heard tell someone roughly when and where you drove, so send it only to people you trust.
 
 ## Safe while the detector runs
@@ -61,6 +85,3 @@ hundreds of megabytes: do it with the car parked at home.
 
 The system log keeps about a day on a busy car computer, so make the package soon after the drive that went
 wrong.
-
-**Coming next:** the same package from the app (a Support package card on the Pi screen, with Share), and a way
-to send it to the Slot17 team.

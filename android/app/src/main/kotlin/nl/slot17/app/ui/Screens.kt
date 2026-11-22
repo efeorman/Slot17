@@ -249,6 +249,7 @@ fun PiScreen(model: AppModel) {
                     icon = Icons.Filled.PowerSettingsNew, enabled = it && !model.powerOff.busy)
             }
         }
+        SupportCard(model.support)
         Card("Starting again") {
             Text("There is no start button, on purpose. The detector starts by itself when the Pi powers up. Repeatedly starting and stopping can jam this Airspy.",
                 color = C.dim, fontSize = 14.sp)

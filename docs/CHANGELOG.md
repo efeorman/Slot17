@@ -2,7 +2,23 @@
 
 What changed, why, and what was tried and left out. Newest first. Figures come from our own car, receiver and drives; yours will differ.
 
-## 1.4.0, iPhone app 1.7.0 and Android app 1.9.0: Bluetooth to the app (22 November 2026, not released yet)
+## 1.5.0, iPhone app 1.8.0 and Android app 1.10.0: support packages from the app (22 November 2026)
+
+The support package of 1.4.0 (`setup.sh logs`) can now be made from the app, shared from the phone, and sent to the Slot17 team. The detector's recognition is unchanged. [SUPPORT.md](operations/SUPPORT.md) describes it.
+
+- **Why:** someone whose car computer misbehaves, far away, should not need SSH and `scp` to give us what we need. Asked for when a user's drives had to be reviewed.
+- **The app's Support package card** on the Pi screen: Quick, One drive or Everything; for a drive, a list of the newest 12 with their corrected start, length, matches and faults, and optionally only minutes A to B; recordings with Everything on request. **Include this phone's log** is on; **Include drive data with places** is off and asks first.
+- **The car computer** makes the package with `p0/support.py` in its own process at the lowest priority (`nice 19`, at most an hour), then uploads it to the display server in pieces of 768 KB. The server answers with what it has, so a lost piece is sent again from there, and the whole is checked against its SHA-256 before it is kept. The push says how far it is, and the app shows it.
+- **The server** keeps the newest three packages (150 MB at most, 120 MB each), adds the phone's newest log and, only when asked, its drive data, and lets the app list, download, delete and send them. A request for a package may take two hours to answer instead of three minutes; found while checking the README.
+- **Share** downloads the package to the phone and opens the share sheet. The web page's settings list the packages with a Download link.
+- **Send to team:** the server sends it (at most 50 MB) to the Slot17 team's inbox at support.slot17.cloud, only with the person's consent, and gets back a code to tell us and a token it keeps. **Take back** and **Delete** remove it there too. The inbox takes only zips made by `support.py`, at most 25 a day per sender and 300 in all, can't be read from the internet and deletes each package after 30 days. The privacy page on slot17.cloud says this in all eight languages.
+- **Also:** the README and SECURITY.md said the car computer accepts no incoming connections and listed fewer requests than it knows; both now describe Bluetooth, every request and the support packages, and that a hosted server uses HTTPS. The README's doubled sentence under Updates by themselves is gone.
+- **Tests:**
+  - Server and publisher: 8 new (a package from the app's request to its download, pieces resumed, a wrong checksum, the limit of three, the phone's files, places only when asked, consent, take back, who may ask, the longer answer time).
+  - The inbox: 7, against a real server on a free port.
+  - Android core: 3 new; iPhone: the same 3.
+
+## 1.4.0, iPhone app 1.7.0 and Android app 1.9.0: Bluetooth to the app (22 November 2026)
 
 Alerts and the detector's state now also go straight from the car computer to the apps over Bluetooth Low Energy, besides the display server: faster, and they keep coming where there is no internet. The detector's recognition is unchanged. [BLUETOOTH.md](design/BLUETOOTH.md) describes it.
 

@@ -18,6 +18,7 @@ The operator currently uses plain HTTP; both secrets travel unencrypted.
 import argparse
 import hashlib
 import hmac
+import http.client
 import json
 import math
 import os
@@ -28,6 +29,7 @@ import socket
 import sys
 import threading
 import time
+import zipfile
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
@@ -115,12 +117,14 @@ class AppConfig:
 # useful, and the phone keeps its own copy until it hears the Pi saved it.
 # A Pushover switch made while the car is off waits for the next drive, like a sighting.
 OP_TTL_S = {"poweroff": 30.0, "logs": 120.0, "mark": 86400.0, "notify": 86400.0, "doctor": 120.0,
-            "bluetooth": 86400.0}
+            "bluetooth": 86400.0, "support": 600.0}
 STOP_TTL_S = 60.0
 OP_RESEND_S = 30.0          # a sighting the Pi took but never answered is offered again
 MAX_OPS = 64
 MAX_OP_BATCH = 16           # handed to the Pi at once; the rest wait for its next request
 OP_ANSWER_S = 180.0         # a command handed over and never answered is reported, not left "sent"
+# A support package is made and uploaded before its answer: up to an hour to make, then the upload over 4G.
+OP_ANSWER_KIND_S = {"support": 2 * 3600.0}
 # The Pi loses power with the ignition, so it can never send a log at the end of a drive. The
 # server asks for one by itself while the Pi is on: the newest then covers the drive to within
 # this long of its end. The first comes early, so even a short drive leaves one.
@@ -253,7 +257,7 @@ class Store:
             if op["state"] == "pending" and now - op["created"] > OP_TTL_S[op["kind"]]:
                 op["state"], op["detail"] = "expired", "The Pi did not collect it in time"
             # Not resent: a stop, log or power off must not run twice. A sighting is resent instead.
-            elif op["state"] == "sent" and op["kind"] != "mark" and now - op["sent"] > OP_ANSWER_S:
+            elif op["state"] == "sent" and op["kind"] != "mark" and now - op["sent"] > OP_ANSWER_KIND_S.get(op["kind"], OP_ANSWER_S):
                 op["state"], op["detail"] = "failed", "The Pi did not answer"
 
     @staticmethod
@@ -498,6 +502,12 @@ def clean_state(p):
             out["bluetooth"] = clean_bluetooth(p["bluetooth"])
         except ValueError:
             pass                                # an odd detail never refuses the push it came with
+    for key, clean in (("drives", clean_drives), ("support", clean_support)):
+        if key in p:
+            try:
+                out[key] = clean(p[key])
+            except (ValueError, TypeError):
+                pass                            # an odd detail never refuses the push it came with
     if "doctor" in p:
         try:
             out["doctor"] = clean_doctor(p["doctor"])
@@ -518,6 +528,42 @@ BLUETOOTH_STATES = {"off", "starting", "advertising", "connected", "error", "una
 # The same rule as p0/bluetooth_config.py: what every phone shows the same way.
 BLUETOOTH_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,19}")
 KEY_ID = re.compile(r"[0-9a-f]{8}")
+
+
+SESSION = re.compile(r"^[0-9A-Za-z][0-9A-Za-z_.-]{0,79}$")      # a session folder's name
+SUPPORT_STATES = {"building", "uploading"}
+
+
+def clean_drives(rows):
+    """The car computer's newest drives (1.5.0), for the app's choice of support package."""
+    if not isinstance(rows, list) or len(rows) > 12:
+        raise ValueError
+    out = []
+    for r in rows:
+        if not isinstance(r, dict) or not isinstance(r.get("session"), str) or not SESSION.match(r["session"]):
+            raise ValueError
+        row = {"session": r["session"]}
+        if isinstance(r.get("start"), str) and re.fullmatch(r"[0-9T:+.-]{10,32}", r["start"]):
+            row["start"] = r["start"]
+        for key, lo, hi in (("minutes", 0, 1e6), ("mb", 0, 1e7)):
+            if r.get(key) is not None:
+                row[key] = _num(r[key], lo, hi, 1)
+        for key in ("matches", "faults", "recordings"):
+            if r.get(key) is not None:
+                row[key] = _int(r[key], 0, 10**9)
+        out.append(row)
+    return out
+
+
+def clean_support(b):
+    """A support package on its way from the car computer (1.5.0): being made, or so many bytes sent."""
+    if not isinstance(b, dict) or b.get("state") not in SUPPORT_STATES:
+        raise ValueError
+    out = {"state": b["state"]}
+    for key in ("sent", "total"):
+        if b.get(key) is not None:
+            out[key] = _int(b[key], 0, 10**10)
+    return out
 
 
 def clean_bluetooth(b):
@@ -627,6 +673,22 @@ def clean_op(wanted):
         if not isinstance(wanted.get("pushover"), bool):
             raise ValueError
         payload = {"pushover": wanted["pushover"]}
+    elif wanted["kind"] == "support":
+        choice = wanted.get("choice")
+        if choice not in ("quick", "drive", "everything"):
+            raise ValueError
+        payload = {"choice": choice, "phone_log": wanted.get("phone_log") is True, "places": wanted.get("places") is True}
+        if choice != "quick":
+            if not isinstance(wanted.get("session"), str) or not SESSION.match(wanted["session"]):
+                raise ValueError
+            payload["session"] = wanted["session"]
+            window = wanted.get("window")
+            if window is not None:
+                if not (isinstance(window, list) and len(window) == 2 and all(isinstance(x, int) and not isinstance(x, bool)
+                                                                               for x in window) and 0 <= window[0] < window[1] <= 1440):
+                    raise ValueError
+                payload["window"] = window
+            payload["recordings"] = choice == "everything" and wanted.get("recordings") is True
     elif wanted["kind"] == "bluetooth":
         # Exactly one of: the switch, a new name, or the app asking for the link's key.
         asked = [k for k in ("on", "name", "pair") if k in wanted]
@@ -699,6 +761,195 @@ def _log_stats(folder):
                 yield path, path.stat()
             except OSError:
                 continue
+
+
+# --- support packages (1.5.0) ---------------------------------------------------------------------------------
+PACKAGE_NAME = re.compile(r"^support-[0-9]{8}-[0-9]{6}Z-[0-9a-f]{8}\.zip$")
+PACKAGE_MAX_BYTES = 120 * 1024 * 1024    # one package; anything bigger stays on the car computer (setup.sh logs)
+PACKAGE_KEEP = 3
+PACKAGE_KEEP_BYTES = 150 * 1024 * 1024
+PACKAGE_PARTIAL_S = 3600.0               # an upload that stopped is removed after this
+PHONE_FILES_S = 3600.0                   # the phone's own log and drive data, if uploaded within this
+TEAM_INBOX = os.environ.get("SLOT17_TEAM_INBOX", "https://support.slot17.cloud/v1/packages")
+TEAM_MAX_BYTES = 50 * 1024 * 1024
+TEAM_TIMEOUT_S = 120.0
+TEAM_CODE = re.compile(r"^S17-[A-Z2-9]{6}$")
+
+
+class Packages:
+    """Support packages (p0/support.py) the car computer uploads in pieces, for the apps to share or send on.
+
+    Pieces arrive in order, and a dropped connection resumes from the size stored so far. Complete, a package can
+    take the phone's own log and, only when asked, its drive data with places, under phone/. At most PACKAGE_KEEP
+    packages and PACKAGE_KEEP_BYTES are kept, oldest first out. "Send to the Slot17 team" uploads one to the
+    team's inbox (support.slot17.cloud), which deletes it after 30 days or when asked with its token.
+    """
+
+    def __init__(self, folder, log_dir=None, inbox=None):
+        self.folder, self.log_dir, self.inbox = Path(folder), Path(log_dir) if log_dir else None, inbox or TEAM_INBOX
+        self.lock = threading.Lock()
+
+    def _meta(self, name):
+        try:
+            data = json.loads((self.folder / (name + ".json")).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _save_meta(self, name, meta):
+        partial = self.folder / (name + ".json.partial")
+        partial.write_text(json.dumps(meta), encoding="utf-8")
+        os.replace(partial, self.folder / (name + ".json"))
+
+    def append(self, name, offset, data, total):
+        """Store one piece. Returns the size stored so far, from which the car computer resumes."""
+        if not PACKAGE_NAME.match(name) or not 0 < total <= PACKAGE_MAX_BYTES:
+            raise ValueError
+        with self.lock:
+            self.folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self._sweep()
+            if (self.folder / name).exists():
+                return total
+            part = self.folder / (name + ".partial")
+            have = part.stat().st_size if part.exists() else 0
+            if offset != have or have + len(data) > total:
+                return have
+            with open(part, "ab") as fh:
+                fh.write(data)
+                fh.flush()
+                os.fsync(fh.fileno())
+            return have + len(data)
+
+    def finish(self, name, sha256, choice="", phone_log=False, places=False):
+        """Check the whole package against its checksum, add the phone's files if asked, and keep it."""
+        with self.lock:
+            part = self.folder / (name + ".partial")
+            digest = hashlib.sha256()
+            with open(part, "rb") as fh:
+                for block in iter(lambda: fh.read(1 << 20), b""):
+                    digest.update(block)
+            if not hmac.compare_digest(digest.hexdigest(), str(sha256)):
+                part.unlink()
+                raise ValueError("checksum")
+            added = self._add_phone_files(part, phone_log, places)
+            os.replace(part, self.folder / name)
+            self._save_meta(name, {"name": name, "made": time.time(), "size": (self.folder / name).stat().st_size,
+                                   "choice": choice[:20], "phone": added})
+            self._prune()
+
+    def _add_phone_files(self, part, phone_log, places):
+        """The newest app log (and, only with `places`, the newest drive data) uploaded within PHONE_FILES_S."""
+        if not (phone_log or places) or self.log_dir is None:
+            return []
+        now, newest = time.time(), {}
+        for f in sorted(self.log_dir.glob("app-*.log"), key=lambda f: f.stat().st_mtime):
+            if now - f.stat().st_mtime > PHONE_FILES_S:
+                continue
+            with open(f, "rb") as fh:
+                drive = b'"slot17-drive-data"' in fh.read(2 << 20)      # the app's uploads are at most 1 MB
+            newest["drive" if drive else "log"] = f
+        wanted = [("log", "phone/app-log.txt")] if phone_log else []
+        wanted += [("drive", "phone/drive-data-with-places.json")] if places else []
+        added = []
+        with zipfile.ZipFile(part, "a", zipfile.ZIP_DEFLATED) as z:
+            for kind, arcname in wanted:
+                if kind in newest:
+                    z.write(newest[kind], arcname)
+                    added.append(arcname)
+        return added
+
+    def _sweep(self):
+        for part in self.folder.glob("*.partial"):
+            try:
+                if time.time() - part.stat().st_mtime > PACKAGE_PARTIAL_S:
+                    part.unlink()
+            except OSError:
+                pass
+
+    def _prune(self):
+        rows = sorted(self.folder.glob("support-*.zip"), key=lambda f: f.stat().st_mtime, reverse=True)
+        total = 0
+        for i, f in enumerate(rows):
+            total += f.stat().st_size
+            if i >= PACKAGE_KEEP or total > PACKAGE_KEEP_BYTES:
+                self.delete(f.name, locked=True)
+
+    def listing(self):
+        out = []
+        for f in sorted(self.folder.glob("support-*.zip"), key=lambda f: f.stat().st_mtime, reverse=True) \
+                if self.folder.is_dir() else []:
+            meta = self._meta(f.name)
+            row = {"name": f.name, "size": f.stat().st_size, "age_s": round(max(0.0, time.time() - f.stat().st_mtime), 1),
+                   "choice": meta.get("choice", ""), "phone": meta.get("phone", [])}
+            if meta.get("team_code"):
+                row.update(team_code=meta["team_code"], team_expires=meta.get("team_expires"))
+            out.append(row)
+        return out
+
+    def path(self, name):
+        f = self.folder / name
+        return f if PACKAGE_NAME.match(name) and f.is_file() else None
+
+    def listing_row(self, name):
+        return next((r for r in self.listing() if r["name"] == name), {})
+
+    def delete(self, name, locked=False):
+        if not PACKAGE_NAME.match(name):
+            raise ValueError
+        for f in (self.folder / name, self.folder / (name + ".json")):
+            try:
+                f.unlink()
+            except FileNotFoundError:
+                pass
+
+    def _team(self, method, url, body=None, headers=None):
+        parts = urlsplit(url)
+        cls = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
+        conn = cls(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80), timeout=TEAM_TIMEOUT_S)
+        try:
+            conn.request(method, parts.path, body, headers or {})
+            resp = conn.getresponse()
+            data = resp.read(64 * 1024)
+            if resp.status != 200:
+                raise OSError(f"the Slot17 team's inbox answered {resp.status}")
+            return json.loads(data)
+        finally:
+            conn.close()
+
+    def send(self, name):
+        """Upload a package to the Slot17 team, with the person's consent. Returns the code they can quote."""
+        f = self.path(name)
+        if f is None:
+            raise FileNotFoundError(name)
+        size = f.stat().st_size
+        if size > TEAM_MAX_BYTES:
+            raise ValueError(f"over {TEAM_MAX_BYTES >> 20} MB: send a smaller package")
+        meta = self._meta(name)
+        if meta.get("team_code"):
+            return {"code": meta["team_code"], "expires": meta.get("team_expires")}
+        with open(f, "rb") as fh:
+            answer = self._team("POST", self.inbox, fh, {"Content-Type": "application/zip", "Content-Length": str(size),
+                                                         "X-Slot17-Consent": "yes"})
+        if not TEAM_CODE.match(str(answer.get("code", ""))) or not isinstance(answer.get("delete_token"), str):
+            raise OSError("the Slot17 team's inbox gave no code")
+        with self.lock:
+            meta = self._meta(name) or {"name": name}
+            meta.update(team_code=answer["code"], team_token=answer["delete_token"][:64],
+                        team_expires=answer.get("expires_utc"))
+            self._save_meta(name, meta)
+        return {"code": answer["code"], "expires": answer.get("expires_utc")}
+
+    def unsend(self, name):
+        """Delete a package from the Slot17 team's inbox again."""
+        meta = self._meta(name)
+        if not meta.get("team_code"):
+            raise FileNotFoundError(name)
+        self._team("DELETE", f"{self.inbox.rstrip('/')}/{meta['team_code']}", None,
+                   {"X-Delete-Token": meta["team_token"], "Content-Length": "0"})
+        with self.lock:
+            for key in ("team_code", "team_token", "team_expires"):
+                meta.pop(key, None)
+            self._save_meta(name, meta)
 
 
 def list_logs(folder):
@@ -796,6 +1047,7 @@ def make_handler(cfg, store, page_bytes, streams=None, log_dir=None, config_path
                  release_dir=None):
     log_dir = Path(log_dir) if log_dir else HERE / "logs"
     release_dir = Path(release_dir) if release_dir else HERE / "release"
+    packages = Packages(log_dir / "support", log_dir)
     app_config = AppConfig(config_path or HERE / "app-config.json")
     sound_dir = Path(sound_dir) if sound_dir else HERE / "sounds"
     pi_token = cfg["pi_token"].encode()
@@ -1021,6 +1273,15 @@ def make_handler(cfg, store, page_bytes, streams=None, log_dir=None, config_path
                 if not self.viewer():
                     return self.send(401, '{"error":"unauthorised"}')
                 return self.send(200, json.dumps({"logs": list_logs(log_dir)}))
+            if url.path == "/api/support":
+                if not self.viewer():
+                    return self.send(401, '{"error":"unauthorised"}')
+                return self.send(200, json.dumps({"packages": packages.listing()}))
+            if url.path.startswith("/api/support/"):
+                if not self.viewer():
+                    return self.send(401, '{"error":"unauthorised"}')
+                f = packages.path(url.path[len("/api/support/"):])
+                return self.send_file(f) if f else self.send(404, '{"error":"not found"}')
             if url.path.startswith("/api/logs/"):
                 if not self.viewer():
                     return self.send(401, '{"error":"unauthorised"}')
@@ -1032,6 +1293,28 @@ def make_handler(cfg, store, page_bytes, streams=None, log_dir=None, config_path
                 except FileNotFoundError:
                     return self.send(404, '{"error":"not found"}')
             return self.send(404, '{"error":"not found"}')
+
+        def send_file(self, f):
+            """A package, in pieces: a hosted server has little memory, and a package can be 100 MB."""
+            size = f.stat().st_size
+            self.close_connection = True
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", f'attachment; filename="{f.name}"')
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            if self.command == "HEAD":
+                return None
+            try:
+                with open(f, "rb") as fh:
+                    for block in iter(lambda: fh.read(256 * 1024), b""):
+                        self.wfile.write(block)
+            except OSError:
+                pass                               # the phone went away
+            return None
 
         def stream(self):
             if not self.viewer():
@@ -1068,7 +1351,7 @@ def make_handler(cfg, store, page_bytes, streams=None, log_dir=None, config_path
             # socket with unread request bytes makes the OS send a reset and the
             # client never sees the status. Larger or slower uploads are cut off.
             path = urlsplit(self.path).path
-            uploading = path in ("/api/app-log", "/api/pi-log")
+            uploading = path in ("/api/app-log", "/api/pi-log", "/api/support-package")
             limit = MAX_LOG_BODY if uploading else MAX_BODY
             if not self.same_origin():
                 self.close_connection = True
@@ -1081,18 +1364,33 @@ def make_handler(cfg, store, page_bytes, streams=None, log_dir=None, config_path
                 if limit < length <= limit + 16 * MAX_BODY:
                     self.read_body(length)          # bounded in size and time
                 return self.send(413, '{"error":"size"}')
-            # Check who is asking before accepting a large, slow body.
-            if path == "/api/app-log" and not self.viewer():
+            # Check who is asking before accepting a large, slow body. A small one is still read off, so
+            # the client sees the 401 and not a reset (a test of 1.5.0 caught that once in 14 runs).
+            if path == "/api/app-log" and not self.viewer() or path in ("/api/pi-log", "/api/support-package") \
+                    and not hmac.compare_digest(self.headers.get("Authorization", "").encode(), b"Bearer " + pi_token):
                 self.close_connection = True
-                return self.send(401, '{"error":"unauthorised"}')
-            if path == "/api/pi-log" and not hmac.compare_digest(
-                    self.headers.get("Authorization", "").encode(), b"Bearer " + pi_token):
-                self.close_connection = True
+                if length <= MAX_BODY:
+                    self.read_body(length)
                 return self.send(401, '{"error":"unauthorised"}')
             body = self.read_body(length, LOG_BODY_DEADLINE_S if uploading else BODY_DEADLINE_S)
             if body is None:
                 self.close_connection = True
                 return self.send(408, '{"error":"incomplete body"}')
+            if path == "/api/support-package":
+                q = parse_qs(urlsplit(self.path).query)
+                try:
+                    name, offset, total = q["name"][0], int(q["offset"][0]), int(q["total"][0])
+                    size = packages.append(name, offset, body, total)
+                    done = False
+                    if size == total and "sha256" in q:
+                        packages.finish(name, q["sha256"][0], q.get("choice", [""])[0],
+                                        q.get("phone_log", ["0"])[0] == "1", q.get("places", ["0"])[0] == "1")
+                        done = True
+                except (KeyError, ValueError, IndexError):
+                    return self.send(400, '{"error":"invalid piece"}')
+                except OSError:
+                    return self.send(507, '{"error":"could not store the package"}')
+                return self.send(200, json.dumps({"size": size, "done": done}))
             if uploading:
                 try:
                     name = save_log(log_dir, "app" if path == "/api/app-log" else "pi", body)
@@ -1109,6 +1407,38 @@ def make_handler(cfg, store, page_bytes, streams=None, log_dir=None, config_path
                     return self.send(200, json.dumps(store.add_op(kind, op_id, payload)))
                 except (ValueError, RecursionError):
                     return self.send(400, '{"error":"invalid operation"}')
+            if path in ("/api/support/delete", "/api/support/send", "/api/support/unsend"):
+                if not self.viewer():
+                    return self.send(401, '{"error":"unauthorised"}')
+                try:
+                    wanted = json.loads(body)
+                    name = wanted["name"] if isinstance(wanted, dict) and isinstance(wanted.get("name"), str) else ""
+                    if not PACKAGE_NAME.match(name):
+                        raise ValueError
+                    if path == "/api/support/delete":
+                        # A package sent to the team is taken back from there first; if their inbox does not
+                        # answer, it is deleted here all the same and theirs goes after its 30 days.
+                        team = "none"
+                        if packages.listing_row(name).get("team_code"):
+                            try:
+                                packages.unsend(name)
+                                team = "deleted"
+                            except (OSError, ValueError, http.client.HTTPException):
+                                team = "left"
+                        packages.delete(name)
+                        return self.send(200, json.dumps({"deleted": True, "team": team}))
+                    if path == "/api/support/unsend":
+                        packages.unsend(name)
+                        return self.send(200, '{"unsent":true}')
+                    if wanted.get("consent") is not True:
+                        return self.send(400, '{"error":"sending needs the person\'s consent"}')
+                    return self.send(200, json.dumps(packages.send(name)))
+                except (ValueError, RecursionError) as exc:
+                    return self.send(400, json.dumps({"error": str(exc) or "invalid request"}))
+                except FileNotFoundError:
+                    return self.send(404, '{"error":"not found"}')
+                except OSError as exc:
+                    return self.send(502, json.dumps({"error": str(exc)[:200]}))
             if path == "/api/command":
                 # Authorised by the viewer cookie/key, like every other phone
                 # endpoint. Stop is the only verb: see Store.__init__ for why

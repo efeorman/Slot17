@@ -113,6 +113,9 @@ class AppModel(private val context: Context) {
     /** The Bluetooth route to the car computer, beside the server (1.4.0). */
     val bluetooth = BluetoothRoute(context, store, sendOp = { kind, fields, apply -> sendOp(kind, fields, apply) },
         carState = { lastMessage?.state }, deliver = ::bluetoothMatches, changed = ::refresh, note = ::note)
+    /** Support packages from the Pi screen (1.5.0). */
+    val support = SupportRoute(context, scope, client, sendOp = { kind, fields, apply -> sendOp(kind, fields, apply) },
+        carState = { if (demo) null else lastMessage?.state }, phoneFiles = ::supportPhoneFiles, note = ::note)
 
     // What the screens show
     var tab by mutableStateOf(Tab.LIVE)
@@ -1064,6 +1067,7 @@ class AppModel(private val context: Context) {
             "notify" -> if (op.id == pushoverAction.id) pushoverAction = actionState(op, "Waiting for the car computer…",
                 op.detail.ifEmpty { "Saved on the car computer" })
             "bluetooth" -> bluetooth.apply(op)
+            "support" -> support.apply(op)
             "doctor" -> if (op.id == doctorAction.id) doctorAction = actionState(op, "The car computer is checking itself…",
                 op.detail.ifEmpty { "Checked" })
             "logs" -> if (op.id == piLogs.id) {
@@ -1193,6 +1197,34 @@ class AppModel(private val context: Context) {
                 note("log saved on the server as $name")
                 refreshServerLogs()
             }.onFailure { logUpload = ActionState(text = "Could not send: ${it.message}", level = Level.BAD) }
+        }
+    }
+
+    /**
+     * Before a support package: this phone's log and, only when asked, the last day's drive data with places go to
+     * the server, which adds the newest of each to the package. Then [then] asks the car computer.
+     */
+    private fun supportPhoneFiles(phoneLog: Boolean, places: Boolean, then: () -> Unit) {
+        scope.launch {
+            if (phoneLog) {
+                val header = diagnostics.joinToString("\n") { "${it.first}: ${it.second}" } + "\n\n"
+                client.uploadLog(header.encodeToByteArray() + log.tail(900_000))
+                    .onFailure { note("support package: this phone's log did not reach the server: ${it.message}") }
+            }
+            if (places) {
+                val until = System.currentTimeMillis()
+                val from = until - 86_400_000L
+                var track = location.track.filter { it.atMs > from }.sortedBy { it.atMs }
+                val recent = alerts.filter { it.atMs > from }.sortedBy { it.atMs }.takeLast(2000)
+                val marks = sightings.filter { it.seenAtMs > from }
+                var body = DriveData.encode(version, from, until, settings, recent, marks, track)
+                while (body.size > 950_000 && track.size > 10) {           // the newest places, when a day is too much
+                    track = track.takeLast(track.size / 2)
+                    body = DriveData.encode(version, from, until, settings, recent, marks, track)
+                }
+                client.uploadLog(body).onFailure { note("support package: the drive data did not reach the server: ${it.message}") }
+            }
+            then()
         }
     }
 

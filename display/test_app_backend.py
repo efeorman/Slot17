@@ -991,5 +991,187 @@ class BluetoothSwitch(Base):
                                    "error": "e" * 120})
 
 
+def fake_team_inbox(folder):
+    """Stands in for the Slot17 team's inbox at support.slot17.cloud, as far as a display server sees it: a
+    package in with the consent header gives a code and a token; the token deletes it again."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import secrets
+
+    class Inbox(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def answer(self, code, body):
+            data = json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            if self.path != "/v1/packages" or self.headers.get("X-Slot17-Consent") != "yes" or not body.startswith(b"PK"):
+                return self.answer(400, {"error": "refused"})
+            code = "S17-" + "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
+            token = secrets.token_urlsafe(16)
+            (folder / f"{code}.zip").write_bytes(body)
+            (folder / f"{code}.token").write_text(token)
+            self.answer(200, {"code": code, "delete_token": token, "expires_utc": "2026-12-22T20:00:00Z"})
+
+        def do_DELETE(self):
+            code = self.path.rsplit("/", 1)[-1]
+            token_file = folder / f"{code}.token"
+            if not token_file.exists():
+                return self.answer(404, {"deleted": False})
+            if self.headers.get("X-Delete-Token") != token_file.read_text():
+                return self.answer(403, {"error": "wrong token"})
+            for f in (folder / f"{code}.zip", token_file):
+                f.unlink()
+            self.answer(200, {"deleted": True})
+
+    return ThreadingHTTPServer(("127.0.0.1", 0), Inbox)
+
+
+class SupportPackages(Base):
+    """1.5.0: the app asks for a support package; the car computer makes it and uploads it in pieces; the app
+    shares it, deletes it, or sends it to the Slot17 team's inbox, and can take it back from there."""
+
+    def setUp(self):
+        self.inbox_dir = tempfile.TemporaryDirectory()
+        self.inbox_httpd = fake_team_inbox(Path(self.inbox_dir.name))
+        threading.Thread(target=self.inbox_httpd.serve_forever, daemon=True).start()
+        self.saved_inbox, srv.TEAM_INBOX = srv.TEAM_INBOX, f"http://127.0.0.1:{self.inbox_httpd.server_address[1]}/v1/packages"
+        self.saved_piece, pub.SUPPORT_PIECE_BYTES = pub.SUPPORT_PIECE_BYTES, 4096      # several pieces per package
+        super().setUp()
+        self.made = []
+        self.pub.support = pub.SupportJob(run=self.make)
+
+    def tearDown(self):
+        super().tearDown()
+        srv.TEAM_INBOX, pub.SUPPORT_PIECE_BYTES = self.saved_inbox, self.saved_piece
+        self.inbox_httpd.shutdown()
+        self.inbox_httpd.server_close()
+        self.inbox_dir.cleanup()
+
+    def make(self, args):
+        """Stands in for p0/support.py: a real package's two files, and enough besides for several pieces."""
+        import os
+        import zipfile
+        self.made.append(args)
+        out = Path(args[args.index("--out") + 1])
+        with zipfile.ZipFile(out, "w") as z:
+            z.writestr("REPORT.txt", "Slot17 support package\n")
+            z.writestr("manifest.json", json.dumps({"software": "1.5.0", "choice": "quick"}))
+            z.writestr("journal/boot0.txt", os.urandom(20000).hex())
+        return {"file": str(out), "bytes": out.stat().st_size}
+
+    def ask(self, op_id=ID_A, **fields):
+        self.cycle()                               # the car computer announces "support"
+        self.assertEqual(self.op(kind="support", id=op_id, **fields)[0], 200)
+        self.cycle()                               # handed over; the package is made and uploaded in the background
+        self.assertTrue(self.pub.support.busy.acquire(timeout=20))
+        self.pub.support.busy.release()
+        self.cycle()                               # the answer travels back
+        return self.op_state(op_id)
+
+    def packages(self, cookie=True):
+        status, body = self.req("GET", "/api/support", cookie=cookie)
+        return status, json.loads(body).get("packages") if status == 200 else None
+
+    def test_quick_package_from_the_app_to_a_download(self):
+        state = self.ask(choice="quick")
+        self.assertEqual(state["state"], "done", state)
+        name = state["detail"]
+        self.assertRegex(name, srv.PACKAGE_NAME)
+        self.assertEqual(self.made[0][:2], ["--out", self.made[0][1]])
+        rows = self.packages()[1]
+        self.assertEqual([r["name"] for r in rows], [name])
+        status, data = self.req("GET", f"/api/support/{name}")
+        self.assertEqual(status, 200)
+        import io
+        import zipfile
+        self.assertIn("REPORT.txt", zipfile.ZipFile(io.BytesIO(data)).namelist())
+        self.assertFalse(list(Path.home().joinpath(".cache").glob(f"slot17-support-{ID_A[:8]}.zip")))  # cleaned up
+
+    def test_a_drive_with_a_window_reaches_support_py(self):
+        state = self.ask(choice="everything", session="20261119-171847-301483Z_watch_382.5MHz", window=[30, 50],
+                         recordings=True)
+        self.assertEqual(state["state"], "done", state)
+        self.assertEqual(self.made[0][2:], ["--drive", "20261119-171847-301483Z_watch_382.5MHz", "--window", "30-50",
+                                            "--everything", "--recordings"])
+
+    def test_the_phones_files_only_when_asked_and_places_only_with_places(self):
+        import io
+        import zipfile
+        self.assertEqual(self.req("POST", "/api/app-log", b"the app's own log\n")[0], 200)
+        self.assertEqual(self.req("POST", "/api/app-log", b'{"slot17-drive-data": 1, "places": []}')[0], 200)
+        name = self.ask(choice="quick", phone_log=True)["detail"]
+        names = zipfile.ZipFile(io.BytesIO(self.req("GET", f"/api/support/{name}")[1])).namelist()
+        self.assertIn("phone/app-log.txt", names)
+        self.assertNotIn("phone/drive-data-with-places.json", names)
+        name = self.ask(op_id=ID_B, choice="quick", phone_log=True, places=True)["detail"]
+        names = zipfile.ZipFile(io.BytesIO(self.req("GET", f"/api/support/{name}")[1])).namelist()
+        self.assertIn("phone/drive-data-with-places.json", names)
+
+    def test_sent_to_the_team_only_with_consent_and_taken_back(self):
+        name = self.ask(choice="quick")["detail"]
+        self.assertEqual(self.req("POST", "/api/support/send", json.dumps({"name": name}))[0], 400)
+        status, body = self.req("POST", "/api/support/send", json.dumps({"name": name, "consent": True}))
+        self.assertEqual(status, 200, body)
+        code = json.loads(body)["code"]
+        self.assertTrue((Path(self.inbox_dir.name) / f"{code}.zip").exists())
+        self.assertEqual(self.packages()[1][0]["team_code"], code)
+        self.assertNotIn("team_token", self.req("GET", "/api/support")[1].decode())   # the token stays on the server
+        self.assertEqual(self.req("POST", "/api/support/unsend", json.dumps({"name": name}))[0], 200)
+        self.assertFalse((Path(self.inbox_dir.name) / f"{code}.zip").exists())
+        self.assertNotIn("team_code", self.packages()[1][0])
+        self.assertEqual(self.req("POST", "/api/support/delete", json.dumps({"name": name}))[0], 200)
+        self.assertEqual(self.packages()[1], [])
+
+    def test_only_the_viewer_and_the_car_computer(self):
+        self.assertEqual(self.packages(cookie=False)[0], 401)
+        self.assertEqual(self.req("GET", "/api/support/support-20261122-120000Z-aaaaaaaa.zip", cookie=False)[0], 401)
+        status, _ = self.req("POST", "/api/support-package?name=support-20261122-120000Z-aaaaaaaa.zip&offset=0&total=3",
+                             b"abc", cookie=False)
+        self.assertEqual(status, 401)
+        for bad in ({"choice": "all"}, {"choice": "drive"}, {"choice": "drive", "session": "../etc"},
+                    {"choice": "drive", "session": "s", "window": [50, 30]}, {"choice": "drive", "session": "s", "window": [0, 9999]}):
+            self.assertEqual(self.op(kind="support", id=ID_A, **bad)[0], 400, bad)
+
+    def test_pieces_resume_and_a_wrong_checksum_keeps_nothing(self):
+        packages = srv.Packages(self.logs / "support", self.logs)
+        name = "support-20261122-120000Z-bbbbbbbb.zip"
+        self.assertEqual(packages.append(name, 0, b"abc", 6), 3)
+        self.assertEqual(packages.append(name, 0, b"abc", 6), 3)      # a piece sent twice: the size says where to go on
+        self.assertEqual(packages.append(name, 3, b"def", 6), 6)
+        with self.assertRaises(ValueError):
+            packages.finish(name, "0" * 64)
+        self.assertEqual(packages.listing(), [])
+        with self.assertRaises(ValueError):
+            packages.append("../../x.zip", 0, b"a", 1)
+
+    def test_a_long_build_is_not_reported_as_unanswered(self):
+        store = srv.Store()
+        store.add_op("support", ID_A, {"choice": "quick"})
+        store.add_op("doctor", ID_B, {})
+        store.features = {"support", "doctor"}                 # as a car computer with 1.5.0 announces
+        store.take_ops()
+        later = time.monotonic() + srv.OP_ANSWER_S + 60
+        store._expire_ops(later)
+        states = {op["kind"]: op["state"] for op in store.ops.values()}
+        self.assertEqual(states, {"support": "sent", "doctor": "failed"})
+
+    def test_at_most_three_are_kept(self):
+        import hashlib
+        packages = srv.Packages(self.logs / "support", self.logs)
+        for i in range(5):
+            name = f"support-20261122-12000{i}Z-{i:08x}.zip"
+            packages.append(name, 0, b"zip", 3)
+            packages.finish(name, hashlib.sha256(b"zip").hexdigest())
+            time.sleep(0.02)
+        self.assertEqual(len(packages.listing()), srv.PACKAGE_KEEP)
+
+
 if __name__ == "__main__":
     unittest.main()

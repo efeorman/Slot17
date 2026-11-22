@@ -6,8 +6,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.7.0"
-    CURRENT_PROJECT_VERSION: "21"
+    MARKETING_VERSION: "1.8.0"
+    CURRENT_PROJECT_VERSION: "22"
     TARGETED_DEVICE_FAMILY: "1"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -33,8 +33,8 @@ targets:
       path: Slot17/Info.plist
       properties:
         CFBundleDisplayName: Slot17
-        CFBundleShortVersionString: "1.7.0"
-        CFBundleVersion: "21"
+        CFBundleShortVersionString: "1.8.0"
+        CFBundleVersion: "22"
         NSSupportsLiveActivities: true
         UILaunchScreen:
           UIColorName: LaunchBackground
@@ -70,8 +70,8 @@ targets:
       path: Slot17Live/Info.plist
       properties:
         CFBundleDisplayName: Slot17
-        CFBundleShortVersionString: "1.7.0"
-        CFBundleVersion: "21"
+        CFBundleShortVersionString: "1.8.0"
+        CFBundleVersion: "22"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
   Slot17Tests:

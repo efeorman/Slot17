@@ -141,6 +141,9 @@
   <hr class="sep">
   <div class="btns"><button id="stopBtn">Stop the detector</button></div>
   <div class="hint" id="stopHint"></div>
+  <hr class="sep">
+  <div class="row"><label>Support packages</label></div>
+  <div class="hint" id="supportList">Made in the app: Pi screen, Support package.</div>
   <button id="closeSheet">Done</button>
 </div>
 
@@ -711,7 +714,28 @@
     $("startSoundHint").classList.toggle("bad", !!problem);
     if (!problem) chime();
   });
-  $("gearBtn").addEventListener("click", () => { $("sheet").hidden = !$("sheet").hidden; });
+  // The support packages on this server (1.5.0), to download. They are made from the app.
+  async function listSupport() {
+    const box = $("supportList");
+    try {
+      const r = await fetch("/api/support", { cache: "no-store", credentials: "same-origin", signal: timeoutSignal(6000) });
+      if (!r.ok) return;
+      const rows = (await r.json()).packages || [];
+      if (!rows.length) { box.textContent = "None yet. Make one in the app: Pi screen, Support package."; return; }
+      box.replaceChildren(...rows.map(p => {
+        const line = document.createElement("div");
+        const a = document.createElement("a");
+        a.href = "/api/support/" + encodeURIComponent(p.name);
+        a.download = p.name;
+        a.textContent = "Download";
+        const size = p.size >= 1e6 ? (p.size / 1e6).toFixed(1) + " MB" : Math.ceil(p.size / 1e3) + " KB";
+        const kind = { quick: "Quick check", drive: "One drive", everything: "Everything from a drive" }[p.choice] || "Package";
+        line.append(`${kind}, ${size}${p.team_code ? ", sent to the Slot17 team as " + p.team_code : ""} · `, a);
+        return line;
+      }));
+    } catch (_) { /* the list is a convenience; the app shows the same */ }
+  }
+  $("gearBtn").addEventListener("click", () => { $("sheet").hidden = !$("sheet").hidden; if (!$("sheet").hidden) listSupport(); });
   $("closeSheet").addEventListener("click", () => { $("sheet").hidden = true; });
 
   /* ---------- keeping the phone able to make a sound ----------

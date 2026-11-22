@@ -19,6 +19,7 @@ struct PiView: View {
                 }
                 health
                 actions
+                SupportCard(support: model.support)
                 Card(title: "Starting again") {
                     Text("There is no start button, on purpose. The detector starts by itself when the Pi powers up. Repeatedly starting and stopping can jam this Airspy.")
                         .font(.footnote).foregroundColor(Theme.dim)

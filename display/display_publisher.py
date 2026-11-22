@@ -23,6 +23,7 @@ analyses 0.5 s windows and confirms before an event is written.
 """
 import argparse
 from collections import deque
+import hashlib
 import http.client
 import json
 import math
@@ -37,7 +38,7 @@ import subprocess
 import sys
 import threading
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 HEARTBEAT = Path("/run/tetra/watch.heartbeat")
 CONFIG = Path.home() / ".config/slot17-display.json"
@@ -64,7 +65,7 @@ QUIET_REPEAT_S = 900.0
 BACKFILL_BYTES = 512 << 10
 READ_CAP = 4 << 20
 TIMEOUT_S = 2.5
-FEATURES = ["mark", "poweroff", "logs", "notify", "doctor", "bluetooth"]
+FEATURES = ["mark", "poweroff", "logs", "notify", "doctor", "bluetooth", "support"]
 MARK_LABELS = {"police", "ambulance", "fire", "unknown", "noise", "antenna-change"}
 MAX_ACKS = 32                 # in one push: the server's limit
 MAX_ACKS_WAITING = 256        # held until sent
@@ -1027,6 +1028,152 @@ class BluetoothLink:
         return out
 
 
+SUPPORT_PIECE_BYTES = 768 * 1024   # under the server's 1 MB per upload
+SUPPORT_MAKE_LIMIT_S = 3600.0
+SUPPORT_TIMEOUT_S = 60.0
+SUPPORT_RETRIES = 5
+DRIVES_EVERY_S = 300.0             # the app's list of drives to choose a package from
+DRIVES_SHOWN = 12
+SUPPORT_CHOICES = ("quick", "drive", "everything")
+
+
+def support_module():
+    """`p0/support.py`, or None where it cannot be loaded (a display-only install, an older p0)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "p0"))
+    try:
+        import support
+        return support
+    except Exception:                       # noqa: BLE001 - the display must run regardless
+        return None
+
+
+def drives_state():
+    """The newest drives, for the app's package choice: the same rows as `support.py --list`, shortened."""
+    support = support_module()
+    if support is None:
+        return None
+    try:
+        rows = support.drives()[:DRIVES_SHOWN]
+    except Exception:                       # noqa: BLE001 - a detail for the app; the push must go
+        return None
+    return [{"session": r["session"][:80], "start": r["start"], "minutes": r["minutes"], "matches": r["matches"],
+             "faults": len(r["faults"]), "mb": r["events_mb"], "recordings": r["recordings"]} for r in rows]
+
+
+class SupportJob:
+    """One support package at a time, asked for from the app: p0/support.py makes it in its own process at the
+    lowest priority, then it goes to the server in pieces, resuming where the server says it got to."""
+
+    def __init__(self, root=None, run=None, opener=None):
+        self.root = Path(root) if root else Path(__file__).resolve().parents[1]
+        self.made_elsewhere = run is not None
+        self.run = run or self._run
+        self.opener = opener
+        self.busy = threading.Lock()
+        self.state = None                   # what the push says about the package on its way
+
+    @property
+    def available(self):
+        """support.py is here to run (it came with 1.4.0); a display-only install has no p0/."""
+        return self.made_elsewhere or (self.root / "p0/support.py").is_file()
+
+    def _run(self, args):
+        done = subprocess.run(["nice", "-n", "19", sys.executable, "-B", str(self.root / "p0/support.py"), *args],
+                              capture_output=True, text=True, timeout=SUPPORT_MAKE_LIMIT_S)
+        if done.returncode != 0:
+            raise OSError((done.stderr or done.stdout or "support.py failed").strip().splitlines()[-1][:160])
+        return json.loads(done.stdout.strip().splitlines()[-1])
+
+    def start(self, op, pub, cfg):
+        if not self.busy.acquire(blocking=False):
+            pub.ack(op["id"], "failed", "A package is already being made")
+            return None
+        thread = threading.Thread(target=self._work, args=(op, pub, cfg), daemon=True, name="support")
+        thread.start()
+        return thread
+
+    def _work(self, op, pub, cfg):
+        out = Path.home() / ".cache" / f"slot17-support-{op['id'][:8]}.zip"
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            args = ["--out", str(out)]
+            if op["choice"] != "quick":
+                args += ["--drive", op["session"]]
+                if op.get("window"):
+                    args += ["--window", f"{op['window'][0]}-{op['window'][1]}"]
+                if op["choice"] == "everything":
+                    args.append("--everything")
+                    if op.get("recordings"):
+                        args.append("--recordings")
+            self.state = {"state": "building"}
+            self.run(args)
+            name = f"support-{time.strftime('%Y%m%d-%H%M%SZ', time.gmtime())}-{op['id'][:8]}.zip"
+            self._upload(out, name, op, cfg)
+            print(f"support package uploaded: {name} ({out.stat().st_size} bytes)", flush=True)
+            pub.ack(op["id"], "done", name)
+        except Exception as exc:            # noqa: BLE001 - report it, keep the display running
+            print(f"support package failed: {type(exc).__name__}: {exc}", flush=True)
+            pub.ack(op["id"], "failed", f"{type(exc).__name__}: {exc}"[:160])
+        finally:
+            self.state = None
+            out.unlink(missing_ok=True)
+            self.busy.release()
+
+    def _upload(self, path, name, op, cfg):
+        total = path.stat().st_size
+        h = hashlib.sha256()
+        with open(path, "rb") as fh:                      # in blocks: a package can be 100 MB and more
+            for block in iter(lambda: fh.read(1 << 20), b""):
+                h.update(block)
+        digest = h.hexdigest()
+        parts = urlsplit(cfg["url"])
+        cls = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
+        offset, failures = 0, 0
+        with open(path, "rb") as fh:
+            while True:
+                fh.seek(offset)
+                piece = fh.read(SUPPORT_PIECE_BYTES)
+                last = offset + len(piece) == total
+                query = {"name": name, "offset": offset, "total": total}
+                if last:
+                    query.update(sha256=digest, choice=op["choice"], phone_log=int(bool(op.get("phone_log"))),
+                                 places=int(bool(op.get("places"))))
+                self.state = {"state": "uploading", "sent": offset, "total": total}
+                conn = (self.opener or cls)(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80),
+                                            timeout=SUPPORT_TIMEOUT_S)
+                try:
+                    conn.request("POST", "/api/support-package?" + urlencode(query), piece,
+                                 {"Authorization": "Bearer " + cfg["token"], "Content-Type": "application/octet-stream"})
+                    resp = conn.getresponse()
+                    answer = json.loads(resp.read() or b"{}")
+                    if resp.status != 200:
+                        raise OSError(f"server answered {resp.status}: {answer.get('error', '')}")
+                except (OSError, ValueError, http.client.HTTPException):
+                    failures += 1
+                    if failures > SUPPORT_RETRIES:
+                        raise
+                    time.sleep(min(30, 2 ** failures))
+                    continue
+                finally:
+                    conn.close()
+                failures = 0
+                if answer.get("done"):
+                    return
+                offset = int(answer.get("size", 0))      # the server's own count: resumes after a lost piece
+
+
+def run_support(op, pub, cfg):
+    """A support package for the app: checked here as well as on the server, then made in the background."""
+    job = getattr(pub, "support", None)
+    if job is None or not job.available:
+        pub.ack(op["id"], "failed", "Support packages need car computer software 1.5.0")
+        return None
+    if op.get("choice") not in SUPPORT_CHOICES or (op["choice"] != "quick" and not isinstance(op.get("session"), str)):
+        pub.ack(op["id"], "failed", "Unknown package choice")
+        return None
+    return job.start(op, pub, cfg)
+
+
 def run_bluetooth(op, pub):
     """Switch the Bluetooth link on or off, rename it, or give the app its key, as asked from the app."""
     config, link = bluetooth_module(), getattr(pub, "bluetooth", None)
@@ -1117,6 +1264,8 @@ class Publisher:
         self.phone = phone
         self.bluetooth = bluetooth    # a BluetoothLink, or None
         self.pusher = None            # a Pusher in the running service; None sends in line (--once, tests)
+        self.support = SupportJob()   # a support package asked for from the app
+        self.drives, self.drives_at = None, -1e9
         self.owed = False             # a push was due while one was in flight
         self.quiet_alarm = False
         self.quiet_alerted_at = None
@@ -1328,6 +1477,12 @@ class Publisher:
             bluetooth = self.bluetooth.state(now_mono)
             if bluetooth:
                 out["bluetooth"] = bluetooth
+        if now_mono - self.drives_at >= DRIVES_EVERY_S:
+            self.drives_at, self.drives = now_mono, drives_state()
+        if self.drives is not None:
+            out["drives"] = self.drives
+        if self.support is not None and self.support.state:
+            out["support"] = dict(self.support.state)
         doctor = getattr(self, "doctor", None)
         if doctor is not None:
             if doctor.due(now_mono):
@@ -1667,6 +1822,8 @@ def handle_ops(sender, pub, cfg):
             run_notify(op, pub)
         elif op.get("kind") == "bluetooth":
             run_bluetooth(op, pub)
+        elif op.get("kind") == "support":
+            run_support(op, pub, cfg)
         elif op.get("kind") == "doctor":
             doctor = getattr(pub, "doctor", None)
             if doctor is None or doctor.busy:

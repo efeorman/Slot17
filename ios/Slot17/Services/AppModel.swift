@@ -95,6 +95,8 @@ final class AppModel: ObservableObject {
     private let tracker = LinkTracker()
     /// The Bluetooth route to the car computer, beside the server (1.4.0).
     let bluetooth = BluetoothRoute()
+    /// Support packages from the Pi screen (1.5.0).
+    let support = SupportRoute()
     /// The phone's last round trip to the server, in milliseconds.
     var phoneRoundTripMS: Double? { tracker.lastRoundTrip.map { $0 * 1000 } }
     private var engine = AlertEngine()
@@ -156,6 +158,11 @@ final class AppModel: ObservableObject {
         bluetooth.deliver = { [weak self] matches, at in self?.bluetoothMatches(matches, receivedAt: at) }
         bluetooth.changed = { [weak self] in self?.refresh() }
         bluetooth.note = { [weak self] in self?.note($0) }
+        support.client = client
+        support.sendOp = { [weak self] kind, fields, apply in self?.sendOp(kind: kind, fields: fields, update: apply) }
+        support.carState = { [weak self] in self?.demo == true ? nil : self?.tracker.frame?.message.state }
+        support.phoneFiles = { [weak self] log, places, then in self?.supportPhoneFiles(log: log, places: places, then: then) }
+        support.note = { [weak self] in self?.note($0) }
         client.onStreamEvent = { [weak self] in self?.note($0) }
         client.onUnauthorised = { [weak self] in self?.unauthorised() }
         applyAudioSettings()
@@ -1271,6 +1278,8 @@ final class AppModel: ObservableObject {
                 }
             case "bluetooth":
                 bluetooth.apply(op)
+            case "support":
+                support.apply(op)
             case "doctor":
                 if op.id == doctorAction.id {
                     doctorAction = Self.actionState(op, waiting: "The car computer is checking itself…", done: op.detail.ifEmpty("Checked"))
@@ -1430,6 +1439,54 @@ final class AppModel: ObservableObject {
                 self.refreshServerLogs()
             case .failure(let error):
                 self.logUpload = .init(text: "Could not send: \(error.localizedDescription)", level: .bad)
+            }
+        }
+    }
+
+    /// Before a support package: this phone's log and, only when asked, the last day's drive data with places go to
+    /// the server, which adds the newest of each to the package. Then `then` asks the car computer.
+    private func supportPhoneFiles(log withLog: Bool, places: Bool, then: @escaping () -> Void) {
+        let placesStep = { [weak self] in
+            guard let self, places else { return then() }
+            struct DriveData: Encodable {
+                let kind = "slot17-drive-data"
+                let app: String
+                let from: Date
+                let until: Date
+                let settings: AlertSettings
+                let alerts: [AlertRecord]
+                let sightings: [Sighting]
+                let track: [LocationService.TrackPoint]
+            }
+            let until = Date(), from = until.addingTimeInterval(-86_400)
+            var track = self.location.track.filter { $0.at > from }.sorted { $0.at < $1.at }
+            let recent = Array(self.alerts.filter { $0.at > from }.sorted { $0.at < $1.at }.suffix(2000))
+            let marks = self.sightings.filter { $0.seenAt > from }
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            func encode() -> Data? {
+                try? encoder.encode(DriveData(app: Self.version, from: from, until: until, settings: self.settings,
+                                              alerts: recent, sightings: marks, track: track))
+            }
+            var body = encode()
+            while let b = body, b.count > 950_000, track.count > 10 {      // the newest places, when a day is too much
+                track = Array(track.suffix(track.count / 2))
+                body = encode()
+            }
+            guard let body else { return then() }
+            self.client.uploadLog(body) { [weak self] result in
+                if case .failure(let error) = result { self?.note("support package: the drive data did not reach the server: \(error.localizedDescription)") }
+                then()
+            }
+        }
+        guard withLog else { return placesStep() }
+        let header = (diagnostics.map { "\($0.0): \($0.1)" } + [""]).joined(separator: "\n")
+        log.tail(maxBytes: 900_000) { [weak self] tail in
+            var body = Data(header.utf8)
+            body.append(tail)
+            self?.client.uploadLog(body) { [weak self] result in
+                if case .failure(let error) = result { self?.note("support package: this phone's log did not reach the server: \(error.localizedDescription)") }
+                placesStep()
             }
         }
     }
