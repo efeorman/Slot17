@@ -14,6 +14,8 @@
 #     --no-hotspot          don't ask about the phone's hotspot
 #     --updates / --no-updates      install the Slot17 team's signed updates by themselves, or not
 #     --no-display          don't connect to a display server
+#     --bluetooth / --no-bluetooth  send alerts to the app over Bluetooth too, or not
+#     --bluetooth-name NAME         the name phones show for this car computer (default Slot17)
 #     --notify / --no-notify        set up phone notifications through Pushover, or not
 #     --calibrate / --no-calibrate  measure this receiver's frequency error, or not
 #     --start / --no-start          start the detector at the end, or not
@@ -26,6 +28,7 @@ PROJECT="$(cd "$HERE/.." && pwd)"
 . "$HERE/common.sh"
 
 SERVER=""; PI_KEY=""; HOTSPOT=""; HOTSPOT_STEP=ask; UPDATES=ask; DISPLAY_LINK=ask; NOTIFY=ask; CALIBRATE=ask; START=ask
+BLUETOOTH=ask; BT_NAME=""
 AUTOSTART=1; NO_SERVICES=0; CHECK=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -37,6 +40,9 @@ while [ $# -gt 0 ]; do
         --updates) UPDATES=yes ;;
         --no-updates) UPDATES=no ;;
         --no-display) DISPLAY_LINK=no ;;
+        --bluetooth) BLUETOOTH=yes ;;
+        --no-bluetooth) BLUETOOTH=no ;;
+        --bluetooth-name) BT_NAME="$2"; [ "$BLUETOOTH" = no ] || BLUETOOTH=yes; shift ;;
         --notify) NOTIFY=yes ;;
         --no-notify) NOTIFY=no ;;
         --calibrate) CALIBRATE=yes ;;
@@ -54,6 +60,7 @@ done
 RUN_USER="$(id -un)"
 SERVICE=tetra-detector.service
 DISPLAY_CONFIG="$HOME/.config/slot17-display.json"
+BT_SETTINGS="$PROJECT/p0/bluetooth_config.py"
 
 airspy_present() { command -v lsusb >/dev/null && lsusb -d 1d50:60a1 >/dev/null 2>&1; }
 
@@ -68,6 +75,10 @@ report() {
     printf '  %-22s %s\n' "Airspy plugged in" "$(airspy_present && echo yes || echo 'no, or lsusb is missing')"
     printf '  %-22s %s\n' "Detector service" "$(systemctl is-enabled $SERVICE 2>/dev/null || echo 'not installed'), $(systemctl is-active $SERVICE 2>/dev/null || true)"
     printf '  %-22s %s\n' "Display link" "$([ -f "$DISPLAY_CONFIG" ] && echo configured || echo 'not configured')"
+    printf '  %-22s %s\n' "Bluetooth" "$(python3 -B "$BT_SETTINGS" --show 2>/dev/null | python3 -c '
+import json, sys
+s = json.load(sys.stdin)
+print("on, shown as " + s["name"] if s["on"] else "off")' 2>/dev/null || echo unknown)"
     printf '  %-22s %s\n' "Notifications" "$([ -f "$HOME/.config/tetra-pushover.json" ] && echo configured || echo 'not configured')"
     printf '  %-22s %s\n' "Own calibration" "$([ -f "$PROJECT/p0/calibration.local.json" ] && echo yes || echo 'no, using the shipped example')"
 }
@@ -252,7 +263,46 @@ else
     note "skipped. You can connect later by running the setup again."
 fi
 
-# --- 9. notifications ---------------------------------------------------------
+# --- 9. Bluetooth -------------------------------------------------------------
+step "Bluetooth to your phone"
+if [ "$BLUETOOTH" != no ] && ! python3 -B "$PROJECT/p0/bluetooth_link.py" adapter 2>/dev/null | grep -q '"present": true'; then
+    note "no Bluetooth adapter found (or BlueZ isn't running), so this is skipped."
+    BLUETOOTH=none
+fi
+if { [ "$BLUETOOTH" = ask ] || [ "$BLUETOOTH" = yes ]; } && [ "$DISPLAY_LINK" != yes ]; then
+    note "skipped: the app gets this car computer's Bluetooth key through the display server, so connect that first."
+    BLUETOOTH=none
+fi
+if [ "$BLUETOOTH" = ask ]; then
+    echo "  Besides the display server, the car computer can send alerts straight to the Slot17 app over"
+    echo "  Bluetooth: faster, and they keep coming where there is no internet. While no phone is"
+    echo "  connected it is visible to Bluetooth scanners nearby."
+    ask_yes "Send alerts over Bluetooth too?" y && BLUETOOTH=yes || BLUETOOTH=no
+fi
+if [ "$BLUETOOTH" = yes ]; then
+    current="$(python3 -B "$BT_SETTINGS" --show | python3 -c 'import json, sys; print(json.load(sys.stdin)["name"])')"
+    if [ -z "$BT_NAME" ]; then
+        echo "  Phones show this car computer under a name: up to 20 letters, digits, spaces, '.', '-' or '_'."
+        BT_NAME="$(ask_text "Name (Enter for $current):")"
+        BT_NAME="${BT_NAME:-$current}"
+    fi
+    if ! python3 -B "$BT_SETTINGS" --on --name "$BT_NAME" >/dev/null; then
+        note "\"$BT_NAME\" can't be used as a name; using $current. Rename it in the app or with --bluetooth-name."
+        BT_NAME="$current"
+        python3 -B "$BT_SETTINGS" --on --name "$BT_NAME" >/dev/null
+    fi
+    python3 -B "$PROJECT/p0/bluetooth_link.py" adapter --name "$BT_NAME" >/dev/null 2>&1 \
+        || note "the adapter keeps its old name until the detector starts; then it takes \"$BT_NAME\"."
+    ok "on, shown as \"$BT_NAME\". In the app: Settings, Bluetooth to the car computer, Set up."
+elif [ "$BLUETOOTH" = no ]; then
+    if [ -f "$HOME/.config/slot17-bluetooth.json" ]; then
+        python3 -B "$BT_SETTINGS" --off >/dev/null && ok "switched off"
+    else
+        note "skipped. You can switch it on later in the app, or with bash setup.sh car --bluetooth."
+    fi
+fi
+
+# --- 10. notifications --------------------------------------------------------
 step "Phone notifications (optional)"
 if [ "$NOTIFY" = ask ]; then
     if [ "$YES" = 1 ]; then NOTIFY=no
@@ -268,7 +318,7 @@ else
     note "skipped"
 fi
 
-# --- 10. calibration ----------------------------------------------------------
+# --- 11. calibration ----------------------------------------------------------
 step "Calibrating the receiver (recommended once)"
 if ! airspy_present; then
     note "no Airspy found on USB, so this is skipped. Plug it in and run: bash setup.sh car --calibrate --no-display --no-notify"
@@ -289,7 +339,7 @@ if [ "$CALIBRATE" = yes ]; then
     fi
 fi
 
-# --- 11. start ----------------------------------------------------------------
+# --- 12. start ----------------------------------------------------------------
 step "Starting the detector"
 if [ "$START" = ask ]; then
     if airspy_present; then

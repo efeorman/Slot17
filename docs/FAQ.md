@@ -55,7 +55,7 @@ A Raspberry Pi 5. We use the 8 GB one; 2 GB and up should be fine, the detector 
 Yes. An antenna on the outside, like a magnetic roof antenna, hears more than one behind the windscreen, and some windscreens have a metal coating that blocks radio. Keep in mind that more range also means more beeps for radios you can't see. We use a Motorola GMAE4258B stuck inside the windscreen. Anything made for 380 to 400 MHz works.
 
 ### What power supply?
-A USB-C car charger that gives 5 V at 5 A. Most only give 3 A at 5 V, whatever the box says, and that causes undervoltage, which Slot17 reports.
+We use the UGREEN Nexode 60 W car charger (EC602). It gives 3 A at 5 V, which was enough for our Pi with the receiver, an SSD and a 4G stick. Bigger car chargers don't give the Pi more: their extra watts are at higher voltages. If Slot17 reports undervoltage, your setup needs more: use a 12 V to 5 V converter rated for 5 A, as the [README](../README.md#what-you-need) explains. Where to buy the parts in your country, with prices and a total: [slot17.cloud/parts/](https://slot17.cloud/parts/).
 
 ### Do I need internet in the car?
 Yes, so the car computer can reach the server. Your phone's hotspot is enough. A 4G USB stick with its own SIM saves your phone's battery; we use a ZTE MF833N.

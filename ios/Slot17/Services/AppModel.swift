@@ -93,6 +93,8 @@ final class AppModel: ObservableObject {
     private var driveUploadDoneThisStop = false
     private let client = ServerClient()
     private let tracker = LinkTracker()
+    /// The Bluetooth route to the car computer, beside the server (1.4.0).
+    let bluetooth = BluetoothRoute()
     /// The phone's last round trip to the server, in milliseconds.
     var phoneRoundTripMS: Double? { tracker.lastRoundTrip.map { $0 * 1000 } }
     private var engine = AlertEngine()
@@ -149,6 +151,11 @@ final class AppModel: ObservableObject {
         audio.onResult = { [weak self] in self?.soundResult($0) }
         audio.onStateChange = { [weak self] in self?.refresh() }
         client.onMessage = { [weak self] in self?.received($0) }
+        bluetooth.sendOp = { [weak self] kind, fields, apply in self?.sendOp(kind: kind, fields: fields, update: apply) }
+        bluetooth.carState = { [weak self] in self?.tracker.frame?.message.state }
+        bluetooth.deliver = { [weak self] matches, at in self?.bluetoothMatches(matches, receivedAt: at) }
+        bluetooth.changed = { [weak self] in self?.refresh() }
+        bluetooth.note = { [weak self] in self?.note($0) }
         client.onStreamEvent = { [weak self] in self?.note($0) }
         client.onUnauthorised = { [weak self] in self?.unauthorised() }
         applyAudioSettings()
@@ -217,6 +224,7 @@ final class AppModel: ObservableObject {
         audio.arm()
         if settings.recordLocation { location.start() }
         if !demo { connect() }
+        bluetooth.start()
         startTick()
     }
 
@@ -507,6 +515,7 @@ final class AppModel: ObservableObject {
             if let detector = message.state?.detector, let windows = detector.windows, let wide = detector.wholeBandWindows {
                 interference.add(at: Mono.now(), windows: windows, wide: wide)
             }
+            serverMatches(message.state?.matches ?? [])
             engine.ingest(message.state?.matches ?? [], frame: tracker.frame,
                           channels: message.state?.channels ?? [], scope: tracker.scope)
         }
@@ -514,12 +523,35 @@ final class AppModel: ObservableObject {
         applyOps(message.ops ?? [], command: message.command)
     }
 
+    /// Matches from the server: counted for the route figures, and an alert first heard over Bluetooth takes the
+    /// server's id, so the drive report can find it.
+    private func serverMatches(_ matches: [MatchRow]) {
+        let now = Mono.now()
+        for match in matches {
+            let key = MatchKey.of(match)
+            bluetooth.serverMatch(key, at: now)
+            if let index = alerts.firstIndex(where: { $0.id == "bt:" + key }) {
+                alerts[index].id = match.id
+                historyDirty = true
+            }
+        }
+    }
+
+    /// Matches over Bluetooth: their age counts from when they arrived, so no server clock is needed.
+    private func bluetoothMatches(_ matches: [MatchRow], receivedAt: Double) {
+        engine.ingest(matches, frame: nil, channels: bluetooth.feed.channels, scope: tracker.scope, receivedAt: receivedAt)
+        flushMatches()
+        refresh()
+        if listening { updateLiveTile(Mono.now()) }
+    }
+
     private func flushMatches() {
         let now = Mono.now()
         let context = AlertEngine.Context(
-            now: now, live: tracker.live(now), mayHold: tracker.mayHoldMatches(now), scope: tracker.scope,
+            now: now, live: tracker.live(now) || bluetooth.feed.live(now), mayHold: tracker.mayHoldMatches(now), scope: tracker.scope,
             settings: settings, armed: audio.armed, audioProblem: audio.problem, mutedUntil: mutedUntil,
             age: { [tracker] waiting in
+                if let receivedAt = waiting.receivedAt { return waiting.match.age + (now - receivedAt) }
                 guard let frame = waiting.frame else { return .infinity }
                 return waiting.match.age + tracker.elapsed(frame, now)
             },
@@ -613,6 +645,7 @@ final class AppModel: ObservableObject {
         checkEquipmentTones(now)
         checkAutoSleep(now)
         checkDriveEnded(now)
+        bluetooth.settle(now)
         updateLocationPower(now)
         resendPending(now)
         checkFaultNotices(now)
@@ -786,6 +819,7 @@ final class AppModel: ObservableObject {
     private func checkAutoSleep(_ now: Double) {
         guard settings.autoSleepMinutes > 0, !demo else { return }
         let carLive = tracker.frame != nil && tracker.carAge(now) <= LinkTracker.carStale && tracker.detectorActive
+            || bluetooth.feed.live(now)
         if carLive || UIApplication.shared.applicationState == .active {
             noDataSince = nil
             if !audio.armed && UIApplication.shared.applicationState == .active { audio.arm() }
@@ -806,6 +840,7 @@ final class AppModel: ObservableObject {
         audio.disarm(why)
         location.stop()
         client.closeStream()
+        bluetooth.stop()
         if liveTile?.isRunning == true {
             liveTile?.end(final: endedTileState(Mono.now()), reason: "asleep", immediately: false)
         }
@@ -815,7 +850,7 @@ final class AppModel: ObservableObject {
     /// GPS is for records only, so with no car data it drops to a coarse, low-power setting, and returns
     /// when data comes back. Not stopped: iOS would not let it start again from the background.
     private func updateLocationPower(_ now: Double) {
-        let carLive = tracker.frame != nil && tracker.carAge(now) <= LinkTracker.carStale
+        let carLive = tracker.frame != nil && tracker.carAge(now) <= LinkTracker.carStale || bluetooth.feed.live(now)
         if carLive { lastCarLiveAt = now }
         let open = UIApplication.shared.applicationState == .active
         location.setLowPower(!open && !carLive && now - max(lastCarLiveAt, listeningSince) >= 120)
@@ -825,7 +860,7 @@ final class AppModel: ObservableObject {
     /// so sightings and alerts can be analysed with their places without anyone remembering to.
     private func checkDriveEnded(_ now: Double) {
         guard hasLink, !demo else { return }
-        let carLive = tracker.frame != nil && tracker.carAge(now) <= LinkTracker.carStale
+        let carLive = tracker.frame != nil && tracker.carAge(now) <= LinkTracker.carStale || bluetooth.feed.live(now)
         if carLive {
             carGoneSince = nil
             driveUploadDoneThisStop = false
@@ -981,10 +1016,24 @@ final class AppModel: ObservableObject {
             && tracker.sinceRx(now) <= LinkTracker.linkLost
         // Every assignment to a @Published value redraws every screen watching the model, even when
         // nothing changed; this runs four times a second, so only real changes are assigned.
-        let bars = carFresh && tracker.detectorActive
+        let overBluetooth = !carFresh && bluetooth.feed.live(now)
+        if overBluetooth {
+            let line = HeadlineStatus(level: .ok, title: "Live over Bluetooth",
+                                      detail: "No link to the server: alerts come straight from the car computer")
+            if line != headline { headline = line }
+        }
+        let bars = carFresh && tracker.detectorActive || overBluetooth
         if bars != showBars { showBars = bars }
         var rows: [MeterRow] = []
-        if bars, let frame = tracker.frame, let state {
+        if overBluetooth, let state = bluetooth.feed.piState(base: nil, now: now) {
+            rows = Meters.pick(state.channels.map {
+                let age = ($0.age * 2).rounded(.down) / 2
+                return MeterRow(ch: $0.ch, freqMHz: $0.freqMHz, strength: $0.strength, age: age,
+                                hits60: $0.hits60, approxTime: $0.approxTime ?? false,
+                                frequent: $0.activity == "active" && age < 15,
+                                rising: ($0.rising ?? false) && age < 20, call: $0.call ?? false)
+            })
+        } else if bars, let frame = tracker.frame, let state {
             let elapsed = tracker.elapsed(frame, now)
             rows = Meters.pick(state.channels.map {
                 // Ages in half seconds: the screen shows whole seconds, and finer steps only redraw.
@@ -1004,6 +1053,7 @@ final class AppModel: ObservableObject {
         let quiet = StatusBuilder.receiverQuiet(tracker, settings: settings, now: now)
         if quiet != receiverQuiet { receiverQuiet = quiet }
         settlePushoverWanted()
+        bluetooth.settleWanted()
         let muted = now < mutedUntil ? Int((mutedUntil - now).rounded(.up)) : 0
         if muted != mutedSeconds { mutedSeconds = muted }
 
@@ -1067,8 +1117,10 @@ final class AppModel: ObservableObject {
     // MARK: Info for the Pi screen
 
     var piState: PiState? {
-        guard let frame = tracker.frame, tracker.carAge(Mono.now()) <= LinkTracker.carStale else { return nil }
-        return frame.message.state
+        let now = Mono.now()
+        if let frame = tracker.frame, tracker.carAge(now) <= LinkTracker.carStale { return frame.message.state }
+        // Without the server, the car computer's own state over Bluetooth, on top of the server's last report.
+        return bluetooth.feed.live(now) ? bluetooth.feed.piState(base: tracker.frame?.message.state, now: now) : nil
     }
 
     /// Why this action cannot be used right now, in words, or nil if it can.
@@ -1217,6 +1269,8 @@ final class AppModel: ObservableObject {
                     pushoverAction = Self.actionState(op, waiting: "Waiting for the car computer…",
                                                       done: op.detail.ifEmpty("Saved on the car computer"))
                 }
+            case "bluetooth":
+                bluetooth.apply(op)
             case "doctor":
                 if op.id == doctorAction.id {
                     doctorAction = Self.actionState(op, waiting: "The car computer is checking itself…", done: op.detail.ifEmpty("Checked"))

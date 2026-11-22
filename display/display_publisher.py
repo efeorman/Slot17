@@ -28,6 +28,7 @@ import json
 import math
 import os
 from pathlib import Path
+import queue
 import re
 import secrets
 import signal
@@ -63,7 +64,7 @@ QUIET_REPEAT_S = 900.0
 BACKFILL_BYTES = 512 << 10
 READ_CAP = 4 << 20
 TIMEOUT_S = 2.5
-FEATURES = ["mark", "poweroff", "logs", "notify", "doctor"]
+FEATURES = ["mark", "poweroff", "logs", "notify", "doctor", "bluetooth"]
 MARK_LABELS = {"police", "ambulance", "fire", "unknown", "noise", "antenna-change"}
 MAX_ACKS = 32                 # in one push: the server's limit
 MAX_ACKS_WAITING = 256        # held until sent
@@ -668,6 +669,7 @@ class Sender:
         self.device = None           # the interface the open connection is pinned to; None = the kernel's choice
         self.pinned_since = None
         self.stats = LinkStats()
+        self.lock = threading.Lock()     # one push at a time over the one connection, whichever thread sends
 
     def close(self):
         if self.conn is not None:
@@ -686,6 +688,10 @@ class Sender:
 
     def __call__(self, payload):
         """Send one push: over the open connection, a new one, then each other network. Raises if all fail."""
+        with self.lock:
+            self._send(payload)
+
+    def _send(self, payload):
         started = time.monotonic()
         if self.device is not None and self.pinned_since is not None \
                 and started - self.pinned_since > self.PREFERRED_AFTER_S:
@@ -860,9 +866,258 @@ def run_notify(op, pub):
     pub.ack(op["id"], "done", f"Pushover messages {'on' if wanted else 'off'}")
 
 
+BLUETOOTH_RESTART_S = (5.0, 30.0, 120.0, 600.0)  # after the link's process ended by itself, ever more slowly
+BLUETOOTH_SETTINGS_EVERY_S = 60.0                # re-read, in case setup.sh changed them
+BLUETOOTH_LINE_BYTES = 4096                      # one command: a pipe write this small is all or nothing
+BLUETOOTH_STOP_S = 3.0
+
+
+def bluetooth_module():
+    """`p0/bluetooth_config.py`, or None where it cannot be loaded (a display-only install, an older p0)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "p0"))
+    try:
+        import bluetooth_config
+        return bluetooth_config
+    except Exception:                       # noqa: BLE001 - the display must run regardless
+        return None
+
+
+class BluetoothLink:
+    """The Bluetooth link's own process (`p0/bluetooth_link.py`), run while Bluetooth is switched on.
+
+    It gets the same matches and detector state as the display server, and is never in their way:
+    commands go into a non-blocking pipe and are dropped when it is full, and a link that keeps
+    ending is started again ever more slowly. Its status lines come back on a reader thread.
+    """
+
+    def __init__(self, root=None, config=None, spawn=None):
+        self.root = Path(root) if root else Path(__file__).resolve().parents[1]
+        self.config = config if config is not None else bluetooth_module()
+        self.spawn = spawn or self._spawn
+        self.proc = None
+        self.status, self.lock = {}, threading.Lock()
+        self.failures, self.next_start = 0, 0.0
+        self.dropped = 0
+        self.last_feed = -1e9
+        self.settings, self.settings_at = None, -1e9
+
+    def _spawn(self):
+        proc = subprocess.Popen([sys.executable, "-B", str(self.root / "p0/bluetooth_link.py"), "serve"],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, cwd=str(self.root / "p0"))
+        os.set_blocking(proc.stdin.fileno(), False)     # a link that stops reading must never hold us up
+        return proc
+
+    def _write(self, data):
+        """One whole line into the link's input. BlockingIOError when the pipe is full."""
+        os.write(self.proc.stdin.fileno(), data)
+
+    def _settings(self, now, fresh=False):
+        if self.config is None:
+            return None
+        if fresh or self.settings is None or now - self.settings_at >= BLUETOOTH_SETTINGS_EVERY_S:
+            try:
+                self.settings, self.settings_at = self.config.public(self.config.load()), now
+            except Exception as exc:        # noqa: BLE001 - unreadable settings mean off, never a crash
+                print(f"bluetooth settings unreadable: {type(exc).__name__}: {exc}", flush=True)
+                self.settings, self.settings_at = None, now
+        return self.settings
+
+    def running(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def poll(self, now):
+        """Start the link when it is on and not running; notice when it ended. Never raises."""
+        ended = self.proc is not None and self.proc.poll() is not None
+        settings = self._settings(now, fresh=ended)     # switched off over Bluetooth: the link ended by itself
+        if ended:
+            code, self.proc = self.proc.returncode, None
+            if settings and settings["on"]:
+                self.failures += 1
+                wait = BLUETOOTH_RESTART_S[min(self.failures, len(BLUETOOTH_RESTART_S)) - 1]
+                self.next_start = now + wait
+                print(f"bluetooth link ended (exit {code}); starting it again in {wait:.0f} s", flush=True)
+        if not settings or not settings["on"]:
+            if self.proc is not None:
+                self.stop()
+            return
+        if self.proc is None and now >= self.next_start:
+            try:
+                self.proc = self.spawn()
+            except Exception as exc:        # noqa: BLE001 - no Bluetooth is a detail, never a crash
+                self.proc = None
+                self.failures += 1
+                self.next_start = now + BLUETOOTH_RESTART_S[-1]
+                print(f"bluetooth link did not start: {type(exc).__name__}: {exc}", flush=True)
+                return
+            threading.Thread(target=self._read, args=(self.proc,), daemon=True, name="bluetooth").start()
+
+    def _read(self, proc):
+        for raw in proc.stdout:
+            try:
+                line = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(line, dict):
+                with self.lock:
+                    self.status = line
+                if line.get("state") in ("advertising", "connected"):
+                    self.failures = 0
+                if line.get("settings_changed"):
+                    self.settings_at = -1e9     # a phone changed them over Bluetooth: read them again
+
+    def feed(self, command):
+        """Hand one command to the link, or drop it when the link is busy. Returns True when written."""
+        if not self.running():
+            return False
+        line = (json.dumps(command, separators=(",", ":")) + "\n").encode()
+        if len(line) > BLUETOOTH_LINE_BYTES:
+            self.dropped += 1
+            return False
+        try:
+            self._write(line)
+            return True
+        except BlockingIOError:
+            self.dropped += 1
+        except OSError:
+            pass                            # the link ended; poll() notices and starts it again
+        return False
+
+    def reload(self, now=None):
+        """The settings changed (the app's switch or name): tell the link, or start or stop it."""
+        now = time.monotonic() if now is None else now
+        settings = self._settings(now, fresh=True)
+        self.failures, self.next_start = 0, 0.0
+        if self.running():
+            self.feed({"reload": True})     # renames itself, or ends when switched off
+        self.poll(now)
+        return settings
+
+    def stop(self):
+        proc, self.proc = self.proc, None
+        if proc is None:
+            return
+        try:
+            proc.stdin.close()              # the link ends when its input does
+            proc.wait(timeout=BLUETOOTH_STOP_S)
+        except Exception:                   # noqa: BLE001 - make sure it goes, whatever happened
+            proc.kill()
+        with self.lock:
+            self.status = {}
+
+    def state(self, now):
+        """For the push: the switch, and what the link last said about itself."""
+        settings = self._settings(now)
+        if settings is None:
+            return None
+        with self.lock:
+            line = dict(self.status)
+        on = settings["on"]
+        state = line.get("state") if on and self.running() else "starting" if on else "off"
+        out = {"on": on, "state": state if state else "starting", "name": settings["name"],
+               "subscribed": bool(on and line.get("subscribed")), "frames": int(line.get("frames") or 0),
+               "matches": int(line.get("matches") or 0)}
+        if settings.get("key_id"):
+            out["key_id"] = settings["key_id"]
+        if finite(line.get("since")) and on:
+            out["since_s"] = round(max(0.0, now - line["since"]), 1)
+        if isinstance(line.get("mtu"), int):
+            out["mtu"] = line["mtu"]
+        if line.get("error") and on:
+            out["error"] = str(line["error"])[:120]
+        return out
+
+
+def run_bluetooth(op, pub):
+    """Switch the Bluetooth link on or off, rename it, or give the app its key, as asked from the app."""
+    config, link = bluetooth_module(), getattr(pub, "bluetooth", None)
+    if config is None or link is None:
+        pub.ack(op["id"], "failed", "Bluetooth is not available on this car computer")
+        return
+    try:
+        if isinstance(op.get("on"), bool):
+            config.save(on=op["on"])
+            done = f"Bluetooth {'on' if op['on'] else 'off'}"
+        elif isinstance(op.get("name"), str):
+            config.save(name=op["name"])
+            done = f"Bluetooth name: {op['name']}"
+        elif op.get("pair") is True:
+            settings = config.load()
+            if not settings["on"]:
+                pub.ack(op["id"], "failed", "Bluetooth is switched off on the car computer")
+                return
+            print("operator command: the Bluetooth key was sent to the app", flush=True)
+            pub.ack(op["id"], "done", "key:" + settings["key"].hex())
+            return
+        else:
+            pub.ack(op["id"], "failed", "Unknown Bluetooth request")
+            return
+    except ValueError as exc:
+        pub.ack(op["id"], "failed", str(exc)[:160])
+        return
+    except OSError as exc:
+        print(f"Bluetooth setting failed: {type(exc).__name__}: {exc}", flush=True)
+        pub.ack(op["id"], "failed", f"Could not save the setting: {type(exc).__name__}")
+        return
+    link.reload()
+    print(f"operator command: {done}", flush=True)
+    pub.ack(op["id"], "done", done)
+
+
+PUSH_WAIT_S = 15.0     # at most this long for a push in flight, before one that must go now (power off, stop)
+
+
+class Pusher:
+    """Sends the pushes on a thread of their own, one at a time.
+
+    A server that does not answer can take a push several seconds: TIMEOUT_S for each network the Sender
+    tries. Sent from the main loop, that time held up reading new matches, and so the Bluetooth link that
+    needs them most when the internet is gone. The result comes back through `results`, and the
+    publisher settles it on its own thread, so its state is only ever changed there.
+    """
+
+    def __init__(self, send):
+        self.send = send
+        self.inbox = queue.Queue(maxsize=1)
+        self.results = deque()
+        self.idle = threading.Event()
+        self.idle.set()
+        threading.Thread(target=self._work, daemon=True, name="push").start()
+
+    @property
+    def busy(self):
+        return not self.idle.is_set()
+
+    def offer(self, payload):
+        """Hand over one push, or refuse while one is in flight. Returns True when taken."""
+        if self.busy:
+            return False
+        self.idle.clear()
+        self.inbox.put(payload)
+        return True
+
+    def wait(self, timeout=PUSH_WAIT_S):
+        return self.idle.wait(timeout)
+
+    def _work(self):
+        while True:
+            payload = self.inbox.get()
+            try:
+                self.send(payload)
+                self.results.append((payload, None))
+            except (OSError, http.client.HTTPException, ValueError) as exc:
+                self.results.append((payload, exc))
+            except Exception as exc:            # noqa: BLE001 - a broken push must never end the thread
+                self.results.append((payload, exc))
+            finally:
+                self.idle.set()
+
+
 class Publisher:
-    def __init__(self, send, heartbeat=HEARTBEAT, phone=None):
+    def __init__(self, send, heartbeat=HEARTBEAT, phone=None, bluetooth=None):
         self.phone = phone
+        self.bluetooth = bluetooth    # a BluetoothLink, or None
+        self.pusher = None            # a Pusher in the running service; None sends in line (--once, tests)
+        self.owed = False             # a push was due while one was in flight
         self.quiet_alarm = False
         self.quiet_alerted_at = None
         self._warned_no_phone = False
@@ -956,8 +1211,9 @@ class Publisher:
                 self.channels.add(event, self.session, now_mono)
 
     def step(self, now_mono=None):
-        """Check once; push if something is new or the keepalive is due. Returns pushed?"""
+        """Check once; push if something is new or the keepalive is due. Returns pushed (or handed over)?"""
         now_mono = time.monotonic() if now_mono is None else now_mono
+        self._settle_pushes(now_mono)
         if now_mono - self.last_hb_poll >= HEARTBEAT_EVERY_S:
             self.last_hb_poll = now_mono
             hb = self.heartbeat.poll(now_mono)
@@ -971,11 +1227,31 @@ class Publisher:
         self.pending.extend(new)
         state = self.heartbeat.state(now_mono)["state"]
         changed = state != self.last_state            # e.g. running -> stale/stopped: say so at once
+        if self.bluetooth is not None:
+            self._feed_bluetooth(now_mono, new, changed)
         # After a failed push, try again within half a second rather than at the next keepalive.
         wait = RETRY_S if 0 < self.failures <= FAST_RETRIES else KEEPALIVE_S
-        if not new and not changed and now_mono - self.last_push < wait:
+        if not new and not changed and not self.owed and now_mono - self.last_push < wait:
             return False
         return self.push(now_mono)
+
+    def _feed_bluetooth(self, now_mono, new, changed):
+        """New matches to the Bluetooth link at once; the detector and channels at the server's rhythm.
+
+        A match carries the same fields as in the push to the server, so the phone decides the same
+        way whichever route brings it first.
+        """
+        link = self.bluetooth
+        link.poll(now_mono)
+        if not link.running():
+            return
+        if new:
+            link.feed({"matches": [{"id": m["id"], "ch": m["ch"], "strength_db": m["strength_db"],
+                                    "age_s": round(max(0.0, now_mono - m["seen"]), 3), "rule": m.get("rule")}
+                                   for m in new]})
+        if new or changed or now_mono - link.last_feed >= KEEPALIVE_S:
+            link.last_feed = now_mono
+            link.feed({"status": self.heartbeat.state(now_mono), "channels": self.channels.snapshot(now_mono)})
 
     def _antenna_notice(self, now_mono):
         """Tell the phone once when the receiver stops hearing anything, and once when it recovers."""
@@ -1048,6 +1324,10 @@ class Publisher:
             out["link"] = self.link
         if getattr(self, "notify_state", None):
             out["notify"] = self.notify_state
+        if self.bluetooth is not None:
+            bluetooth = self.bluetooth.state(now_mono)
+            if bluetooth:
+                out["bluetooth"] = bluetooth
         doctor = getattr(self, "doctor", None)
         if doctor is not None:
             if doctor.due(now_mono):
@@ -1097,14 +1377,45 @@ class Publisher:
             return list(self.acks)[:MAX_ACKS]
 
     def push(self, now_mono):
+        """Send the state: handed to the pusher, or in line without one. Returns True when sent or handed over."""
+        if self.pusher is not None and self.pusher.busy:
+            # One at a time. Owed, so the next step sends it the moment the one in flight is back, with
+            # whatever arrived meanwhile, instead of at the next keepalive.
+            self.owed = True
+            return False
+        return self._push(now_mono, in_line=self.pusher is None)
+
+    def push_now(self, now_mono):
+        """Send the state in line, after any push in flight: for what must reach the phone before this process
+        ends (power off). Returns True when it was delivered."""
+        if self.pusher is not None:
+            self.pusher.wait()
+            self._settle_pushes(now_mono)
+        return self._push(now_mono, in_line=True)
+
+    def _push(self, now_mono, in_line):
+        self.owed = False
         self.last_push = now_mono              # also paces retries while offline
         payload = self.payload(now_mono)
+        if not in_line:
+            return self.pusher.offer(payload)
         try:
             self.send(payload)
         except (OSError, http.client.HTTPException, ValueError) as exc:
+            return self._settle(payload, exc, now_mono)
+        return self._settle(payload, None, now_mono)
+
+    def _settle_pushes(self, now_mono):
+        while self.pusher is not None and self.pusher.results:
+            payload, error = self.pusher.results.popleft()
+            self._settle(payload, error, now_mono)
+
+    def _settle(self, payload, error, now_mono):
+        """After a push: count a failure, or drop what it delivered. Returns True when it was delivered."""
+        if error is not None:
             self.failures += 1
             if self.failures in (1, 10) or self.failures % 300 == 0:
-                print(f"push failed ({self.failures}x): {type(exc).__name__}: {exc}", flush=True)
+                print(f"push failed ({self.failures}x): {type(error).__name__}: {error}", flush=True)
             return False
         self.failures = 0
         sent = {m["id"] for m in payload["matches"]}     # delivered; the rest go with the next push
@@ -1117,6 +1428,8 @@ class Publisher:
         return True
 
     def stopped(self):
+        if self.pusher is not None:
+            self.pusher.wait()
         try:
             self.seq += 1
             self.send({"v": 3, "snapshot_mono": time.monotonic(), "seq": self.seq, "session": self.session,
@@ -1149,7 +1462,9 @@ def publisher_lock(path):
 def run(args):
     cfg = load_config(args.config)
     sender = Sender(cfg["url"], cfg["token"], take_commands=not args.once)
-    pub = Publisher(sender, phone=phone_sender())
+    pub = Publisher(sender, phone=phone_sender(), bluetooth=None if args.once else BluetoothLink())
+    if not args.once:
+        pub.pusher = Pusher(sender)            # --once sends in line: its first step is its answer
     return run_publisher(args, sender, pub, cfg)
 
 
@@ -1223,7 +1538,7 @@ def run_poweroff(op, pub, runner=None):
         return True
     # Report first: once this works there is no publisher left to report anything.
     pub.ack(op_id, "done", "Powering off")
-    pub.push(time.monotonic())
+    pub.push_now(time.monotonic())
     runner = runner or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=30))
     print("operator command: power off", flush=True)
     try:
@@ -1350,6 +1665,8 @@ def handle_ops(sender, pub, cfg):
             keep_going = run_poweroff(op, pub) and keep_going
         elif op.get("kind") == "notify":
             run_notify(op, pub)
+        elif op.get("kind") == "bluetooth":
+            run_bluetooth(op, pub)
         elif op.get("kind") == "doctor":
             doctor = getattr(pub, "doctor", None)
             if doctor is None or doctor.busy:
@@ -1419,6 +1736,8 @@ def run_publisher(args, sender, pub, cfg=None):
             break
         time.sleep(max(0.02, LOOP_S - (time.monotonic() - started)))
     pub.stopped()
+    if pub.bluetooth is not None:
+        pub.bluetooth.stop()
     sender.close()
     return 0
 

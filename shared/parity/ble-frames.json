@@ -1,0 +1,157 @@
+{
+  "about": "Frames of the Bluetooth link (p0/bluetooth_frames.py). Every app must decode each frame to `decoded` with `key`, refuse `tampered`, and give each match id its `key`.",
+  "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "key_id": "630dcd29",
+  "frames": [
+    {
+      "name": "status",
+      "hex": "010107b0075101000000020040380000250000000000f0000c000400f0fff73d7af340f05a97",
+      "decoded": {
+        "kind": "status",
+        "boot": 1359458311,
+        "counter": 1,
+        "detector": {
+          "state": "running",
+          "windows": 14400,
+          "hits": 37,
+          "quiet_windows": 0,
+          "quiet_alarm_windows": 240,
+          "whole_band_windows": 12,
+          "heartbeat_unchanged_s": 0.4,
+          "floor_db": -1.6
+        }
+      }
+    },
+    {
+      "name": "matches",
+      "hex": "010207b0075102000000028a81a209287b91709a002802780001e226d52e2585f5ae09000080dc0503c0bd843320c09f52",
+      "decoded": {
+        "kind": "matches",
+        "boot": 1359458311,
+        "counter": 2,
+        "matches": [
+          {
+            "key": "8a81a209287b9170",
+            "ch": 154,
+            "strength_db": 55.2,
+            "age_s": 0.12,
+            "rule": "standard"
+          },
+          {
+            "key": "e226d52e2585f5ae",
+            "ch": 9,
+            "strength_db": null,
+            "age_s": 1.5,
+            "rule": "coherent"
+          }
+        ]
+      }
+    },
+    {
+      "name": "channels",
+      "hex": "010307b0075103000000029a00a1923a00280201000300118a81a209090007053a0000800f00010006e226d52e8d3e66c69e26ae95",
+      "decoded": {
+        "kind": "channels",
+        "boot": 1359458311,
+        "counter": 3,
+        "channels": [
+          {
+            "ch": 154,
+            "freq_mhz": 383.8625,
+            "strength_db": 55.2,
+            "age_s": 0.1,
+            "hits_60s": 3,
+            "rising": true,
+            "call": false,
+            "approx_time": false,
+            "activity": "active",
+            "burst": "8a81a209"
+          },
+          {
+            "ch": 9,
+            "freq_mhz": 380.2375,
+            "strength_db": null,
+            "age_s": 1.5,
+            "hits_60s": 1,
+            "rising": false,
+            "call": true,
+            "approx_time": true,
+            "activity": null,
+            "burst": "e226d52e"
+          }
+        ]
+      }
+    },
+    {
+      "name": "reply",
+      "hex": "010407b0075104000000020115426c7565746f6f7468206e616d653a2043617220325f7538bb5b2c85f1",
+      "decoded": {
+        "kind": "reply",
+        "boot": 1359458311,
+        "counter": 4,
+        "action": "rename",
+        "ok": true,
+        "text": "Bluetooth name: Car 2"
+      }
+    }
+  ],
+  "controls": [
+    {
+      "action": "rename",
+      "name": "Car 2",
+      "boot": 1359458311,
+      "counter": 3,
+      "hex": "011007b0075103000000020543617220320eaca991c7616668"
+    },
+    {
+      "action": "off",
+      "name": "",
+      "boot": 1359458311,
+      "counter": 4,
+      "hex": "011007b00751040000000100798733d94664753b"
+    }
+  ],
+  "tampered": "010207b0075102000000028a80a209287b91709a002802780001e226d52e2585f5ae09000080dc0503c0bd843320c09f52",
+  "match_keys": [
+    {
+      "id": "20261122-150122-000000Z_watch_382.5MHz/9f2c",
+      "key": "8a81a209287b9170"
+    },
+    {
+      "id": "20261122-150122-000000Z_watch_382.5MHz/a03e",
+      "key": "e226d52e2585f5ae"
+    }
+  ],
+  "sequence": [
+    {
+      "boot": 7,
+      "counter": 1,
+      "accept": true
+    },
+    {
+      "boot": 7,
+      "counter": 2,
+      "accept": true
+    },
+    {
+      "boot": 7,
+      "counter": 2,
+      "accept": false
+    },
+    {
+      "boot": 9,
+      "counter": 1,
+      "accept": true
+    },
+    {
+      "boot": 7,
+      "counter": 3,
+      "accept": false
+    },
+    {
+      "boot": 9,
+      "counter": 2,
+      "accept": true
+    }
+  ]
+}

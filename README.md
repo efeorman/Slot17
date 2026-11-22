@@ -77,14 +77,14 @@ Check which system your country uses before buying anything. Also check the law:
 
 ## What you need
 
-These are the parts we use. Equivalent parts should work too.
+These are the parts we use. Equivalent parts should work too. **Where to buy them in your country, with prices and a total:** [slot17.cloud/parts/](https://slot17.cloud/parts/) (also in [Dutch](https://slot17.cloud/nl/parts/), [German](https://slot17.cloud/de/parts/) and the site's other languages). It picks your country by itself and shows only that country's shops.
 
 | Part | What we use | Alternatives and advice |
 |---|---|---|
 | **Car computer** | [Raspberry Pi 5](https://www.raspberrypi.com/products/raspberry-pi-5/), 8 GB | Any memory size from 2 GB up should do: the detector uses about 0.6 GB. We have only tested the Raspberry Pi 5; slower computers may not keep up |
 | **Storage** | 512 GB NVMe SSD | A good microSD card of 128 GB or more works too. Recordings grow with every drive: ours collected about 155 GB in two months. Recording pauses when less than 5 GB is free |
 | **Case** | Argon case with NVMe slot | Any case with cooling. A car gets hot in summer |
-| **Power in the car** | USB-C car charger | Use one that gives 5 V at 5 A (27 W) with USB-C Power Delivery. Most USB-C car chargers give only 3 A at 5 V, however many watts they advertise at higher voltages, so check that 5 V 5 A (or 5.1 V 5 A) is listed. A weak charger or a thin cable causes undervoltage, which Slot17 reports |
+| **Power in the car** | [UGREEN Nexode 60 W car charger, EC602](https://www.amazon.nl/dp/B0DSBSBSGW), Pi on its built-in USB-C cable | It gives 3 A at 5 V. That was enough for our Pi 5 with the Airspy, an NVMe SSD and a 4G stick: no undervoltage during a whole drive (19 November 2026). Bigger car chargers don't help: almost all give 3 A at 5 V, and their extra watts are at 9 to 20 V, which the Pi doesn't use. A car charger that offers the Pi 5's own 5 V 5 A profile is very rare. If `setup.sh doctor` reports undervoltage, your setup draws more: use a 12 V to 5 V converter rated for 5 A with a fused lighter plug or a fused connection, and tell the Pi it can draw 5 A with `sudo rpi-eeprom-config --edit`, adding `PSU_MAX_CURRENT=5000` (only with a supply that really gives 5 A) |
 | **Receiver** | [Airspy Mini](https://itead.cc/product/airspy-mini/) | Its antenna socket is SMA. Other receivers aren't supported |
 | **Antenna** | [Motorola GMAE4258B](https://www.firecom.nl/merken/motorola/motorola-gmae4258b/), a hidden TETRA antenna for 380–410 MHz, stuck inside the front windscreen | Any antenna made for 380–400 MHz works. **An antenna on the outside of the car, such as a magnetic roof antenna, receives better** than one inside. Some windscreens have a metal coating that blocks radio signals. You may need an adapter to the Airspy's SMA socket |
 | **Internet in the car** | The iPhone's personal hotspot, or a ZTE MF833N 4G USB stick with its own SIM | Any hotspot or car Wi-Fi works and needs nothing extra. A 4G stick spares the phone's battery; ours needs one extra setup command on a Raspberry Pi 5, see [the optional step](#optional-a-4g-stick-instead-of-the-hotspot). A stick that Linux recognises by itself needs no setup at all |
@@ -203,6 +203,7 @@ It installs everything and runs about 90 checks. Then it asks a few questions, a
 | Question | Our advice |
 |---|---|
 | Connect to a display server? | **Yes.** Paste the server address and the car computer key from step 2 |
+| Send alerts over Bluetooth too? | **Yes**, unless you'd rather the car computer weren't visible to Bluetooth scanners nearby while no phone is connected. It then asks for the name phones show (Enter keeps **Slot17**). See [Bluetooth to the app](#optional-bluetooth-to-the-app) |
 | Set up Pushover notifications? | Optional. You need a Pushover app token and user key |
 | Calibrate the receiver? | **Yes**, once, with the antenna connected. It measures how far your receiver's frequency is off, which differs per receiver |
 | Start it now? | **Yes** |
@@ -229,6 +230,16 @@ It installs a USB fix made by someone else and a small check of ours that keeps 
 
 - **Plug the stick into the other pair of USB sockets**, not the pair the receiver is in. On the same pair, the receiver lost samples while the stick started, on three of four starts.
 - **Leave the hotspot switched on for the first drives.** On our first drive the stick lost its mobile connection once for eight minutes, and with no hotspot the phone had nothing from the car for that time.
+
+### Optional: Bluetooth to the app
+
+Besides the display server, the car computer can send alerts straight to the app over Bluetooth: faster, and they keep coming where there is no internet. The server stays for everything else. Setup asks about it (yes by default); `bash setup.sh car --bluetooth` or `--no-bluetooth` changes it later, and so does the app.
+
+- **In the app:** Settings, **Bluetooth to the car computer**, **Set up**, with the car computer on and nearby. The app gets the car computer's key through the server, then the phone shows a list to pick it from. The same card switches Bluetooth on and off on the car computer and renames it (with the phone connected, off and renaming go straight over Bluetooth), and shows which route brought each match first.
+- **Needs:** car computer software 1.4.0, an iPhone with iOS 18 or an Android phone with Bluetooth, and a car computer with Bluetooth (every Raspberry Pi from the 3 on has it).
+- **Tested so far** on our car computer with a PC: found in 0.2 s, connected in 0.9 s, 0 of 161 frames lost, round trip 79 ms. Not yet with a phone in a car.
+
+[BLUETOOTH.md](docs/design/BLUETOOTH.md) explains how it works, the frames, the key and what each phone does.
 
 ## Step 4: Install the app
 
@@ -336,6 +347,7 @@ Environment=SLOT17_CHECK_THREADS=2
 | Problem | What to do |
 |---|---|
 | `ssh: Could not resolve hostname slot17.local` | Your computer and the car computer must be on the same network. Wait two minutes after power-up. On older Windows, try the address shown in your phone's hotspot screen instead |
+| Someone helping you needs your logs | On the car computer, run `bash ~/Slot17/setup.sh logs`. It makes one zip with a plain report, the setup check and the logs, without keys or passwords; under 1 MB for the quick check. [SUPPORT.md](docs/operations/SUPPORT.md) explains the choices |
 | You don't know where to start | On the car computer, run `bash ~/Slot17/setup.sh doctor`. It only looks, changes nothing, and gives one verdict per part: receiver, service, detector, network, clock, server, power, storage, settings. The first problem it lists is usually the cause of the others. On the server, `bash ~/Slot17/setup.sh doctor server` |
 | The app says **No data from the car** | Is the hotspot on, and did the car computer join it? Is port 5732 open on the server? On the car computer, `bash ~/Slot17/setup.sh car --check` shows what is set up |
 | The phone can't open the private link | The server's port 5732 isn't reachable from the internet. Open it in your hosting provider's firewall, and check the address with `bash ~/Slot17/setup.sh server --show` |
@@ -343,10 +355,11 @@ Environment=SLOT17_CHECK_THREADS=2
 | The detector didn't start | Read why with `journalctl -u tetra-detector.service -n 40 --no-pager`. **Don't keep restarting it**: if the Airspy stopped responding, unplug it, plug it back in, and power-cycle the computer |
 | The 4G stick's light is red, or the app has no data while the stick is in | The stick has no mobile connection. Slot17 asks it to reconnect every 30 seconds and says what the stick reported: `journalctl -u slot17-modem.service -b \| grep modem:`. If the light stays red for minutes with good coverage, pull the stick out and put it back; with a hotspot switched on, the car computer uses that meanwhile |
 | The app feels slow, or you want to know which network the car computer is on | Open the app's **Pi** screen, card **Connection**: the phone's round trip to the server, the network the car computer uses (4G stick, hotspot or cable) and its upload times over the last minute, and for the stick its signal (RSRP; from -90 dBm is good, under -105 weak), quality, its own ping to the server and whether data roaming is on. Needs release 9 on the car computer and app 1.4.9 |
-| **Undervoltage** or **throttling** warnings | The power supply or cooling is too weak. Use a 5 V 5 A charger and a cooled case |
+| **Undervoltage** or **throttling** warnings | The power supply or cooling is too weak. Check on the car computer, with the engine running: `vcgencmd get_throttled` (`0x0` is fine; `0x1` is undervoltage now, `0x4` throttled now, `0x8` too hot now; the same with `0x10000`, `0x40000`, `0x80000` means since power-up), `vcgencmd measure_temp`, and on a Pi 5 `vcgencmd pmic_read_adc EXT5V_V` (about 5.1 V is good, under 4.8 V is too low). Put the Pi on the charger's main port with nothing else on that charger; if it still says undervoltage, use a 12 V to 5 V 5 A converter (see [What you need](#what-you-need)). For heat: a case with a fan, out of the sun |
 | No sound on the iPhone | Open the app again, because iOS needs that to start the sound. Check the volume and **Settings > Sound** in the app. The app's Logs screen says why each alert did or didn't make a sound |
 | Calibration found no carriers | Your country may not use 390–395 MHz for the base stations, or the antenna isn't connected. Slot17 still runs, using an example calibration |
 | The storage is full | Old recordings are never deleted automatically. Delete old folders in `~/Slot17/captures/` |
+| Bluetooth: **A different car computer answered**, or it never connects | Settings, Bluetooth to the car computer, **Set up again**, with the car computer on and nearby. On the car computer, `bash ~/Slot17/setup.sh doctor` has a Bluetooth line. On Android, allow **Nearby devices** for Slot17, and switch Location on while setting up |
 
 ## Reading a session
 
@@ -425,13 +438,14 @@ You should see `OK` and `"offline_preflight_pass": true`.
 
 | Command | What it covers |
 |---|---|
-| `python -B p0/preflight.py --offline --tests` | The detector: 175 tests. Before every detector start the car computer runs them only if its code changed since they last passed, and in any case every 20th start; otherwise a smoke test of a few seconds (`--tests-if-changed`) |
+| `python -B p0/preflight.py --offline --tests` | The detector: 215 tests. Before every detector start the car computer runs them only if its code changed since they last passed, and in any case every 20th start; otherwise a smoke test of a few seconds (`--tests-if-changed`) |
 | `python -m unittest display/test_hardening.py` | Server and car computer limits |
 | `python -m unittest display/test_app_backend.py` | What the app uses on the server |
 | `python -m unittest display/test_display.py` | Display logic |
 | `python -m unittest scripts/test_scorecard.py` | The scorecard |
 | `python -m unittest scripts/test_modem_link.py` | The 4G stick check, with a pretend stick |
 | `python -m unittest scripts/test_doctor.py` | `setup.sh doctor`, with a pretend machine |
+| `python -m unittest scripts/test_bluetooth_parity.py` | `shared/parity/ble-frames.json` is exactly what the car computer sends over Bluetooth |
 | `python -m unittest display/test_drive_report.py` | The drive report |
 | `python -m unittest display/test_display_browser.py` | The web page in a headless browser; needs `pip install playwright` and `playwright install chromium` |
 | `python display/stress_server.py` | Attacks and load on a local copy of the server |
@@ -455,6 +469,7 @@ Read [SECURITY.md](SECURITY.md) before relying on this. The main points:
 - **The receiver can hang.** An Airspy can stop responding after being started and stopped many times, and then only unplugging it helps. Slot17 therefore never restarts it automatically.
 - **iOS decides when the app runs.** iOS sometimes pauses the app for 5–36 seconds in the background, and can end it, after which it stays silent until you open it again.
 - **CarPlay shows a Live Activity, not an app.** A CarPlay app needs permission from Apple.
+- **Bluetooth needs iOS 18 on an iPhone**, and the car computer is visible to Bluetooth scanners nearby under its name while no phone is connected. If iOS ended the app, it reconnects but beeps again only once the app is opened, as without Bluetooth.
 - **Frequency drift.** A receiver's frequency changes with temperature and age. Ours measured +9.6 and later +4.1 ppm. Detection worked at both settings, but recalibrating now and then does no harm.
 
 ## Repository layout

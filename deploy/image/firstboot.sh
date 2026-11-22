@@ -41,6 +41,12 @@ if [ -n "$S17_HOTSPOT_NAME" ] && [ -n "$S17_HOTSPOT_PASSWORD" ]; then
 else
     args+=(--no-hotspot)
 fi
+# Bluetooth is on unless slot17.txt says no; setup skips it by itself where there is no adapter.
+case "$(printf '%s' "$S17_BLUETOOTH" | tr '[:upper:]' '[:lower:]')" in
+    no|off|false|0) args+=(--no-bluetooth) ;;
+    *) args+=(--bluetooth) ;;
+esac
+if [ -n "$S17_BLUETOOTH_NAME" ]; then args+=(--bluetooth-name "$S17_BLUETOOTH_NAME"); fi
 # Start the detector now only if the receiver is plugged in; it starts at every power-up anyway.
 if lsusb -d 1d50:60a1 >/dev/null 2>&1; then args+=(--start); else args+=(--no-start); fi
 

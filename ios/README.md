@@ -26,11 +26,13 @@ Open the app once before driving, then lock the phone. iOS won't let an app star
 | Sightings | Everything you marked and whether the Pi saved it, plus adding one with a note |
 | Pi | Health, Save a recording, Collect the Pi's logs, Stop the detector and Power off |
 | Logs | Every alert with why it sounded or not and which recognition rule matched, diagnostics, and logs kept on the server |
-| Settings | Private link, sound, levels, warnings, fault messages, the car computer's Pushover switch and demo mode |
+| Settings | Private link, sound, levels, warnings, fault messages, the car computer's Pushover switch, Bluetooth to the car computer and demo mode |
 
 **Fault messages (1.6.0).** Settings, Fault messages: the app can show the faults Pushover sends (detector degraded, receiver hears nothing, detector stopped, and once when all is well again) as its own notifications, and can switch the car computer's Pushover messages off and on. The app's notifications work only while the app runs, as it does with sound armed; Pushover has no such limit. Switching Pushover needs car computer software 1.2.9.
 
 **Without opening the app (1.6.0, iOS 18).** Besides the Home Screen and CarPlay widget, Slot17 offers two controls, *Slot17: saw police* and *Slot17: saw nothing*, for Control Center, the Lock Screen's buttons or the Action button, and Lock Screen widgets with the same taps.
+
+**Bluetooth to the car computer (1.7.0, iOS 18).** Settings, Bluetooth to the car computer: Set up gets the car computer's key through the server and shows iOS's accessory picker (AccessorySetupKit), so there is no Bluetooth permission prompt. Alerts then also come straight from the car computer, and a match that comes both ways plays once. See [BLUETOOTH.md](../docs/design/BLUETOOTH.md).
 
 ## Limits
 

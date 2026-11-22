@@ -14,6 +14,7 @@ import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 import urllib.parse
@@ -845,6 +846,358 @@ class ServerTests(unittest.TestCase):
                 self.assertEqual(p.stat().st_mode & 0o777, 0o600)
             with self.assertRaises(SystemExit):
                 srv.init_config(p)
+
+
+class FakeLinkProcess:
+    """Stands in for p0/bluetooth_link.py's process."""
+
+    def __init__(self, lines=()):
+        self.code = None
+        self.stdout = [json.dumps(x).encode() + b"\n" for x in lines]
+        self.stdin = SimpleNamespace(closed=False)
+        self.stdin.close = lambda: setattr(self.stdin, "closed", True)
+
+    def poll(self):
+        return self.code
+
+    @property
+    def returncode(self):
+        return self.code
+
+    def wait(self, timeout=None):
+        self.code = 0 if self.code is None else self.code
+        return self.code
+
+    def kill(self):
+        self.code = -9
+
+
+class RecordingLink(pub.BluetoothLink):
+    """A BluetoothLink whose writes are recorded; `full` makes the pipe refuse them."""
+
+    def __init__(self, config, processes):
+        super().__init__(root=Path(__file__).resolve().parents[1], config=config, spawn=self._next)
+        self.processes, self.written, self.full = processes, [], False
+
+    def _next(self):
+        if not self.processes:
+            raise OSError("no more processes")
+        return self.processes.pop(0)
+
+    def _write(self, data):
+        if self.full:
+            raise BlockingIOError
+        self.written.append(json.loads(data))
+
+
+class BluetoothLinkTests(unittest.TestCase):
+    """1.4.0: the publisher runs the Bluetooth link while it is switched on, and nothing it does can stop a push."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.config = pub.bluetooth_module()
+        if self.config is None:
+            self.skipTest("p0/bluetooth_config.py is not here (a display-only copy)")
+        self.addCleanup(setattr, self.config, "PATH", self.config.PATH)
+        self.config.PATH = str(self.dir / "slot17-bluetooth.json")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def link(self, *processes, on=True):
+        if on is not None:
+            self.config.save(on=on)
+        return RecordingLink(self.config, list(processes))
+
+    def test_switched_off_it_starts_nothing(self):
+        link = self.link(FakeLinkProcess(), on=False)
+        link.poll(10.0)
+        self.assertFalse(link.running())
+        self.assertEqual(link.state(10.0)["state"], "off")
+        self.assertFalse(link.feed({"matches": []}))
+
+    def test_switched_on_it_starts_once_and_takes_commands(self):
+        link = self.link(FakeLinkProcess(), FakeLinkProcess())
+        link.poll(10.0)
+        link.poll(11.0)
+        self.assertTrue(link.running())
+        self.assertTrue(link.feed({"matches": [{"id": "s/e"}]}))
+        self.assertEqual(link.written, [{"matches": [{"id": "s/e"}]}])
+
+    def test_a_full_pipe_drops_instead_of_waiting(self):
+        link = self.link(FakeLinkProcess())
+        link.poll(10.0)
+        link.full = True
+        self.assertFalse(link.feed({"status": {}}))
+        self.assertEqual(link.dropped, 1)
+        self.assertFalse(link.feed({"x": "y" * pub.BLUETOOTH_LINE_BYTES}))   # too long to be all or nothing
+        self.assertEqual(link.dropped, 2)
+
+    def test_an_ending_link_is_started_again_ever_more_slowly(self):
+        first, second, third = FakeLinkProcess(), FakeLinkProcess(), FakeLinkProcess()
+        link = self.link(first, second, third)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            link.poll(10.0)
+            first.code = 3
+            link.poll(11.0)
+            self.assertFalse(link.running())
+            link.poll(15.9)
+            self.assertFalse(link.running())
+            link.poll(16.1)
+            self.assertTrue(link.running())
+            second.code = 3
+            link.poll(17.0)
+            link.poll(46.0)
+            self.assertFalse(link.running())
+            link.poll(47.1)
+            self.assertTrue(link.running())
+        self.assertIn("starting it again in 5 s", out.getvalue())
+        self.assertIn("starting it again in 30 s", out.getvalue())
+
+    def test_switched_off_from_the_app_it_is_stopped(self):
+        proc = FakeLinkProcess()
+        link = self.link(proc)
+        link.poll(10.0)
+        self.config.save(on=False)
+        link.reload(11.0)
+        self.assertFalse(link.running())
+        self.assertTrue(proc.stdin.closed)
+        self.assertEqual(link.state(11.0), {"on": False, "state": "off", "name": "Slot17", "subscribed": False,
+                                            "frames": 0, "matches": 0,
+                                            "key_id": self.config.public(self.config.load())["key_id"]})
+
+    def test_what_the_link_says_reaches_the_push(self):
+        proc = FakeLinkProcess([{"state": "connected", "since": 100.0, "subscribed": True, "frames": 40,
+                                 "matches": 3, "mtu": 185, "error": None}])
+        link = self.link(proc)
+        link.poll(110.0)
+        link._read(proc)
+        state = link.state(110.0)
+        self.assertEqual((state["state"], state["subscribed"], state["frames"], state["mtu"], state["since_s"]),
+                         ("connected", True, 40, 185, 10.0))
+        self.assertNotIn(self.config.load()["key"].hex(), json.dumps(state))
+
+    def test_no_bluetooth_module_means_no_state(self):
+        link = pub.BluetoothLink()
+        link.config = None              # a display-only install, or a p0 older than 1.4.0
+        link.poll(1.0)
+        self.assertIsNone(link.state(1.0))
+
+
+class BluetoothPublisherTests(unittest.TestCase):
+    """The link gets new matches at once, with the server's fields, and the state at the server's rhythm."""
+
+    class Recorder:
+        def __init__(self, fail=False):
+            self.fed, self.last_feed, self.fail = [], -1e9, fail
+
+        def poll(self, now):
+            if self.fail:
+                raise AssertionError("poll must not be reached when it failed")
+
+        def running(self):
+            return True
+
+        def feed(self, command):
+            self.fed.append(command)
+            return True
+
+        def state(self, now):
+            return {"on": True, "state": "connected", "name": "Slot17", "subscribed": True, "frames": 1, "matches": 0}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.s1 = self.dir / "20260911-100000Z_watch"
+        self.s1.mkdir()
+        (self.s1 / "events.jsonl").write_text("")
+        self.hb = self.dir / "hb.json"
+        self.sent = []
+        self.link = self.Recorder()
+        self.pub = pub.Publisher(send=self.sent.append, heartbeat=self.hb, bluetooth=self.link)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_new_matches_go_out_at_once_with_the_servers_fields(self):
+        heartbeat(self.hb, self.s1)
+        self.pub.step(now_mono=50)
+        with open(self.s1 / "events.jsonl", "a") as fh:
+            fh.write(event(154, "e1", snr=30, mono=50.5, matched_burst={"rule": "weak"}) + "\n")
+        self.pub.step(now_mono=51)
+        sent = [c["matches"] for c in self.link.fed if "matches" in c]
+        server = self.sent[-1]["matches"]
+        self.assertEqual(len(sent), 1)
+        m = sent[0][0]
+        self.assertEqual((m["id"], m["ch"], m["strength_db"], m["rule"]), (server[0]["id"], 154, 30.0, "weak"))
+        self.assertEqual(set(m), {"id", "ch", "strength_db", "age_s", "rule"})
+        self.assertAlmostEqual(m["age_s"], 0.5)
+        self.assertEqual(self.sent[-1]["bluetooth"]["state"], "connected")
+
+    def test_the_state_follows_the_keepalive(self):
+        heartbeat(self.hb, self.s1)
+        self.pub.step(now_mono=50)
+        statuses = [c for c in self.link.fed if "status" in c]
+        self.assertEqual(len(statuses), 1)
+        self.assertEqual(statuses[0]["status"]["state"], "running")
+        self.pub.step(now_mono=50.5)
+        self.assertEqual(len([c for c in self.link.fed if "status" in c]), 1)
+        self.pub.step(now_mono=52.1)
+        self.assertEqual(len([c for c in self.link.fed if "status" in c]), 2)
+
+    def test_a_link_that_cannot_start_never_stops_the_pushes(self):
+        config = pub.bluetooth_module()
+        if config is None:
+            self.skipTest("p0/bluetooth_config.py is not here")
+        self.addCleanup(setattr, config, "PATH", config.PATH)
+        config.PATH = str(self.dir / "slot17-bluetooth.json")
+        config.save(on=True)
+
+        def broken():
+            raise OSError("no such file: bluetooth_link.py")
+        self.pub.bluetooth = pub.BluetoothLink(config=config, spawn=broken)
+        heartbeat(self.hb, self.s1)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertTrue(self.pub.step(now_mono=50))
+        self.assertIn("did not start", out.getvalue())
+        self.assertEqual(self.sent[-1]["bluetooth"]["state"], "starting")
+
+
+class BluetoothOpTests(unittest.TestCase):
+    """The app's Bluetooth switch, name and pairing request, carried out on the car computer."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.config = pub.bluetooth_module()
+        if self.config is None:
+            self.skipTest("p0/bluetooth_config.py is not here (a display-only copy)")
+        self.addCleanup(setattr, self.config, "PATH", self.config.PATH)
+        self.config.PATH = str(Path(self.tmp.name) / "slot17-bluetooth.json")
+        self.pub = pub.Publisher(send=lambda p: None, heartbeat=Path(self.tmp.name) / "hb.json",
+                                 bluetooth=RecordingLink(self.config, [FakeLinkProcess(), FakeLinkProcess()]))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_op(self, **fields):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            pub.run_bluetooth(dict(fields, id="c" * 32), self.pub)
+        ack = self.pub.acks.pop()
+        return ack["state"], ack["detail"], out.getvalue()
+
+    def test_on_then_named_then_off(self):
+        self.assertEqual(self.run_op(on=True)[:2], ("done", "Bluetooth on"))
+        self.assertTrue(self.pub.bluetooth.running())
+        self.assertEqual(self.run_op(name="Car 2")[:2], ("done", "Bluetooth name: Car 2"))
+        self.assertEqual(self.pub.bluetooth.written[-1], {"reload": True})
+        self.assertEqual(self.config.load()["name"], "Car 2")
+        self.assertEqual(self.run_op(on=False)[:2], ("done", "Bluetooth off"))
+        self.assertFalse(self.config.load()["on"])
+        self.assertFalse(self.pub.bluetooth.running())
+
+    def test_a_bad_name_is_refused_and_changes_nothing(self):
+        self.run_op(on=True)
+        state, detail, _ = self.run_op(name="a;b")
+        self.assertEqual(state, "failed")
+        self.assertIn("not a usable name", detail)
+        self.assertEqual(self.config.load()["name"], "Slot17")
+
+    def test_the_key_goes_only_to_a_pairing_request_and_never_into_the_log(self):
+        self.assertEqual(self.run_op(pair=True)[:2], ("failed", "Bluetooth is switched off on the car computer"))
+        self.run_op(on=True)
+        state, detail, log = self.run_op(pair=True)
+        key = self.config.load()["key"].hex()
+        self.assertEqual((state, detail), ("done", "key:" + key))
+        self.assertNotIn(key, log)
+
+    def test_an_unknown_request_and_a_car_computer_without_bluetooth(self):
+        self.assertEqual(self.run_op(scan=True)[0], "failed")
+        self.pub.bluetooth = None
+        self.assertEqual(self.run_op(on=True)[:2], ("failed", "Bluetooth is not available on this car computer"))
+
+
+class PusherTests(unittest.TestCase):
+    """A server that does not answer never holds up reading new matches, nor the Bluetooth link that needs them."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.s1 = self.dir / "20260911-100000Z_watch"
+        self.s1.mkdir()
+        (self.s1 / "events.jsonl").write_text("")
+        self.hb = self.dir / "hb.json"
+        self.release, self.failing, self.sent = threading.Event(), False, []
+        self.link = BluetoothPublisherTests.Recorder()
+        self.pub = pub.Publisher(send=self.slow_send, heartbeat=self.hb, bluetooth=self.link)
+        self.pub.pusher = pub.Pusher(self.slow_send)
+
+    def tearDown(self):
+        self.release.set()
+        self.tmp.cleanup()
+
+    def slow_send(self, payload):
+        """A server that answers only when the test lets it, as one does whose 4G has no service."""
+        self.release.wait(10)
+        if self.failing:
+            raise OSError("no route to host")
+        self.sent.append(payload)
+
+    def test_matches_reach_bluetooth_while_a_push_hangs(self):
+        heartbeat(self.hb, self.s1)
+        self.assertTrue(self.pub.step(now_mono=50))            # handed over; it hangs
+        with open(self.s1 / "events.jsonl", "a") as fh:
+            fh.write(event(154, "e1", snr=30, mono=50.8) + "\n")
+        started = time.monotonic()
+        self.assertFalse(self.pub.step(now_mono=51))           # still one in flight: not sent, but not waited for
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertEqual([m["ch"] for c in self.link.fed if "matches" in c for m in c["matches"]], [154])
+        self.release.set()
+        self.assertTrue(self.pub.pusher.wait(5))
+        self.pub.step(now_mono=51.2)                           # settles the first, hands over the next
+        self.assertTrue(self.pub.pusher.wait(5))
+        self.pub.step(now_mono=51.4)
+        self.assertEqual([m["ch"] for m in self.sent[-1]["matches"]], [154])
+        self.assertEqual(list(self.pub.pending), [])           # delivered, so no longer waiting
+        self.assertEqual(self.pub.failures, 0)
+
+    def test_a_failed_push_is_counted_when_it_comes_back(self):
+        self.failing = True
+        self.release.set()
+        heartbeat(self.hb, self.s1)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.pub.step(now_mono=50)
+            self.assertTrue(self.pub.pusher.wait(5))
+            self.pub.step(now_mono=50.1)
+        self.assertEqual(self.pub.failures, 1)
+        self.assertIn("push failed (1x): OSError", out.getvalue())
+
+    def test_power_off_waits_for_the_push_in_flight_and_reports_first(self):
+        from types import SimpleNamespace
+        heartbeat(self.hb, self.s1)
+        self.pub.step(now_mono=50)                             # one in flight
+        threading.Timer(0.3, self.release.set).start()
+        ran = pub.run_poweroff({"id": "c" * 32, "age_s": 1.0}, self.pub,
+                               runner=lambda cmd: SimpleNamespace(returncode=0, stdout="", stderr=""))
+        self.assertFalse(ran)
+        self.assertEqual(self.sent[-1]["acks"], [{"id": "c" * 32, "state": "done", "detail": "Powering off"}])
+
+    def test_the_sender_takes_one_push_at_a_time(self):
+        sender = pub.Sender("http://example.invalid/api/push", "t" * 43)
+        inside, most = [0], [0]
+
+        def exchange(payload):
+            inside[0] += 1
+            most[0] = max(most[0], inside[0])
+            time.sleep(0.05)
+            inside[0] -= 1
+        sender._send = exchange
+        threads = [threading.Thread(target=sender, args=({},)) for _ in range(4)]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+        self.assertEqual(most[0], 1)
 
 
 if __name__ == "__main__":

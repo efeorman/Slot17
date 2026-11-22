@@ -35,6 +35,11 @@ class LinkService : Service() {
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
         }
+        // Android 14 asks for a type per kind of work; this one needs Nearby devices allowed (BLUETOOTH_CONNECT).
+        if (Build.VERSION.SDK_INT >= 31 && model.bluetooth.paired &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+            type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+        }
         val notification = LiveNotification.build(this, model.liveNotice())
         if (Build.VERSION.SDK_INT >= 29) startForeground(Notices.LIVE_ID, notification, type)
         else startForeground(Notices.LIVE_ID, notification)

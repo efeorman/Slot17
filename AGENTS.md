@@ -6,7 +6,9 @@ map; this file is the short version, for any coding assistant working in this re
 
 ## Hard rules
 
-1. **Receive-only.** Never add a transmit path, decryption, decoding of content, or interception.
+1. **Receive-only.** Never add a transmit path, decryption, decoding of content, or interception. This is
+   about the radio band Slot17 listens to: the car computer's own data links to the app and the server (Wi-Fi,
+   4G, Bluetooth since 1.4.0) never transmit there.
 2. **Honest claims.** A match means a public TETRA training pattern was recognised. Code, text and UI must
    never claim police, identity, distance or direction from a signal.
 3. **One receiver session.** Never write code or instructions that start, stop or reopen the Airspy
@@ -25,7 +27,7 @@ map; this file is the short version, for any coding assistant working in this re
 pip install -r requirements-dev.txt
 python -B p0/preflight.py --offline --tests      # detector tests; must end with "offline_preflight_pass": true
 python -m unittest display/test_hardening.py display/test_app_backend.py display/test_display.py display/test_drive_report.py
-python -m unittest scripts/test_doctor.py scripts/test_modem_link.py scripts/test_scorecard.py
+python -m unittest scripts/test_doctor.py scripts/test_modem_link.py scripts/test_scorecard.py scripts/test_bluetooth_parity.py
 ruff check p0 display deploy tests scripts       # must report no findings
 ```
 
@@ -39,7 +41,9 @@ bundle app changes into one run.
   recordings, with false-match controls (time-reversed snippets, generated signals without the training
   word). Record what failed as well as what worked in `docs/CHANGELOG.md`.
 - **The API** between car computer, server and app: change `display/display_publisher.py`,
-  `display/server.py` and `ios/Slot17/Core/Protocol.swift` together. The server accepts only whitelisted
+  `display/server.py` and `ios/Slot17/Core/Protocol.swift` together. The Bluetooth frames
+  (`p0/bluetooth_frames.py`, docs/design/BLUETOOTH.md) change with both apps' `Bluetooth` decoders and a
+  regenerated `shared/parity/ble-frames.json`. The server accepts only whitelisted
   fields; the app ignores unknown ones; a new operation is sent only to a car computer that lists it in
   its features, so older ones keep working.
 - **Add a test that fails without your change.**

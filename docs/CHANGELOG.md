@@ -2,6 +2,52 @@
 
 What changed, why, and what was tried and left out. Newest first. Figures come from our own car, receiver and drives; yours will differ.
 
+## 1.4.0, iPhone app 1.7.0 and Android app 1.9.0: Bluetooth to the app (22 November 2026, not released yet)
+
+Alerts and the detector's state now also go straight from the car computer to the apps over Bluetooth Low Energy, besides the display server: faster, and they keep coming where there is no internet. The detector's recognition is unchanged. [BLUETOOTH.md](design/BLUETOOTH.md) describes it.
+
+- **Why:** pushes to the server took 0.18 to 0.28 s in a typical minute, 2.8 s or more in 1 minute of 10 and up to 6.7 s; with the 4G stick out of service nothing reached the phone for minutes (3.5 at the Elten border, 8 on the first drive with the stick).
+- **Measured before building**, a PC against our car computer, at −54 to −65 dBm:
+  - Found in 0.20 s, connected in 0.92 s, MTU 517.
+  - 0 of 161 frames lost; 180-byte frames arrived whole.
+  - Round trip median 79 ms. Advertising again 0.05 s after a disconnect.
+  - At −84 to −90 dBm (another room) the PC saw the car computer but could not connect.
+- **The real code on the car computer**, from a scratch folder, checked from the PC with the real decoder:
+  - 82 frames in 35 s, none refused for its signature or as a replay, every match key right.
+  - Renamed and switched off from the settings while running.
+  - The detector's drop counter stayed at its start-up value.
+- **Car computer.**
+  - `p0/bluetooth_frames.py` (signed frames), `bluetooth_config.py` (the switch, the name and the key), `bluetooth_bluez.py` (BlueZ over D-Bus) and `bluetooth_link.py` (the link's own process).
+  - The publisher runs that process while Bluetooth is on, feeds it through a pipe that never blocks, and starts it again ever more slowly if it ends. No new packages: `python3-dbus` and `python3-gi` come with Raspberry Pi OS and Debian 13, and BlueZ lets the normal user register.
+  - BlueZ takes a new adapter name a moment after the call returns; `adapter --name` now waits for it (found on the car computer).
+- **Pushes on their own thread** (`Pusher`). A server that doesn't answer could take one push several seconds (2.5 s for each network the publisher tries), and the publisher read no new matches meanwhile. Harmless before, but it would have held up Bluetooth in exactly the outages it is for. Now the main loop keeps reading and feeding Bluetooth; a push that comes due meanwhile goes out the moment the stuck one is back; power off and stop still wait for theirs. Found when asked whether the retries slow anything down.
+- **Setup.** `setup.sh car` asks "Send alerts over Bluetooth too?", yes by default, and for the name, `Slot17` by default. `--bluetooth`, `--no-bluetooth`, `--bluetooth-name`; `bluetooth=` and `bluetooth_name=` in the image's `slot17.txt`. Skipped without an adapter or a display server. The doctor has a Bluetooth line.
+- **The app's switches**, through the server like the Pushover switch: Bluetooth on the car computer, Rename, and the pairing request that gives a linked app the key. The key never travels over Bluetooth or in a state; a state names it by `key_id`.
+- **Off and Rename over Bluetooth too**, with the phone connected: a signed control frame written to the car computer, which answers with a reply frame. It names a frame the car computer sent in its last 300, and each works once, so a recorded command cannot be played back. Switching on still goes through the server, because a link that is off hears nothing.
+- **One match, one sound.** Both apps remember matches by an 8-byte key, the start of SHA-256 of the match id, which the car computer also sends. A match that comes both ways plays once, and an alert first heard over Bluetooth takes the server's id when it arrives. A match over Bluetooth carries the same fields as through the server.
+- **iPhone (iOS 18):** AccessorySetupKit and Core Bluetooth with state restoration; from iOS 26 that is what lets iOS relaunch the app for Bluetooth (Apple TN3115). **Android:** companion device pairing, `autoConnect` GATT, the `connectedDevice` service type.
+- **Left out, for now:** Bluetooth without a server for the first set-up, other controls over Bluetooth (stop, power off, sightings), Android starting the app when the car computer appears.
+- **A support package**, `bash setup.sh logs` (`p0/support.py`, [SUPPORT.md](operations/SUPPORT.md)): one zip for someone who helps, starting with a plain `REPORT.txt` (the setup check, then per drive its corrected start, length, matches, faults, samples dropped after the start, interference). Three choices:
+  - **Quick check:** under 1 MB.
+  - **One drive:** without the per-candidate lines, optionally only minutes A to B after its start.
+  - **Everything from a drive:** recordings on request.
+
+  Keys, tokens and passwords never go in. It runs at the lowest priority in small steps, and records the dropped samples before and after. The app card and sending it to the team come in the next release.
+- **Tests:**
+  - Detector: 215 (40 new, `tests/test_bluetooth.py` and `tests/test_support.py`).
+  - Server and publisher: 22 new.
+  - Setup: 4 new in `scripts/test_doctor.py`, 2 in `scripts/test_bluetooth_parity.py`.
+  - Android core: 11 new, run here with the real Kotlin compiler.
+  - iPhone: 11 new, run in the cloud build.
+  - The Android and iPhone apps themselves are compiled only in the cloud build; not yet tried on a phone.
+
+## Unreleased: where to buy, and the car charger advice (19 November 2026)
+
+Documents and website only; the software is unchanged.
+
+- **Where to buy** (`slot17.cloud/parts/`, in all 8 languages, in the menu and the footer): a page of the site itself, in its own look. It shows **one country**: the one this browser's time zone or language points to (worked out in the browser; nothing is sent anywhere for it), or the one chosen, which is kept and goes in the address (`#de`). Per part (Raspberry Pi 5, Airspy Mini, antenna, car charger, case, SSD, optional 4G stick) the shops for that country with **price**, stock, delivery time, where they send from, and which are an approved Raspberry Pi reseller, an official Airspy dealer or what we use. The cheapest priced offer from the country itself is ticked first; tick another and the **total** follows. Parts without a price there, and prices in another currency, are named and left out of the total. Outside the EU (United Kingdom, Norway) it warns about import VAT and customs. Prices and links are a snapshot of 19 November 2026 (`website/src/parts/data.ts`, from a web check of each product page; we could not open the shops' pages ourselves). No affiliate links. The first version of that evening, a separate `parts.html` in plain HTML listing every country at once without prices, forwards to the new address.
+- **Car charger advice corrected.** The documents said a car charger must give 5 V at 5 A. Our own car runs on a UGREEN Nexode 60 W (EC602), which gives 3 A at 5 V, and showed no undervoltage once during the drive of 19 November (`throttled=0x0` in all 13 uploads). The README, BUILD.md, the FAQ and the website now name that charger, explain that bigger car chargers don't give the Pi more (their extra watts are at 9 to 20 V), and give the fix for a setup that does draw more: a 12 V to 5 V 5 A converter with `PSU_MAX_CURRENT=5000`. The README's troubleshooting row now says how to read `vcgencmd get_throttled`, the temperature and the Pi 5's input voltage.
+
 ## 1.3.1, iPhone app 1.6.2 and Android app 1.8.0 (19 November 2026)
 
 The detector's recognition is unchanged. This release is about getting started without knowing Linux.

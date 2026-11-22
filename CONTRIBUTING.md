@@ -2,7 +2,7 @@
 
 ## Rules that do not change
 
-1. **Receive-only.** There's no transmit path, and no decryption or interception.
+1. **Receive-only.** There's no transmit path, and no decryption or interception. This is about the band Slot17 listens to; the car computer's own links to the app and the server (Wi-Fi, 4G, Bluetooth since 1.4.0) never transmit there.
 2. **Honest claims.** A match means a public TETRA training pattern was recognised. Never claim distance, identity or "police" from a signal.
 3. **One Airspy session at a time.** This board has hung after stop/start cycles and warm reboots, and only removing power clears that. Don't cycle it for diagnostics, don't reboot the Pi with it attached, and never reopen it automatically. The display can stop the detector and can never start it.
 4. **Keep the evidence.** Don't overwrite captures or logs. Keep source and configuration hashes with each session.
@@ -35,6 +35,8 @@ A channel can carry several radios. Timing and signal trend can't establish iden
 | `p0/notify.py`, `p0/outbox.py` | Notifications that expire and retry; credentials are never stored in the queue |
 | `p0/status.py`, `p0/preflight.py`, `p0/version.py` | Readiness, offline checks and source hashes |
 | `p0/supervise.py` | Runs one detector and reports its failures |
+| `p0/support.py` | `bash setup.sh logs`: the support package, one zip for someone who helps ([SUPPORT.md](docs/operations/SUPPORT.md)) |
+| `p0/bluetooth_*.py` | The Bluetooth link to the apps: its frames, settings, BlueZ peripheral and own process ([BLUETOOTH.md](docs/design/BLUETOOTH.md)) |
 | `display/server.py` | Display server and the app's API |
 | `display/display_publisher.py` | Sends the Pi's state out, and carries commands back |
 | `ios/Slot17/` | The app |

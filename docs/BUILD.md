@@ -10,7 +10,9 @@ From a box of parts to a car computer that beeps on the first drive. It takes an
 - Storage: an NVMe SSD in that case, or a good microSD card of 128 GB or more.
 - Airspy Mini and its USB cable.
 - An antenna for 380 to 400 MHz, plus an adapter to SMA if its plug is different.
-- A USB-C car charger that gives **5 V at 5 A**, and a short, thick USB-C cable.
+- A good USB-C car charger. We use the [UGREEN Nexode 60 W (EC602)](https://www.amazon.nl/dp/B0DSBSBSGW), with the Pi on its built-in cable; see [Power](#5-power).
+
+Where to buy each part in your country, with prices and a total: [slot17.cloud/parts/](https://slot17.cloud/parts/).
 - Optional: a 4G USB stick with its own SIM, and a few clip-on ferrites (the "noise caps" for cables).
 
 ![The parts laid out](images/build/01-parts.png)
@@ -48,7 +50,8 @@ Prefer to do it by hand? The [README](../README.md#step-1-prepare-the-car-comput
 
 - Use a socket that **switches off with the ignition**. Slot17 is made for its power being cut: it starts by itself every time it gets power, and cutting it is safe ([POWER-LOSS.md](operations/POWER-LOSS.md)).
 - A socket that stays on drains the car battery: the Pi keeps running.
-- The charger must give 5 V at 5 A. A weak charger or a thin cable gives undervoltage; the app's Pi screen and `setup.sh doctor` report it.
+- Our charger, the UGREEN Nexode 60 W, gives 3 A at 5 V. That was enough for our Pi with the Airspy, an SSD and a 4G stick. Put the Pi on its built-in cable and nothing else on the same charger.
+- A weak charger or a thin cable gives undervoltage; the app's Pi screen and `setup.sh doctor` report it. If yours does, your setup needs more than 3 A: use a 12 V to 5 V converter rated for 5 A and add `PSU_MAX_CURRENT=5000` with `sudo rpi-eeprom-config --edit` ([README](../README.md#what-you-need)).
 
 ![The charger and the cable route](images/build/04-power.png)
 

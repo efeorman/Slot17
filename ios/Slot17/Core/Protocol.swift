@@ -37,9 +37,11 @@ struct PiState: Decodable {
     var software: String? = nil
     /// The car computer's own setup check (1.3.1 and later); the server keeps the last one between pushes.
     var doctor: DoctorReport? = nil
+    /// The car computer's Bluetooth link to the apps (1.4.0 and later).
+    var bluetooth: BluetoothState? = nil
 
     enum CodingKeys: String, CodingKey {
-        case source, session, detector, channels, matches, features, pi, update, link, notify, software, doctor
+        case source, session, detector, channels, matches, features, pi, update, link, notify, software, doctor, bluetooth
         case snapshotAge = "snapshot_age_s"
     }
 }
@@ -114,6 +116,8 @@ struct MatchRow: Decodable {
     /// How the training word was recognised: "standard", "weak" or "coherent" (1.2.9 and later).
     /// A record of how, not of how close, and never of who.
     var rule: String? = nil
+    /// The key the car computer gave this match over Bluetooth; never from or to the server (see MatchKey).
+    var key: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, ch, call, rising, rule
@@ -198,6 +202,42 @@ enum SignalWords {
 struct NotifySwitch: Decodable, Equatable {
     var pushover: Bool
     var configured: Bool?
+}
+
+/// The car computer's Bluetooth link, as its publisher reports it (1.4.0 and later): the switch, the name phones
+/// show, and how the link is doing. `keyID` names the key the frames are signed with; the key itself never
+/// travels in a state.
+struct BluetoothState: Decodable, Equatable {
+    var on: Bool
+    var state: String
+    var name: String?
+    var keyID: String?
+    var subscribed: Bool
+    var frames: Int?
+    var matches: Int?
+    var mtu: Int?
+    var since: Double?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case on, state, name, subscribed, frames, matches, mtu, error
+        case keyID = "key_id"
+        case since = "since_s"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        on = try c.decode(Bool.self, forKey: .on)
+        state = try c.decodeIfPresent(String.self, forKey: .state) ?? "off"
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        keyID = try c.decodeIfPresent(String.self, forKey: .keyID)
+        subscribed = try c.decodeIfPresent(Bool.self, forKey: .subscribed) ?? false
+        frames = try c.decodeIfPresent(Int.self, forKey: .frames)
+        matches = try c.decodeIfPresent(Int.self, forKey: .matches)
+        mtu = try c.decodeIfPresent(Int.self, forKey: .mtu)
+        since = try c.decodeIfPresent(Double.self, forKey: .since)
+        error = try c.decodeIfPresent(String.self, forKey: .error)
+    }
 }
 
 struct PiHealth: Decodable {

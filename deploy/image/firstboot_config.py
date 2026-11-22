@@ -14,7 +14,7 @@ import shlex
 import sys
 from pathlib import Path
 
-KEYS = ("server", "car_key", "hotspot_name", "hotspot_password")
+KEYS = ("server", "car_key", "hotspot_name", "hotspot_password", "bluetooth", "bluetooth_name")
 SECRETS = ("car_key", "hotspot_password")
 
 

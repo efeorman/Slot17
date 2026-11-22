@@ -6,8 +6,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.6.2"
-    CURRENT_PROJECT_VERSION: "20"
+    MARKETING_VERSION: "1.7.0"
+    CURRENT_PROJECT_VERSION: "21"
     TARGETED_DEVICE_FAMILY: "1"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -24,6 +24,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: nl.slot17.app
         GENERATE_INFOPLIST_FILE: NO
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) SLOT17_APP"
+        # AccessorySetupKit (the Bluetooth set-up) exists from iOS 18; weak, so the app still starts on 16 and 17.
+        OTHER_LDFLAGS: ["$(inherited)", "-weak_framework", "AccessorySetupKit"]
         # The App Group lets the widget show the last sighting. A signing that drops it only loses that.
         CODE_SIGN_ENTITLEMENTS: Slot17/Slot17.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -31,12 +33,17 @@ targets:
       path: Slot17/Info.plist
       properties:
         CFBundleDisplayName: Slot17
-        CFBundleShortVersionString: "1.6.1"
-        CFBundleVersion: "19"
+        CFBundleShortVersionString: "1.7.0"
+        CFBundleVersion: "21"
         NSSupportsLiveActivities: true
         UILaunchScreen:
           UIColorName: LaunchBackground
-        UIBackgroundModes: [audio, location]
+        UIBackgroundModes: [audio, location, bluetooth-central]
+        NSBluetoothAlwaysUsageDescription: "Slot17 gets alerts straight from your car computer over Bluetooth, besides the server, so they are faster and keep coming without internet."
+        # iOS 18: the system picker gives the app only the car computer, and from iOS 26 it is what lets iOS
+        # relaunch the app for a Bluetooth event (Apple TN3115). The UUID is p0/bluetooth_frames.py's service.
+        NSAccessorySetupKitSupports: [Bluetooth]
+        NSAccessorySetupBluetoothServices: ["F9CB0001-AA93-4349-A576-0E70A736266F"]
         NSLocationWhenInUseUsageDescription: "Slot17 records where alerts and sightings happen, so you can later see which roads and distances they come with. It stays on your phone and your own server, and never changes when a sound plays."
         UIRequiresFullScreen: true
         UISupportedInterfaceOrientations:
@@ -63,8 +70,8 @@ targets:
       path: Slot17Live/Info.plist
       properties:
         CFBundleDisplayName: Slot17
-        CFBundleShortVersionString: "1.6.1"
-        CFBundleVersion: "19"
+        CFBundleShortVersionString: "1.7.0"
+        CFBundleVersion: "21"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
   Slot17Tests:

@@ -25,6 +25,7 @@ HEARTBEAT = Path("/run/tetra/watch.heartbeat")
 DISPLAY_CONFIG = HOME / ".config/slot17-display.json"
 PUSHOVER_CONFIG = HOME / ".config/tetra-pushover.json"
 PUSHOVER_SWITCH = HOME / ".config/slot17-notify.json"
+BLUETOOTH_SETTINGS = HOME / ".config/slot17-bluetooth.json"
 RELEASE_KEY = HOME / ".config/slot17-release-key.pub"
 SERVICE_FILE = Path("/etc/systemd/system/tetra-detector.service")
 SERVER_CONFIG = Path("/opt/slot17-display/config.json")
@@ -185,6 +186,25 @@ def check_clock(p):
                             "of its own); folder names of this session may be wrong")]
 
 
+def check_bluetooth(p):
+    """The Bluetooth link to the app: switched on here, and an adapter that is powered."""
+    settings = _json(p.read(BLUETOOTH_SETTINGS))
+    if not settings or settings.get("on") is not True:
+        return [("Bluetooth", NOTE, "off (optional: alerts straight to the app, besides the server). "
+                                    "bash setup.sh car --bluetooth, or the app's Pi screen, switches it on")]
+    name = settings.get("name") if isinstance(settings.get("name"), str) else "Slot17"
+    status, out = p.run(sys.executable, "-B", str(ROOT / "p0/bluetooth_link.py"), "adapter", timeout=10)
+    adapter = _json(out.splitlines()[-1] if out else "")
+    if adapter is None or adapter.get("present") is None:
+        why = (adapter or {}).get("error") or "BlueZ did not answer"
+        return [("Bluetooth", PROBLEM, f"on, but Bluetooth cannot be used: {why}. Is bluetooth.service running?")]
+    if not adapter.get("present"):
+        return [("Bluetooth", PROBLEM, "on, but this computer has no Bluetooth adapter that can advertise")]
+    if not adapter.get("powered"):
+        return [("Bluetooth", PROBLEM, "on, but the adapter is switched off (bluetoothctl power on)")]
+    return [("Bluetooth", OK, f"on, shown as {name}")]
+
+
 def check_power(p):
     status, out = p.run("vcgencmd", "get_throttled")
     if status != 0 or "=" not in out:
@@ -258,7 +278,7 @@ def diagnose(p, role):
         return check_server(p)
     out = []
     for check in (check_python, check_receiver, check_service, check_heartbeat, check_network, check_clock,
-                  check_display, check_power, check_disk, check_settings):
+                  check_display, check_bluetooth, check_power, check_disk, check_settings):
         try:
             out += check(p)
         except Exception as exc:              # noqa: BLE001 - one broken check must not hide the others

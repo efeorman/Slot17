@@ -11,6 +11,11 @@ car_key=
 hotspot_name=
 hotspot_password=
 #
+# Bluetooth to your phone: the app also gets alerts straight from the car computer, faster, and where
+# there is no internet. yes or no, and the name phones show (up to 20 letters, digits, spaces, . - _).
+bluetooth=yes
+bluetooth_name=Slot17
+#
 # At the first start the car computer reads this, sets itself up (about 5 minutes) and then removes the
 # key and the password from this card. If something goes wrong, the reason is in slot17-setup.log,
 # next to this file. You can fill in what's missing and start the car computer again.

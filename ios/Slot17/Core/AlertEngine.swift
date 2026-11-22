@@ -175,11 +175,13 @@ final class AlertEngine {
     private static let seenLimit = 400
     private static let waitingLimit = 20
 
+    /// A match not yet decided. `receivedAt` is set for one that came over Bluetooth: its age counts from then.
     struct Waiting {
         let match: MatchRow
         let frame: Frame?
         let channels: [ChannelRow]
         let scope: String?
+        var receivedAt: Double? = nil
     }
 
     /// Everything the rule depends on at this moment.
@@ -216,10 +218,11 @@ final class AlertEngine {
 
     func clearWaiting() { waiting.removeAll() }
 
-    func ingest(_ matches: [MatchRow], frame: Frame?, channels: [ChannelRow], scope: String?) {
-        for match in matches where !seen.contains(match.id) {
-            remember(match.id)
-            waiting.append(Waiting(match: match, frame: frame, channels: channels, scope: scope))
+    /// Takes new matches. Each is remembered by its MatchKey, so one that comes by both routes plays once.
+    func ingest(_ matches: [MatchRow], frame: Frame?, channels: [ChannelRow], scope: String?, receivedAt: Double? = nil) {
+        for match in matches where !seen.contains(MatchKey.of(match)) {
+            remember(MatchKey.of(match))
+            waiting.append(Waiting(match: match, frame: frame, channels: channels, scope: scope, receivedAt: receivedAt))
             if waiting.count > Self.waitingLimit { waiting.removeFirst() }
         }
     }

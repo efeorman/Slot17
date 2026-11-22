@@ -5,6 +5,7 @@ import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.json.Json
 
 /** Unknown fields are ignored and optional ones may be missing, so an older Pi publisher keeps working. */
@@ -50,6 +51,8 @@ data class PiState(
     val software: String? = null,
     /** The car computer's own setup check (1.3.1 and later); the server keeps the last one between pushes. */
     val doctor: DoctorReport? = null,
+    /** The car computer's Bluetooth link to the apps (1.4.0 and later). */
+    val bluetooth: BluetoothState? = null,
 )
 
 @Serializable
@@ -99,6 +102,8 @@ data class MatchRow(
     val rising: Boolean? = null,
     /** How the training word was recognised: "standard", "weak" or "coherent". Never who. */
     val rule: String? = null,
+    /** The key the car computer gave this match over Bluetooth; never from or to the server (see MatchKey). */
+    @Transient val key: String? = null,
 )
 
 /** What the car computer's reports travel over. Every field optional. */
@@ -166,6 +171,25 @@ object SignalWords {
 /** The car computer's Pushover switch. `configured` is false where Pushover was never set up. */
 @Serializable
 data class NotifySwitch(val pushover: Boolean, val configured: Boolean? = null)
+
+/**
+ * The car computer's Bluetooth link, as its publisher reports it (1.4.0 and later): the switch, the name phones
+ * show, and how the link is doing. `keyId` names the key the frames are signed with; the key itself never
+ * travels in a state.
+ */
+@Serializable
+data class BluetoothState(
+    val on: Boolean,
+    val state: String = "off",
+    val name: String? = null,
+    @SerialName("key_id") val keyId: String? = null,
+    val subscribed: Boolean = false,
+    val frames: Long? = null,
+    val matches: Long? = null,
+    val mtu: Int? = null,
+    @SerialName("since_s") val since: Double? = null,
+    val error: String? = null,
+)
 
 @Serializable
 data class PiHealth(

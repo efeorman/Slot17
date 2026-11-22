@@ -126,28 +126,31 @@ enum JSONStore {
 }
 
 /// The private link is a secret, so it lives in the Keychain and never in the app's files or
-/// settings. Readable after the first unlock, because the app runs with the phone locked.
+/// settings. Readable after the first unlock, because the app runs with the phone locked. The car
+/// computer's Bluetooth key (1.4.0) is kept the same way, under its own account.
 enum Keychain {
-    private static let account = "slot17-private-link"
-    private static var query: [String: Any] {
+    static let linkAccount = "slot17-private-link"
+    static let bluetoothAccount = "slot17-bluetooth-key"
+
+    private static func query(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: account]
     }
 
-    static func save(_ link: String) -> Bool {
-        let values: [String: Any] = [kSecValueData as String: Data(link.utf8),
+    static func save(_ value: String, account: String = linkAccount) -> Bool {
+        let values: [String: Any] = [kSecValueData as String: Data(value.utf8),
                                      kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock]
-        let updated = SecItemUpdate(query as CFDictionary, values as CFDictionary)
+        let updated = SecItemUpdate(query(account) as CFDictionary, values as CFDictionary)
         if updated != errSecItemNotFound { return updated == errSecSuccess }
-        return SecItemAdd(query.merging(values) { $1 } as CFDictionary, nil) == errSecSuccess
+        return SecItemAdd(query(account).merging(values) { $1 } as CFDictionary, nil) == errSecSuccess
     }
 
-    static func load() -> String? {
-        var request = query
+    static func load(account: String = linkAccount) -> String? {
+        var request = query(account)
         request[kSecReturnData as String] = true
         var out: AnyObject?
         guard SecItemCopyMatching(request as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    static func delete() { SecItemDelete(query as CFDictionary) }
+    static func delete(account: String = linkAccount) { SecItemDelete(query(account) as CFDictionary) }
 }

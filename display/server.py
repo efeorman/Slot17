@@ -114,7 +114,8 @@ class AppConfig:
 # its moment must never fire at the start of some later drive; a sighting stays
 # useful, and the phone keeps its own copy until it hears the Pi saved it.
 # A Pushover switch made while the car is off waits for the next drive, like a sighting.
-OP_TTL_S = {"poweroff": 30.0, "logs": 120.0, "mark": 86400.0, "notify": 86400.0, "doctor": 120.0}
+OP_TTL_S = {"poweroff": 30.0, "logs": 120.0, "mark": 86400.0, "notify": 86400.0, "doctor": 120.0,
+            "bluetooth": 86400.0}
 STOP_TTL_S = 60.0
 OP_RESEND_S = 30.0          # a sighting the Pi took but never answered is offered again
 MAX_OPS = 64
@@ -492,6 +493,11 @@ def clean_state(p):
         out["software"] = p["software"]
     if isinstance(p.get("notify"), dict) and isinstance(p["notify"].get("pushover"), bool):
         out["notify"] = {"pushover": p["notify"]["pushover"], "configured": p["notify"].get("configured") is True}
+    if "bluetooth" in p:
+        try:
+            out["bluetooth"] = clean_bluetooth(p["bluetooth"])
+        except ValueError:
+            pass                                # an odd detail never refuses the push it came with
     if "doctor" in p:
         try:
             out["doctor"] = clean_doctor(p["doctor"])
@@ -508,6 +514,37 @@ def clean_state(p):
 
 LINK_KINDS = {"cable", "4G stick", "Wi-Fi", "none"}
 DOCTOR_LEVELS = {"ok", "note", "PROBLEM"}
+BLUETOOTH_STATES = {"off", "starting", "advertising", "connected", "error", "unavailable"}
+# The same rule as p0/bluetooth_config.py: what every phone shows the same way.
+BLUETOOTH_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,19}")
+KEY_ID = re.compile(r"[0-9a-f]{8}")
+
+
+def clean_bluetooth(b):
+    """The car computer's Bluetooth link (1.4.0): its switch, its name and how it is doing; bounded."""
+    if not isinstance(b, dict) or not isinstance(b.get("on"), bool):
+        raise ValueError
+    out = {"on": b["on"], "state": b["state"] if b.get("state") in BLUETOOTH_STATES else "off",
+           "subscribed": b.get("subscribed") is True}
+    name = b.get("name")
+    if isinstance(name, str) and BLUETOOTH_NAME.fullmatch(name) and name == name.strip():
+        out["name"] = name
+    if isinstance(b.get("key_id"), str) and KEY_ID.fullmatch(b["key_id"]):
+        out["key_id"] = b["key_id"]
+    for key, lo, hi in (("frames", 0, 10**12), ("matches", 0, 10**12), ("mtu", 23, 517)):
+        if b.get(key) is not None:
+            try:
+                out[key] = _int(b[key], lo, hi)
+            except (ValueError, TypeError):
+                pass
+    if b.get("since_s") is not None:
+        try:
+            out["since_s"] = _num(b["since_s"], 0, 1e9, 1)
+        except (ValueError, TypeError):
+            pass
+    if isinstance(b.get("error"), str) and b["error"]:
+        out["error"] = b["error"][:120]
+    return out
 
 
 def clean_doctor(d):
@@ -590,6 +627,19 @@ def clean_op(wanted):
         if not isinstance(wanted.get("pushover"), bool):
             raise ValueError
         payload = {"pushover": wanted["pushover"]}
+    elif wanted["kind"] == "bluetooth":
+        # Exactly one of: the switch, a new name, or the app asking for the link's key.
+        asked = [k for k in ("on", "name", "pair") if k in wanted]
+        if len(asked) != 1:
+            raise ValueError
+        if asked == ["on"] and isinstance(wanted["on"], bool):
+            payload = {"on": wanted["on"]}
+        elif asked == ["name"] and isinstance(wanted["name"], str) and BLUETOOTH_NAME.fullmatch(wanted["name"])                 and wanted["name"] == wanted["name"].strip():
+            payload = {"name": wanted["name"]}
+        elif asked == ["pair"] and wanted["pair"] is True:
+            payload = {"pair": True}
+        else:
+            raise ValueError
     return wanted["kind"], op_id, payload
 
 

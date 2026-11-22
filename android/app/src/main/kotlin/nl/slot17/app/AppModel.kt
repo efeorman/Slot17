@@ -36,6 +36,8 @@ import nl.slot17.core.HeadlineStatus
 import nl.slot17.core.InterferenceMeter
 import nl.slot17.core.Level
 import nl.slot17.core.LinkTracker
+import nl.slot17.core.MatchKey
+import nl.slot17.core.RouteStats
 import nl.slot17.core.MarkSummary
 import nl.slot17.core.MeterRow
 import nl.slot17.core.Meters
@@ -108,6 +110,9 @@ class AppModel(private val context: Context) {
     private var engine = AlertEngine()
     private val interference = InterferenceMeter()
     private val faultNotices = FaultNotices()
+    /** The Bluetooth route to the car computer, beside the server (1.4.0). */
+    val bluetooth = BluetoothRoute(context, store, sendOp = { kind, fields, apply -> sendOp(kind, fields, apply) },
+        carState = { lastMessage?.state }, deliver = ::bluetoothMatches, changed = ::refresh, note = ::note)
 
     // What the screens show
     var tab by mutableStateOf(Tab.LIVE)
@@ -279,6 +284,7 @@ class AppModel(private val context: Context) {
         }
         sendLeftoverDriveRecords()
         LinkService.start(context)
+        bluetooth.start()
         refresh()
     }
 
@@ -520,18 +526,43 @@ class AppModel(private val context: Context) {
                 interference.add(mono(), d.windows!!, d.wholeBandWindows!!)
                 interferencePercent = interference.percent
             }
+            serverMatches(message.state?.matches ?: emptyList())
             engine.ingest(message.state?.matches ?: emptyList(), tracker.frame, message.state?.channels ?: emptyList(), tracker.scope)
         }
         flushMatches()
         applyOps(message.ops ?: emptyList(), message.command)
     }
 
+    /** Matches from the server: counted for the route figures, and an alert first heard over Bluetooth takes the server's id. */
+    private fun serverMatches(matches: List<MatchRow>) {
+        val now = mono()
+        for (m in matches) {
+            val key = MatchKey.of(m)
+            bluetooth.stats.arrived(key, RouteStats.Route.SERVER, now)
+            val i = alerts.indexOfFirst { it.id == "bt:$key" }
+            if (i >= 0) {
+                alerts = alerts.toMutableList().also { it[i] = it[i].copy(id = m.id) }
+                historyDirty = true
+            }
+        }
+    }
+
+    /** Matches over Bluetooth: their age counts from when they arrived, so no server clock is needed. */
+    private fun bluetoothMatches(matches: List<MatchRow>, receivedAt: Double) {
+        engine.ingest(matches, null, bluetooth.feed.channels, tracker.scope, receivedAt)
+        flushMatches()
+        refresh()
+    }
+
     private fun flushMatches() {
         val now = mono()
         val context = AlertEngine.Context(
-            now = now, live = tracker.live(now), mayHold = tracker.mayHoldMatches(now), scope = tracker.scope,
+            now = now, live = tracker.live(now) || bluetooth.feed.live(now), mayHold = tracker.mayHoldMatches(now), scope = tracker.scope,
             settings = settings, armed = audio.armed, audioProblem = audio.problem, mutedUntil = mutedUntil,
-            age = { w -> w.frame?.let { w.match.age + tracker.elapsed(it, now) } ?: Double.POSITIVE_INFINITY },
+            age = { w ->
+                w.receivedAt?.let { w.match.age + (now - it) }
+                    ?: w.frame?.let { w.match.age + tracker.elapsed(it, now) } ?: Double.POSITIVE_INFINITY
+            },
             play = { audio.play(it) },
         )
         for (decision in engine.flush(context)) record(decision)
@@ -589,6 +620,7 @@ class AppModel(private val context: Context) {
         checkEquipmentTones(now)
         checkAutoSleep(now)
         checkDriveEnded(now)
+        bluetooth.stats.settle(now)
         updateLocationPower(now)
         resendPending(now)
         checkFaultNotices(now)
@@ -666,7 +698,8 @@ class AppModel(private val context: Context) {
     /** After parking, stop listening so the phone can rest. Opening the app starts it all again. */
     private fun checkAutoSleep(now: Double) {
         if (settings.autoSleepMinutes <= 0 || demo) return
-        val carLive = tracker.frame != null && tracker.carAge(now) <= LinkTracker.CAR_STALE && tracker.detectorActive
+        val carLive = tracker.frame != null && tracker.carAge(now) <= LinkTracker.CAR_STALE && tracker.detectorActive ||
+            bluetooth.feed.live(now)
         if (carLive || visible) {
             noDataSince = null
             if (!audio.armed && visible) audio.arm()
@@ -686,11 +719,12 @@ class AppModel(private val context: Context) {
         client.closeStream()
         saveHistory()
         LinkService.stop(context)
+        bluetooth.stop()
         refresh()
     }
 
     private fun updateLocationPower(now: Double) {
-        val carLive = tracker.frame != null && tracker.carAge(now) <= LinkTracker.CAR_STALE
+        val carLive = tracker.frame != null && tracker.carAge(now) <= LinkTracker.CAR_STALE || bluetooth.feed.live(now)
         if (carLive) lastCarLiveAt = now
         location.setLowPower(!visible && !carLive && now - max(lastCarLiveAt, listeningSince) >= 120)
     }
@@ -699,7 +733,7 @@ class AppModel(private val context: Context) {
 
     private fun checkDriveEnded(now: Double) {
         if (!hasLink || demo) return
-        val carLive = tracker.frame != null && tracker.carAge(now) <= LinkTracker.CAR_STALE
+        val carLive = tracker.frame != null && tracker.carAge(now) <= LinkTracker.CAR_STALE || bluetooth.feed.live(now)
         if (carLive) { carGoneSince = null; driveUploadDoneThisStop = false; return }
         if (tracker.frame == null || driveUploadDoneThisStop) return
         val since = carGoneSince ?: now
@@ -793,11 +827,17 @@ class AppModel(private val context: Context) {
         val frame = tracker.frame
         val state = frame?.message?.state
         lastMessage = frame?.message
-        piState = if (frame != null && tracker.carAge(now) <= LinkTracker.CAR_STALE) state else null
+        val serverFresh = frame != null && tracker.carAge(now) <= LinkTracker.CAR_STALE
+        // Without the server, the car computer's own state over Bluetooth, on top of the server's last report.
+        val overBluetooth = !serverFresh && bluetooth.feed.live(now)
+        piState = if (serverFresh) state else if (overBluetooth) bluetooth.feed.piState(state, now) else null
+        if (overBluetooth) {
+            headline = HeadlineStatus(Level.OK, "Live over Bluetooth", "No link to the server: alerts come straight from the car computer")
+        }
         val carFresh = frame != null && tracker.clockReady(now) && tracker.carAge(now) <= LinkTracker.CAR_STALE &&
             tracker.sinceRx(now) <= LinkTracker.LINK_LOST
         val bars = carFresh && tracker.detectorActive
-        showBars = bars
+        showBars = bars || overBluetooth
         var rows = emptyList<MeterRow>()
         if (bars && frame != null && state != null) {
             val elapsed = tracker.elapsed(frame, now)
@@ -807,12 +847,19 @@ class AppModel(private val context: Context) {
                 MeterRow(it.ch, it.freqMHz, it.strength, age, it.hits60, it.approxTime ?: false,
                     frequent = it.activity == "active" && age < 15, rising = (it.rising ?: false) && age < 20, call = it.call ?: false)
             })
+        } else if (overBluetooth) {
+            rows = Meters.pick((piState?.channels ?: emptyList()).map {
+                val age = floor(it.age * 2) / 2
+                MeterRow(it.ch, it.freqMHz, it.strength, age, it.hits60, it.approxTime ?: false,
+                    frequent = it.activity == "active" && age < 15, rising = (it.rising ?: false) && age < 20, call = it.call ?: false)
+            })
         }
         moreChannels = max(0, rows.size - 3)
         extraMeters = rows.drop(3).take(6)
         meters = rows.take(3)
         receiverQuiet = StatusBuilder.receiverQuiet(tracker, settings, now)
         settlePushoverWanted()
+        bluetooth.settleWanted()
         mutedSeconds = if (now < mutedUntil) ceil(mutedUntil - now).toInt() else 0
         val problem = if (!settings.sound) "sound is switched off" else audio.problem
         soundOK = problem == null
@@ -1016,6 +1063,7 @@ class AppModel(private val context: Context) {
             "poweroff" -> if (op.id == powerOff.id) powerOff = actionState(op, "Waiting for the Pi…", "Powering off")
             "notify" -> if (op.id == pushoverAction.id) pushoverAction = actionState(op, "Waiting for the car computer…",
                 op.detail.ifEmpty { "Saved on the car computer" })
+            "bluetooth" -> bluetooth.apply(op)
             "doctor" -> if (op.id == doctorAction.id) doctorAction = actionState(op, "The car computer is checking itself…",
                 op.detail.ifEmpty { "Checked" })
             "logs" -> if (op.id == piLogs.id) {

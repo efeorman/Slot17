@@ -7,6 +7,7 @@
 #     bash setup.sh car --check  only report what is installed; changes nothing
 #     bash setup.sh modem        optional, on the car computer: a ZTE MF833N 4G stick
 #     bash setup.sh doctor       one plain verdict per part: why does it not work? Changes nothing
+#     bash setup.sh logs         a support package: one zip with what someone needs to review this car computer
 #
 # Add --help after car, server or modem to see every option.
 set -euo pipefail
@@ -16,6 +17,7 @@ role="${1:-}"
 case "$role" in
     car|server|modem) shift ;;
     doctor) shift; exec python3 "$HERE/deploy/doctor.py" "$@" ;;
+    logs) shift; [ $# -gt 0 ] || set -- --ask; exec python3 -B "$HERE/p0/support.py" "$@" ;;
     -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     "")
         if [ ! -t 0 ]; then
@@ -36,7 +38,7 @@ EOF
             2) role=server ;;
             *) echo "Please run it again and type 1 or 2." >&2; exit 2 ;;
         esac ;;
-    *) echo "Unknown choice '$role'. Use: bash setup.sh car, bash setup.sh server, bash setup.sh modem or bash setup.sh doctor" >&2; exit 2 ;;
+    *) echo "Unknown choice '$role'. Use: bash setup.sh car, bash setup.sh server, bash setup.sh modem, bash setup.sh doctor or bash setup.sh logs" >&2; exit 2 ;;
 esac
 
 exec bash "$HERE/deploy/setup-$role.sh" "$@"

@@ -140,6 +140,41 @@ class DoctorTests(unittest.TestCase):
         m.files[str(doctor.PUSHOVER_SWITCH)] = json.dumps({"pushover": False})
         self.assertIn("switched off in the app", verdicts(m)[2])
 
+    def bluetooth(self, adapter, on=True):
+        """A car computer with Bluetooth switched on, whose adapter check answers `adapter`."""
+        m = Machine()
+        m.files[str(doctor.BLUETOOTH_SETTINGS)] = json.dumps({"on": on, "name": "Car 2", "key": "ab" * 32})
+        plain = m.run
+
+        def run(*cmd, timeout=5):
+            if any(str(c).endswith("bluetooth_link.py") for c in cmd):
+                m.commands.append(cmd)
+                return (0 if adapter.get("present") else 1), json.dumps(adapter)
+            return plain(*cmd, timeout=timeout)
+        m.run = run
+        return verdicts(m)
+
+    def test_bluetooth_off_is_only_a_note(self):
+        status, rows, text = verdicts(Machine())
+        self.assertEqual(rows["Bluetooth"], doctor.NOTE)
+        self.assertEqual(status, 0, text)
+
+    def test_bluetooth_on_with_a_working_adapter(self):
+        status, rows, text = self.bluetooth({"present": True, "powered": True, "alias": "Car 2"})
+        self.assertEqual(rows["Bluetooth"], doctor.OK)
+        self.assertIn("shown as Car 2", text)
+        self.assertNotIn("ab" * 32, text)                       # the key never shows
+
+    def test_bluetooth_on_without_an_adapter_or_bluez(self):
+        self.assertEqual(self.bluetooth({"present": False})[1]["Bluetooth"], doctor.PROBLEM)
+        self.assertEqual(self.bluetooth({"present": True, "powered": False})[1]["Bluetooth"], doctor.PROBLEM)
+        status, rows, text = self.bluetooth({"present": None, "error": "missing dbus"})
+        self.assertEqual(rows["Bluetooth"], doctor.PROBLEM)
+        self.assertIn("missing dbus", text)
+
+    def test_bluetooth_switched_off_needs_no_adapter_check(self):
+        self.assertEqual(self.bluetooth({"present": False}, on=False)[1]["Bluetooth"], doctor.NOTE)
+
     def test_no_keys_in_the_output(self):
         text = verdicts(Machine())[2]
         self.assertNotIn("x" * 40, text)

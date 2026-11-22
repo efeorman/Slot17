@@ -39,3 +39,6 @@ the home screen widget and two Quick Settings tiles. The build draws every scree
 1.8.0: urgent beeps on Android Auto (`AutoMessages.kt`, rules in `core/CarMessages.kt`).
 Published with release 1.3.0 as `Slot17.apk` (1.7.0). Still to do: a drive with a real phone, and running
 `shared/parity` in the iOS tests too.
+1.9.0: Bluetooth to the car computer (`BluetoothLink.kt`, `BluetoothRoute.kt`; the frames in `core/Bluetooth.kt`,
+tested against `shared/parity/ble-frames.json`): companion device pairing, a GATT link that reconnects by itself,
+and the Settings card. Not yet: starting the app when the car computer appears.

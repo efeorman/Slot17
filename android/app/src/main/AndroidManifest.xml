@@ -7,6 +7,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- The Bluetooth link to the car computer (1.4.0). The companion chooser does the scanning, so no scan
+         permission is needed; Android 11 and lower need the old pair. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.software.companion_device_setup" android:required="false" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -49,7 +57,7 @@
         <service
             android:name=".LinkService"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback|location" />
+            android:foregroundServiceType="mediaPlayback|location|connectedDevice" />
 
         <receiver android:name=".ActionReceiver" android:exported="false" />
 

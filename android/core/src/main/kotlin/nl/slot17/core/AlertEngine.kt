@@ -175,7 +175,14 @@ data class AlertDecision(
  * channel gap and once per overall gap. A sound that cannot play now is dropped, never queued.
  */
 class AlertEngine {
-    class Waiting(val match: MatchRow, val frame: Frame?, val channels: List<ChannelRow>, val scope: String?)
+    /** A match not yet decided. [receivedAt] is set for one that came over Bluetooth: its age counts from then. */
+    class Waiting(
+        val match: MatchRow,
+        val frame: Frame?,
+        val channels: List<ChannelRow>,
+        val scope: String?,
+        val receivedAt: Double? = null,
+    )
 
     /** Everything the rule depends on at this moment. */
     class Context(
@@ -214,11 +221,13 @@ class AlertEngine {
 
     fun clearWaiting() = waiting.clear()
 
-    fun ingest(matches: List<MatchRow>, frame: Frame?, channels: List<ChannelRow>, scope: String?) {
+    /** Takes new matches. Each is remembered by its [MatchKey], so one that comes by both routes plays once. */
+    fun ingest(matches: List<MatchRow>, frame: Frame?, channels: List<ChannelRow>, scope: String?, receivedAt: Double? = null) {
         for (match in matches) {
-            if (match.id in seen) continue
-            remember(match.id)
-            waiting.addLast(Waiting(match, frame, channels, scope))
+            val key = MatchKey.of(match)
+            if (key in seen) continue
+            remember(key)
+            waiting.addLast(Waiting(match, frame, channels, scope, receivedAt))
             if (waiting.size > WAITING_LIMIT) waiting.removeFirst()
         }
     }

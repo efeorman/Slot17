@@ -62,6 +62,8 @@ The tests run in the cloud; see the [app README](../../ios/README.md#build-and-t
 - The Live Activity keeps up with the sounds.
 - The widget's buttons reach the Pi.
 - Closing the app fully stops the sounds.
+- Bluetooth (1.4.0): Set up finds the car computer; with the hotspot and the stick off, a match still beeps;
+  with both routes on, Settings shows which came first; after the engine starts, it reconnects by itself.
 
 ## 5. Installation
 

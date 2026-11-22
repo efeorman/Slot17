@@ -644,7 +644,7 @@ class PowerOff(Base):
     def test_it_reports_before_powering_off_and_winds_up(self):
         self.pub.heartbeat.poll(time.monotonic())
         order = []
-        self.pub.push = lambda now: order.append(("push", list(self.pub.acks)))
+        self.pub.push_now = lambda now: order.append(("push", list(self.pub.acks)))
         run = self.recorder()
         keep = pub.run_poweroff({"id": ID_A, "age_s": 1.0}, self.pub,
                                 runner=lambda cmd: (order.append(("run", cmd)), run(cmd))[1])
@@ -666,7 +666,7 @@ class PowerOff(Base):
 
     def test_a_refusal_is_reported_and_keeps_the_display_running(self):
         self.pub.heartbeat.poll(time.monotonic())
-        self.pub.push = lambda now: True
+        self.pub.push_now = lambda now: True
         keep = pub.run_poweroff({"id": ID_A, "age_s": 1.0}, self.pub,
                                 runner=self.recorder(returncode=1, stderr="a password is required"))
         self.assertTrue(keep)
@@ -922,6 +922,73 @@ class PiOnTests(Base):
         finally:
             httpd.shutdown()
             httpd.server_close()
+
+
+class BluetoothSwitch(Base):
+    """1.4.0: the app switches the car computer's Bluetooth link, renames it, asks for its key, and sees it all."""
+
+    def setUp(self):
+        super().setUp()
+        self.config = pub.bluetooth_module()
+        if self.config is None:
+            self.skipTest("p0/bluetooth_config.py is not here (a display-only copy)")
+        self.addCleanup(setattr, self.config, "PATH", self.config.PATH)
+        self.config.PATH = str(self.dir / "slot17-bluetooth.json")
+
+        class Quiet(pub.BluetoothLink):
+            def _spawn(self):
+                return SimpleNamespace(poll=lambda: None, stdin=SimpleNamespace(close=lambda: None), stdout=[],
+                                       wait=lambda timeout=None: 0, kill=lambda: None, returncode=0)
+
+            def _write(self, data):
+                pass
+        self.pub.bluetooth = Quiet(config=self.config)
+
+    def reported(self):
+        self.pub.bluetooth.settings_at = -1e9
+        self.cycle()
+        return json.loads(self.req("GET", "/api/state")[1])["state"].get("bluetooth")
+
+    def answer(self, op_id, **fields):
+        self.assertEqual(self.op(kind="bluetooth", id=op_id, **fields)[0], 200)
+        self.cycle()
+        self.cycle()
+        return self.op_state(op_id)
+
+    def test_switch_rename_and_pair_from_the_app(self):
+        self.cycle()
+        self.assertIn("bluetooth", self.store.features)
+        self.assertEqual(self.reported()["on"], False)
+        self.assertEqual(self.answer(ID_A, on=True)["detail"], "Bluetooth on")
+        shown = self.reported()
+        self.assertEqual((shown["on"], shown["name"]), (True, "Slot17"))
+        self.assertRegex(shown["key_id"], "^[0-9a-f]{8}$")
+        self.assertEqual(self.answer(ID_B, name="Car 2")["detail"], "Bluetooth name: Car 2")
+        self.assertEqual(self.reported()["name"], "Car 2")
+        paired = self.answer("d" * 32, pair=True)
+        self.assertEqual(paired["detail"], "key:" + self.config.load()["key"].hex())
+        self.assertNotIn(self.config.load()["key"].hex(), json.dumps(self.reported()))
+
+    def test_only_one_well_formed_request_is_accepted(self):
+        for wrong in ({"on": "yes"}, {"name": "a;b"}, {"name": " x"}, {"name": "x" * 21}, {"pair": False},
+                      {"on": True, "pair": True}, {}):
+            self.assertEqual(self.op(kind="bluetooth", id=ID_A, **wrong)[0], 400, wrong)
+
+    def test_an_older_car_computer_is_never_sent_it(self):
+        self.store.features = ["mark", "logs", "notify"]
+        self.assertEqual(self.op(kind="bluetooth", id=ID_A, on=True)[0], 200)
+        self.assertEqual(self.store.take_ops(), [])
+
+    def test_a_malformed_report_is_dropped_not_refused(self):
+        state = {"v": 3, "detector": {"state": "running"}, "channels": [], "matches": [], "source": "s",
+                 "ticket": "t", "snapshot_age_s": 0, "seq": 1}
+        for wrong in ("on", {"on": "yes"}, {"state": "connected"}):
+            self.assertNotIn("bluetooth", srv.clean_state(dict(state, bluetooth=wrong)))
+        cleaned = srv.clean_state(dict(state, bluetooth={
+            "on": True, "state": "nonsense", "name": "a;b", "key_id": "XYZ", "frames": -1, "mtu": 9000,
+            "since_s": 12.34, "error": "e" * 500, "extra": "dropped"}))["bluetooth"]
+        self.assertEqual(cleaned, {"on": True, "state": "off", "subscribed": False, "since_s": 12.3,
+                                   "error": "e" * 120})
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ struct SettingsView: View {
                 levels
                 behaviour
                 faultMessages
+                BluetoothCard(bluetooth: model.bluetooth)
                 liveActivityCard
                 locationCard
                 serverSettings

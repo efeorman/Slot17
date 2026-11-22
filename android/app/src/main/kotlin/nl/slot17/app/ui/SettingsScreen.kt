@@ -1,11 +1,18 @@
 package nl.slot17.app.ui
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +33,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,7 +47,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.max
 import nl.slot17.app.AppModel
+import nl.slot17.app.BluetoothRoute
 import nl.slot17.core.BeepStyle
+import nl.slot17.core.BluetoothName
+import nl.slot17.core.BluetoothWords
 import nl.slot17.core.Fmt
 import nl.slot17.core.MeterColour
 import nl.slot17.core.SoundKind
@@ -146,6 +157,7 @@ fun SettingsScreen(model: AppModel, editLink: () -> Unit) {
             model.pushoverUnavailable?.let { Hint(it) }
             Hint("Off stops every Pushover message from the car, faults included; switch the notifications above on first so you still hear about faults. A change made while the car is off waits up to a day and applies at the next drive.")
         }
+        BluetoothCard(model.bluetooth, model.nowMs)
         Card("Location") {
             ToggleRow("Record where alerts and sightings happen", s.recordLocation) { v -> model.updateSettings { it.copy(recordLocation = v) } }
             LabelledRow("Status", model.locationStatus)
@@ -237,4 +249,63 @@ fun LinkDialog(model: AppModel, close: () -> Unit) {
         },
         confirmButton = { TextButton({ model.setLink(text)?.let { problem = it } ?: close() }) { Text("Save") } },
         dismissButton = { TextButton(close) { Text("Cancel") } })
+}
+
+
+/**
+ * The Bluetooth route (1.4.0): the car computer's switch and name, this phone's link to it, and which route brought
+ * matches first. [nowMs] is read so the "last frame" line moves on by itself.
+ */
+@Composable
+private fun BluetoothCard(bt: BluetoothRoute, @Suppress("UNUSED_PARAMETER") nowMs: Long) {
+    val context = LocalContext.current
+    val chooser = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) bt.chooserResult(result.data)
+    }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) bt.startPairing()
+    }
+    LaunchedEffect(bt.chooser) {
+        bt.chooser?.let {
+            bt.chooser = null
+            chooser.launch(IntentSenderRequest.Builder(it).build())
+        }
+    }
+    var name by remember { mutableStateOf("") }
+    var nameProblem by remember { mutableStateOf<String?>(null) }
+    Card("Bluetooth to the car computer") {
+        Hint("Alerts also come straight from the car computer over Bluetooth: faster, and where there is no internet. With this phone connected, switching off and renaming go over Bluetooth too; switching on goes through the server.")
+        ToggleRow("Bluetooth on the car computer", bt.shownOn,
+            enabled = (bt.unavailable == null || bt.overBluetooth) && !bt.carAction.busy) { bt.setOnCar(it) }
+        LabelledRow("On the car computer", BluetoothWords.car(bt.onCar))
+        bt.onCar?.name?.let { LabelledRow("Name phones show", it) }
+        OutlinedTextField(value = name, onValueChange = { name = it.take(BluetoothName.MAX); nameProblem = null },
+            label = { Text("New name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        ActionButton("Rename", onClick = {
+            nameProblem = bt.rename(name)
+            if (nameProblem == null) name = ""
+        }, enabled = (bt.unavailable == null || bt.overBluetooth) && name.isNotBlank() && !bt.carAction.busy)
+        nameProblem?.let { Hint(it, C.red) }
+        ActionNote(bt.carAction)
+        bt.unavailable?.let { Hint(it) }
+        Rule()
+        LabelledRow("This phone", bt.phoneText)
+        if (bt.paired) ToggleRow("Use Bluetooth on this phone", bt.phone.use) { bt.setUse(it) }
+        ActionButton(if (bt.paired) "Set up again" else "Set up", onClick = {
+            val asked = Build.VERSION.SDK_INT >= 31 &&
+                context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+            if (asked) permission.launch(Manifest.permission.BLUETOOTH_CONNECT) else bt.startPairing()
+        }, enabled = bt.unavailable == null && !bt.pairing.busy)
+        if (bt.paired) ActionButton("Remove from this phone", onClick = { bt.remove() })
+        ActionNote(bt.pairing)
+        val s = bt.stats
+        if (s.bluetoothFirst + s.serverFirst + s.bluetoothOnly > 0) {
+            Rule()
+            LabelledRow("First over Bluetooth", "${s.bluetoothFirst}")
+            LabelledRow("First over the server", "${s.serverFirst}")
+            s.medianLead?.let { LabelledRow("Bluetooth ahead by", "%.2f s, median".format(it)) }
+            LabelledRow("Only over Bluetooth", "${s.bluetoothOnly}")
+        }
+        Hint("Setting up needs the car computer on and nearby, and Location on while Android looks for it. Android asks once to allow Nearby devices. The car computer's key comes through the server, never over Bluetooth.")
+    }
 }
