@@ -89,7 +89,7 @@ These are the parts we use. Equivalent parts should work too. **Where to buy the
 | **Receiver** | [Airspy Mini](https://itead.cc/product/airspy-mini/) | Its antenna socket is SMA. Other receivers aren't supported |
 | **Antenna** | [Motorola GMAE4258B](https://www.firecom.nl/merken/motorola/motorola-gmae4258b/), a hidden TETRA antenna for 380–410 MHz, stuck inside the front windscreen | Any antenna made for 380–400 MHz works. **An antenna on the outside of the car, such as a magnetic roof antenna, receives better** than one inside. Some windscreens have a metal coating that blocks radio signals. You may need an adapter to the Airspy's SMA socket |
 | **Internet in the car** | The iPhone's personal hotspot, or a ZTE MF833N 4G USB stick with its own SIM | Any hotspot or car Wi-Fi works and needs nothing extra. A 4G stick spares the phone's battery; ours needs one extra setup command on a Raspberry Pi 5, see [the optional step](#optional-a-4g-stick-instead-of-the-hotspot). A stick that Linux recognises by itself needs no setup at all. **With Bluetooth you can drive without it** (since 1.6.0); what you then miss is in [Bluetooth or the server?](#bluetooth-or-the-server) |
-| **Display server** | A hosted server from us, or your own | Ours: one command in the Discord, nothing to rent; see [step 2](#step-2-set-up-the-display-server). Your own: any Debian or Ubuntu machine with a public address that the car and phone can reach, such as a cheap VPS. A home computer works if you forward a port on your router |
+| **Display server** | A hosted server from us, or your own | Needed with Bluetooth too, for the set-up. Ours: one command in the Discord, nothing to rent; see [step 2](#step-2-set-up-the-display-server). Your own: any Debian or Ubuntu machine with a public address that the car and phone can reach, such as a cheap VPS. A home computer works if you forward a port on your router |
 | **Phone** | iPhone with iOS 16.2 or newer | An Android phone with Android 8 or newer works too, with its own app. The iPhone's Live Activity, widget and Bluetooth need iOS 18, and showing the Live Activity on CarPlay needs iOS 26. Computers can use the web page |
 | **Notifications (optional)** | [Pushover](https://pushover.net) | Only for fault messages, such as "receiver hears nothing". The apps can show the same faults themselves (Settings, Fault messages) and switch Pushover off and on; their notifications work only while the app runs |
 
@@ -99,7 +99,7 @@ Not used to Linux? [SETUP-WITH-AI.md](docs/SETUP-WITH-AI.md) has a prompt for an
 
 ## Step 1: Prepare the car computer
 
-**The easy way: the ready-made image.** Each release has `slot17-VERSION-raspios-lite-arm64.img.xz`: Raspberry Pi OS Lite with Slot17 on it and SSH on. Flash it with [Raspberry Pi Imager](https://www.raspberrypi.com/software/) (**Use custom**, then the file), set a username, password and Wi-Fi in Imager's settings, and write it. Then open the card's **bootfs** drive on your computer, fill in **slot17.txt** (your server address and car computer key from step 2, and your phone's hotspot) and start the Pi with it. It sets itself up in about 5 minutes and then removes the key and the password from the card; if something goes wrong, **slot17-setup.log** on the card says what. Then go on to [step 4](#step-4-install-the-app). [BUILD.md](docs/BUILD.md) walks through the whole build, hardware included.
+**The easy way: the ready-made image.** Each release has `slot17-VERSION-raspios-lite-arm64.img.xz`: Raspberry Pi OS Lite with Slot17 on it and SSH on. Flash it with [Raspberry Pi Imager](https://www.raspberrypi.com/software/) (**Use custom**, then the file), set a username, password and Wi-Fi in Imager's settings, and write it. Then open the card's **bootfs** drive on your computer, fill in **slot17.txt** (your server address and car computer key from step 2, and your phone's hotspot; leave the hotspot empty if you'll use Bluetooth alone, which the card has on by default) and start the Pi with it. It sets itself up in about 5 minutes and then removes the key and the password from the card; if something goes wrong, **slot17-setup.log** on the card says what. Then go on to [step 4](#step-4-install-the-app). [BUILD.md](docs/BUILD.md) walks through the whole build, hardware included.
 
 The steps below do the same by hand.
 
@@ -109,7 +109,7 @@ The steps below do the same by hand.
 3. When it offers to customise the settings, choose **Edit settings** and fill in:
    - **Hostname:** for example `slot17`.
    - **Username and password:** remember these.
-   - **Wireless LAN:** your **phone's hotspot name and password**, so it gets internet in the car. You can add your home Wi-Fi later.
+   - **Wireless LAN:** your **phone's hotspot name and password**, so it gets internet in the car. You can add your home Wi-Fi later. Using Bluetooth alone in the car? Then your home Wi-Fi is enough: the car computer needs internet to install and set up, and later for updates.
    - **Wireless LAN country:** your country.
 4. On the **Services** tab, turn on **Enable SSH** with password authentication.
 5. Write the image.
@@ -122,7 +122,7 @@ On an iPhone, the hotspot is under **Settings > Personal Hotspot**. Turn on **Ma
 3. Insert the storage and connect the power.
 
 **3. Log in to it from your computer.**
-1. Turn on your phone's hotspot, and connect your computer to the same hotspot.
+1. Turn on your phone's hotspot, and connect your computer to the same hotspot (or have both on your home Wi-Fi).
 2. Wait about two minutes after power-up.
 3. Open **PowerShell** on Windows or **Terminal** on a Mac, and type, using your username and hostname:
 
@@ -141,6 +141,8 @@ sudo nmcli device wifi connect "Your home Wi-Fi" password "your-wifi-password"
 ## Step 2: Set up the display server
 
 Do this first, because it gives you the address and key that the car computer needs. There are two ways: a server we host for you, or your own.
+
+**Using Bluetooth? You still need a server**, but only to set things up. The app gets its private link and the car computer's Bluetooth key through it, and the car computer's setup offers Bluetooth only once it is connected to a server. After that the app works over Bluetooth without internet in the car, and the server is there for the extras: the web page, updates, drive reports and support packages. For that, the hosted server is the easy choice: it costs nothing and you don't have to keep it running. [Bluetooth or the server?](#bluetooth-or-the-server) compares the two.
 
 ### Option A: a hosted server from us
 
@@ -203,9 +205,9 @@ It installs everything and runs the detector's own tests (about a minute; they n
 
 | Question | Our advice |
 |---|---|
-| Save your phone's hotspot as a Wi-Fi network? | **Yes.** Type its name and password; the car computer then joins it by itself on every drive. Not asked when it is already saved |
+| Save your phone's hotspot as a Wi-Fi network? | **Yes.** Type its name and password; the car computer then joins it by itself on every drive. Not asked when it is already saved. Using Bluetooth alone in the car? Then you can say no |
 | Install updates by themselves? | **Yes.** It then installs new versions signed by the Slot17 team at a start; see [Updates by themselves](#updates-by-themselves) |
-| Connect to a display server? | **Yes.** Paste the server address and the car computer key from step 2 |
+| Connect to a display server? | **Yes.** Paste the server address and the car computer key from step 2. Needed for Bluetooth too: without it, the next question is skipped |
 | Send alerts over Bluetooth too? | **Yes**: the app then gets everything straight from the car computer, also without internet. Say no if you'd rather the car computer weren't visible to Bluetooth scanners nearby, or what it sends readable by a phone nearby. It then asks for the name phones show (Enter keeps **Slot17**). See [Bluetooth to the app](#optional-bluetooth-to-the-app) |
 | Set up Pushover notifications? | Optional. You need a Pushover app token and user key |
 | Calibrate the receiver? | **Yes**, once, with the antenna connected. It measures how far your receiver's frequency is off, which differs per receiver |
@@ -221,7 +223,7 @@ bash ~/Slot17/setup.sh car --check
 
 ### Optional: a 4G stick instead of the hotspot
 
-A 4G USB stick with its own SIM gives the car computer internet without your phone. The hotspot stays as the fallback: the car computer uses a wired network first, then the stick, then Wi-Fi.
+A 4G USB stick with its own SIM gives the car computer internet without your phone. The hotspot stays as the fallback: the car computer uses a wired network first, then the stick, then Wi-Fi. With Bluetooth you don't need either for the app; a stick then only adds what goes through the server, such as the web page and updates on the road.
 
 We use a **ZTE MF833N**. A Raspberry Pi 5 can't use that stick as it comes, so it needs one more command, with the stick plugged in and the detector stopped:
 
@@ -281,6 +283,7 @@ We used Sideloadly at first and use Signulous now (since app 1.5.1). With Signul
 
 3. **On iOS 16 and newer, turn on Developer Mode** if the iPhone asks: **Settings > Privacy & Security > Developer Mode**, then restart.
 4. **Open Slot17 and paste your private link** from step 2. It's stored in the iPhone's Keychain.
+5. **Set up Bluetooth** (optional, iOS 18): Settings, **Bluetooth to the car computer**, **Set up**, with the car computer on and nearby, then pick it from the list. From then on the app also works in the car without internet; see [Bluetooth to the app](#optional-bluetooth-to-the-app).
 
 ### Android
 
@@ -288,6 +291,7 @@ We used Sideloadly at first and use Signulous now (since app 1.5.1). With Signul
 2. **Install it.** Android asks once whether your browser or file manager may install apps; allow it for this one install. The app is signed with our own key, so later versions install over it and keep your settings.
 3. **Open Slot17 and paste your private link** from step 2.
 4. **Allow notifications, then in Settings tap Let Slot17 run in the background.** It keeps a notification while it listens, which lets it play the beeps with the screen off. Some phones (Samsung, Xiaomi, Huawei) also need battery optimisation turned off for Slot17 in the phone's own settings.
+5. **Set up Bluetooth** (optional): Settings, **Bluetooth to the car computer**, **Set up**, with the car computer on and nearby. Allow **Nearby devices**, and keep Location on while the phone looks for it. From then on the app also works in the car without internet.
 
 It does the same as the iPhone app; [android/README.md](android/README.md) lists where it differs (a notification instead of the Live Activity, Quick Settings tiles instead of Control Center controls).
 

@@ -10,7 +10,9 @@ assistant doesn't need them. Where a command prints one, replace it with `XXXX` 
 
 ```text
 You are helping me set up Slot17, a receive-only TETRA burst detector: an Airspy Mini receiver on a
-Raspberry Pi in my car, a small display server (a Linux VPS), and an iPhone app or a web page. The
+Raspberry Pi in my car, a small display server (a free hosted one from the Slot17 Discord, or my own Linux
+VPS), and an iPhone or Android app or a web page. The app can also talk to the Pi over Bluetooth, which
+needs no internet in the car; the display server is still needed once, to set that up. The
 instructions are the README at https://github.com/efeorman/Slot17#readme. If you can read web pages, read it
 first; otherwise ask me to paste each section when we get to it. Follow it exactly. Do not invent commands,
 options or file names that are not in it.
@@ -35,11 +37,12 @@ Rules you must keep to:
 - Plugging, unplugging, power and antennas are things I do. Tell me what to do and wait for me.
 
 Known traps (from the README; check there for the current wording):
-- The display server must be reachable from the internet on TCP port 5732. Many hosting providers have
+- My own display server (not a hosted one) must be reachable from the internet on TCP port 5732. Many hosting providers have
   their own firewall in their web dashboard besides ufw. Test: open http://SERVER-ADDRESS:5732/healthz on
   the phone with Wi-Fi off; it should say "ok".
 - Run the installers as a normal user with sudo rights, not as root.
-- The Raspberry Pi joins the phone's hotspot; on an iPhone, "Maximise Compatibility" may be needed.
+- The Raspberry Pi joins the phone's hotspot; on an iPhone, "Maximise Compatibility" may be needed. With
+  Bluetooth set up in the app (Settings, Bluetooth to the car computer), the car needs no hotspot.
 - A 4G USB stick goes in the other pair of USB sockets, not next to the Airspy: on the same pair the
   receiver loses samples while the stick starts.
 - The app is not in the App Store, so it is installed with a signing service (Signulous or Sideloadly,
@@ -47,7 +50,7 @@ Known traps (from the README; check there for the current wording):
 - The phone app has to be opened once per drive to arm its sound; iOS does not allow it to start itself.
 
 Start by asking me which step I am at: 1 (prepare the car computer), 2 (display server), 3 (car computer
-setup), 4 (iPhone app), or "something does not work".
+setup), 4 (the app, and Bluetooth), or "something does not work".
 ```
 
 ## If something doesn't work

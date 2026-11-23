@@ -274,9 +274,9 @@ if { [ "$BLUETOOTH" = ask ] || [ "$BLUETOOTH" = yes ]; } && [ "$DISPLAY_LINK" !=
     BLUETOOTH=none
 fi
 if [ "$BLUETOOTH" = ask ]; then
-    echo "  Besides the display server, the car computer can send alerts straight to the Slot17 app over"
-    echo "  Bluetooth: faster, and they keep coming where there is no internet. While no phone is"
-    echo "  connected it is visible to Bluetooth scanners nearby."
+    echo "  Besides the display server, the car computer can talk to the Slot17 app straight over"
+    echo "  Bluetooth: faster, and the app then works in the car without internet. It is visible to"
+    echo "  Bluetooth scanners nearby, and a phone nearby can read what it sends (signed, not encrypted)."
     ask_yes "Send alerts over Bluetooth too?" y && BLUETOOTH=yes || BLUETOOTH=no
 fi
 if [ "$BLUETOOTH" = yes ]; then

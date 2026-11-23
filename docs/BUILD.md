@@ -32,8 +32,9 @@ Use the ready-made image from the [latest release](https://github.com/efeorman/S
 
 1. In [Raspberry Pi Imager](https://www.raspberrypi.com/software/), choose your Raspberry Pi 5, then **Use custom** and pick the image file, then your card or SSD.
 2. When Imager offers to customise settings: set a **username and password**, your **Wi-Fi** (home Wi-Fi is fine for now) and your country. SSH is already on in the image.
-3. Write it. Then open the card's **bootfs** drive on your computer, open **slot17.txt** and fill in your server address and car computer key (from `/server create` in the Discord) and your phone's hotspot name and password. Save it.
+3. Write it. Then open the card's **bootfs** drive on your computer, open **slot17.txt** and fill in your server address and car computer key (from `/server create` in the Discord) and your phone's hotspot name and password. Using Bluetooth alone in the car? Leave the hotspot empty: Bluetooth is on by default there. Save it.
 4. Put the card in the Pi and power it up. After about 5 minutes the app shows the car computer. If not, open **slot17-setup.log** on the card; it says what went wrong.
+5. In the app, set up Bluetooth: Settings, **Bluetooth to the car computer**, **Set up**, with the car computer nearby. The app then also works in the car without internet ([README](../README.md#optional-bluetooth-to-the-app)).
 
 Prefer to do it by hand? The [README](../README.md#step-1-prepare-the-car-computer) has every step.
 
@@ -65,6 +66,6 @@ Prefer to do it by hand? The [README](../README.md#step-1-prepare-the-car-comput
 
 ## 7. The first drive
 
-1. Turn on your phone's hotspot, start the car, open the app once and lock the phone (iPhone), or just start the car (Android).
+1. Turn on your phone's hotspot (not needed with Bluetooth), start the car, open the app once and lock the phone (iPhone), or just start the car (Android).
 2. The Pi screen's **Setup check** should be all green after a minute and a half. If not, the first item it names is usually the cause of the rest.
 3. Post your setup in the [Discord](https://discord.gg/rSFPWSWNfh); photos help other people a lot.

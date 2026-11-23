@@ -8,11 +8,13 @@ car_key=
 #
 # Your phone's hotspot, so the car computer goes online in the car.
 # On an iPhone, the name is under Settings > General > About > Name.
+# Leave both empty if you'll use Bluetooth alone in the car: the app then needs no internet there.
 hotspot_name=
 hotspot_password=
 #
-# Bluetooth to your phone: the app also gets alerts straight from the car computer, faster, and where
-# there is no internet. yes or no, and the name phones show (up to 20 letters, digits, spaces, . - _).
+# Bluetooth to your phone: the app gets everything straight from the car computer, faster, and also
+# where there is no internet. Set it up in the app afterwards: Settings, Bluetooth to the car computer.
+# yes or no, and the name phones show (up to 20 letters, digits, spaces, . - _).
 bluetooth=yes
 bluetooth_name=Slot17
 #

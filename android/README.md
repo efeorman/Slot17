@@ -42,3 +42,8 @@ Published with release 1.3.0 as `Slot17.apk` (1.7.0). Still to do: a drive with 
 1.9.0: Bluetooth to the car computer (`BluetoothLink.kt`, `BluetoothRoute.kt`; the frames in `core/Bluetooth.kt`,
 tested against `shared/parity/ble-frames.json`): companion device pairing, a GATT link that reconnects by itself,
 and the Settings card. Not yet: starting the app when the car computer appears.
+1.10.0: support packages from the Pi screen. 1.10.1: Bluetooth reconnects after a failed read instead of staying
+silent. 1.11.0 (car computer 1.6.0): everything over Bluetooth, so the app works where neither the phone nor the
+car computer has internet: the whole state, the Pi screen's actions and the Pi log; an action with no answer over
+Bluetooth within 8 s also goes through the server, and setting up again needs no server once the phone has the key.
+Not tested on a phone yet.

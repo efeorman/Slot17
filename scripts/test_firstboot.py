@@ -12,7 +12,8 @@ TEMPLATE = (Path(__file__).resolve().parents[1] / "deploy" / "image" / "slot17.t
 
 class Reading(unittest.TestCase):
     def test_the_shipped_template_is_empty(self):
-        self.assertEqual(fc.parse(TEMPLATE), {k: "" for k in fc.KEYS})
+        # Nothing of anyone's in it; only Bluetooth's defaults (1.4.0: on, under the name Slot17).
+        self.assertEqual(fc.parse(TEMPLATE), {**{k: "" for k in fc.KEYS}, "bluetooth": "yes", "bluetooth_name": "Slot17"})
 
     def test_notepad_quirks(self):
         text = "﻿# note\r\nserver = https://k7f2q.slot17.cloud \r\ncar_key=\"abc=def\"\r\nHOTSPOT_NAME=iPhone van Efe\r\nhotspot_password='p@ss word'\r\n"
