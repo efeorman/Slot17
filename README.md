@@ -58,10 +58,10 @@ flowchart LR
 
 1. The **antenna and receiver** pick up the radio band TETRA uses.
 2. The **car computer** looks for the fixed training pattern in the middle of every TETRA burst, four times a second, on all 200 channels of 380–385 MHz. It runs by itself from the moment the car powers it.
-3. It sends what it hears through your **phone's hotspot** (or a 4G stick) to a **display server** on the internet, and, if you want, straight to the app over **Bluetooth** as well.
+3. It sends what it hears through your **phone's hotspot** (or a 4G stick) to a **display server** on the internet, and, if you want, straight to the app over **Bluetooth** as well. Over Bluetooth the app works with **no internet in the car at all** (since 1.6.0).
 4. The **app** (iPhone or Android) or the **web page** shows the signal bars and plays a sound for strong signals. From the app you can also mark what you saw, stop the detector, power off the car computer, run its setup check and make a support package.
 
-Why a separate server? The car computer sits behind your phone's hotspot, so the phone can't reach it over the internet. Both can reach a server on the internet. Nothing on the internet ever connects to the car computer itself; the only thing that can is your phone over Bluetooth, if you switch that on.
+Why a separate server? The car computer sits behind your phone's hotspot, so the phone can't reach it over the internet. Both can reach a server on the internet. Nothing on the internet ever connects to the car computer itself; the only thing that can is your phone over Bluetooth, if you switch that on. Bluetooth needs no internet, but it still needs the server once, to set it up; [Bluetooth or the server?](#bluetooth-or-the-server) compares the two.
 
 ## Does it work in my country?
 
@@ -88,9 +88,9 @@ These are the parts we use. Equivalent parts should work too. **Where to buy the
 | **Power in the car** | [UGREEN Nexode 60 W car charger, EC602](https://www.amazon.nl/dp/B0DSBSBSGW), Pi on its built-in USB-C cable | It gives 3 A at 5 V. That was enough for our Pi 5 with the Airspy, an NVMe SSD and a 4G stick: no undervoltage during a whole drive (19 November 2026). Bigger car chargers don't help: almost all give 3 A at 5 V, and their extra watts are at 9 to 20 V, which the Pi doesn't use. A car charger that offers the Pi 5's own 5 V 5 A profile is very rare. If `setup.sh doctor` reports undervoltage, your setup draws more: use a 12 V to 5 V converter rated for 5 A with a fused lighter plug or a fused connection, and tell the Pi it can draw 5 A with `sudo rpi-eeprom-config --edit`, adding `PSU_MAX_CURRENT=5000` (only with a supply that really gives 5 A) |
 | **Receiver** | [Airspy Mini](https://itead.cc/product/airspy-mini/) | Its antenna socket is SMA. Other receivers aren't supported |
 | **Antenna** | [Motorola GMAE4258B](https://www.firecom.nl/merken/motorola/motorola-gmae4258b/), a hidden TETRA antenna for 380–410 MHz, stuck inside the front windscreen | Any antenna made for 380–400 MHz works. **An antenna on the outside of the car, such as a magnetic roof antenna, receives better** than one inside. Some windscreens have a metal coating that blocks radio signals. You may need an adapter to the Airspy's SMA socket |
-| **Internet in the car** | The iPhone's personal hotspot, or a ZTE MF833N 4G USB stick with its own SIM | Any hotspot or car Wi-Fi works and needs nothing extra. A 4G stick spares the phone's battery; ours needs one extra setup command on a Raspberry Pi 5, see [the optional step](#optional-a-4g-stick-instead-of-the-hotspot). A stick that Linux recognises by itself needs no setup at all |
+| **Internet in the car** | The iPhone's personal hotspot, or a ZTE MF833N 4G USB stick with its own SIM | Any hotspot or car Wi-Fi works and needs nothing extra. A 4G stick spares the phone's battery; ours needs one extra setup command on a Raspberry Pi 5, see [the optional step](#optional-a-4g-stick-instead-of-the-hotspot). A stick that Linux recognises by itself needs no setup at all. **With Bluetooth you can drive without it** (since 1.6.0); what you then miss is in [Bluetooth or the server?](#bluetooth-or-the-server) |
 | **Display server** | A hosted server from us, or your own | Ours: one command in the Discord, nothing to rent; see [step 2](#step-2-set-up-the-display-server). Your own: any Debian or Ubuntu machine with a public address that the car and phone can reach, such as a cheap VPS. A home computer works if you forward a port on your router |
-| **Phone** | iPhone with iOS 16.2 or newer | An Android phone with Android 8 or newer works too, with its own app. The iPhone's Live Activity and widget need iOS 18, and showing them on CarPlay needs iOS 26. Computers can use the web page |
+| **Phone** | iPhone with iOS 16.2 or newer | An Android phone with Android 8 or newer works too, with its own app. The iPhone's Live Activity, widget and Bluetooth need iOS 18, and showing the Live Activity on CarPlay needs iOS 26. Computers can use the web page |
 | **Notifications (optional)** | [Pushover](https://pushover.net) | Only for fault messages, such as "receiver hears nothing". The apps can show the same faults themselves (Settings, Fault messages) and switch Pushover off and on; their notifications work only while the app runs |
 
 You also need a computer to set things up. Windows, macOS and Linux all work.
@@ -132,7 +132,7 @@ ssh yourname@slot17.local
 
 The first time, type `yes` to trust it, then your password. You now control the car computer.
 
-**4. Optional: add your home Wi-Fi**, so you can work on it at home. Replace the name and password with yours:
+**4. Optional: add your home Wi-Fi**, so you can work on it at home, and so it gets updates there when the car has no internet. Replace the name and password with yours:
 
 ```bash
 sudo nmcli device wifi connect "Your home Wi-Fi" password "your-wifi-password"
@@ -206,7 +206,7 @@ It installs everything and runs the detector's own tests (about a minute; they n
 | Save your phone's hotspot as a Wi-Fi network? | **Yes.** Type its name and password; the car computer then joins it by itself on every drive. Not asked when it is already saved |
 | Install updates by themselves? | **Yes.** It then installs new versions signed by the Slot17 team at a start; see [Updates by themselves](#updates-by-themselves) |
 | Connect to a display server? | **Yes.** Paste the server address and the car computer key from step 2 |
-| Send alerts over Bluetooth too? | **Yes**, unless you'd rather the car computer weren't visible to Bluetooth scanners nearby while no phone is connected. It then asks for the name phones show (Enter keeps **Slot17**). See [Bluetooth to the app](#optional-bluetooth-to-the-app) |
+| Send alerts over Bluetooth too? | **Yes**: the app then gets everything straight from the car computer, also without internet. Say no if you'd rather the car computer weren't visible to Bluetooth scanners nearby, or what it sends readable by a phone nearby. It then asks for the name phones show (Enter keeps **Slot17**). See [Bluetooth to the app](#optional-bluetooth-to-the-app) |
 | Set up Pushover notifications? | Optional. You need a Pushover app token and user key |
 | Calibrate the receiver? | **Yes**, once, with the antenna connected. It measures how far your receiver's frequency is off, which differs per receiver |
 | Start it now? | **Yes** |
@@ -236,11 +236,28 @@ It installs a USB fix made by someone else and a small check of ours that keeps 
 
 ### Optional: Bluetooth to the app
 
-Besides the display server, the car computer can send alerts straight to the app over Bluetooth: faster, and they keep coming where there is no internet. The server stays for everything else. Setup asks about it (yes by default); `bash setup.sh car --bluetooth` or `--no-bluetooth` changes it later, and so does the app.
+Besides the display server, the car computer can talk to the app straight over Bluetooth. Since 1.6.0 that carries everything the app needs in the car: the alerts, the whole **Pi** screen with the car computer's health and setup check, and the app's buttons (sightings, stop, power off, the Pushover switch, the Pi log and asking for a support package). So the app keeps working where **neither the phone nor the car computer has internet**. Setup asks about it (yes by default); `bash setup.sh car --bluetooth` or `--no-bluetooth` changes it later, and so does the app.
 
-- **In the app:** Settings, **Bluetooth to the car computer**, **Set up**, with the car computer on and nearby. The app gets the car computer's key through the server, then the phone shows a list to pick it from. The same card switches Bluetooth on and off on the car computer and renames it (with the phone connected, off and renaming go straight over Bluetooth), and shows which route brought each match first.
-- **Needs:** car computer software 1.4.0, an iPhone with iOS 18 or an Android phone with Bluetooth, and a car computer with Bluetooth (every Raspberry Pi from the 3 on has it).
-- **Measured** on our car computer: found in 0.2 s, connected in 0.9 s, 0 of 161 frames lost, round trip 79 ms.
+- **In the app:** Settings, **Bluetooth to the car computer**, **Set up**, with the car computer on and nearby. The first time, the app gets the car computer's key through the server, so both need internet once (at home is fine); then the phone shows a list to pick it from. Setting it up again later needs no server. The same card switches Bluetooth on and off on the car computer and renames it (with the phone connected, off and renaming go straight over Bluetooth; on goes through the server), and shows which route brought each match first.
+- **Needs:** car computer software 1.6.0 for everything (1.4.0 sends only the alerts and the detector's state), iPhone app 1.9.0 on iOS 18 or Android app 1.11.0, and a car computer with Bluetooth (every Raspberry Pi from the 3 on has it).
+- **Measured** from a PC to our car computer: found in 0.2 s, connected in 0.9 s, 0 of 161 frames lost, round trip 79 ms. In another room, at −80 to −90 dBm, the PC saw it but could not connect: Bluetooth is for a phone in the car.
+- **Not tested on a phone yet:** the 1.6.0 additions (the Pi screen, the buttons and the Pi log over Bluetooth). Unit tests on the car computer and in both apps check the same frames.
+
+#### Bluetooth or the server?
+
+Use both, which is the default: a match that comes both ways beeps once, and an action that gets no answer over Bluetooth within 8 s also goes through the server.
+
+| | Bluetooth | Display server |
+|---|---|---|
+| **Internet** | Not needed | Needed by the car computer and the phone |
+| **Speed** | Round trip 79 ms (measured from a PC) | 0.18 to 0.28 s per push usually, then up to 0.25 s until the phone picks it up; 2.8 s or more in 1 minute of 10; nothing for minutes when the car's mobile connection drops |
+| **Range** | The car: the phone must be near the car computer | Anywhere with internet |
+| **Who can watch** | Phones with the app, set up for this car computer | The app and the web page, on any number of phones and computers, also at home |
+| **What it carries** | Alerts, the Pi screen, sightings, stop, power off, the Pushover switch, the setup check, the Pi log, asking for a support package | All of that, plus switching Bluetooth on, the Bluetooth key, the web page, the drive report with the car computer's figures, the car computer's log every ten minutes, support packages, and the signed updates for the car computer |
+| **Set-up** | Needs the server once, for the key; an iPhone needs iOS 18 | The private link |
+| **Privacy** | Signed, not encrypted: a phone nearby that connects can read what the car computer sends; the car computer is visible to Bluetooth scanners nearby, under its name, whenever Bluetooth is on. See [Security](#security) | A hosted server uses HTTPS; a server of your own uses plain HTTP |
+
+Without internet in the car you therefore miss the web page and anyone watching from elsewhere, the car computer's part of the drive report, and support packages (make those at home). Updates come when it starts with a network, such as your home Wi-Fi.
 
 [BLUETOOTH.md](docs/design/BLUETOOTH.md) explains how it works, the frames, the key and what each phone does.
 
@@ -278,7 +295,7 @@ It does the same as the iPhone app; [android/README.md](android/README.md) lists
 
 ## Daily use
 
-1. **Start the car.** The car computer powers up, joins your phone's hotspot and starts listening by itself. Keep your hotspot on.
+1. **Start the car.** The car computer powers up, joins your phone's hotspot and starts listening by itself. Keep your hotspot on, unless you use Bluetooth alone; then the phone only needs to be in the car.
 2. **Open the Slot17 app once, then lock the phone.** iOS doesn't let an app start sound from the background, so opening it is what arms the sound. On CarPlay you hear it through the car, and a Live Activity shows the status. On Android the app keeps a notification while it runs and the sound follows the phone's audio, over Bluetooth or Android Auto.
 3. **Strong signals give a sound:** a chime at 35 dB above the background, and an urgent beep at 50 dB. These are signal strengths, not distances.
    - **A radio in a call** (normal bursts on every TETRA frame, which is what speech or a data call looks like) gets a soft, lower two-note tone from 18 dB, below the chime level. It is traffic on that channel; it says nothing about who or how far.
@@ -286,7 +303,7 @@ It does the same as the iPhone app; [android/README.md](android/README.md) lists
 4. **If you have a passenger, mark what you see** with **I SAW** in the app, including vehicles that gave no alert. That is the only way to learn what Slot17 misses.
 5. **Park and switch off.** Cutting the power is fine; [POWER-LOSS.md](docs/operations/POWER-LOSS.md) explains what that keeps.
 
-The app's **Pi** screen can stop the detector, power off the car computer, run its setup check, collect its log and make a support package. It can't start the detector again, on purpose: starting stays with the next power-up.
+The app's **Pi** screen can stop the detector, power off the car computer, run its setup check, collect its log and make a support package. With Bluetooth these work without internet too, also when the detector stopped by itself. Only a support package needs the car computer to reach the server: without internet it fails after about a minute of tries, so make it at home. It can't start the detector again, on purpose: starting stays with the next power-up.
 
 ## Updating
 
@@ -352,7 +369,7 @@ Environment=SLOT17_CHECK_THREADS=2
 | `ssh: Could not resolve hostname slot17.local` | Your computer and the car computer must be on the same network. Wait two minutes after power-up. On older Windows, try the address shown in your phone's hotspot screen instead |
 | Someone helping you needs your logs | In the app: **Pi** screen, **Support package**. Choose a quick check, one drive or everything from a drive, then **Create the package**; the car computer makes one zip with a plain report, the setup check and the logs, without keys or passwords (under 1 MB for the quick check). Then **Share** it with anyone, or **Send to team** to give it to the Slot17 team: you get a code to tell them, and it is deleted after 30 days. Without the app, run `bash ~/Slot17/setup.sh logs` on the car computer. [SUPPORT.md](docs/operations/SUPPORT.md) explains the choices |
 | You don't know where to start | On the car computer, run `bash ~/Slot17/setup.sh doctor`. It only looks, changes nothing, and gives one verdict per part: receiver, service, detector, network, clock, server, power, storage, settings. The first problem it lists is usually the cause of the others. On the server, `bash ~/Slot17/setup.sh doctor server` |
-| The app says **No data from the car** | Is the hotspot on, and did the car computer join it? Is port 5732 open on the server? On the car computer, `bash ~/Slot17/setup.sh car --check` shows what is set up |
+| The app says **No data from the car** | Is the hotspot on, and did the car computer join it? Is port 5732 open on the server? On the car computer, `bash ~/Slot17/setup.sh car --check` shows what is set up. With Bluetooth set up and the phone in the car, the app shows the car computer **Over Bluetooth** even then |
 | The phone can't open the private link | The server's port 5732 isn't reachable from the internet. Open it in your hosting provider's firewall, and check the address with `bash ~/Slot17/setup.sh server --show` |
 | **Receiver input very low** | The receiver hears almost nothing. Check that the antenna is screwed in. A quiet place can also cause it, and indoors this message is normal |
 | The detector didn't start | Read why with `journalctl -u tetra-detector.service -n 40 --no-pager`. **Don't keep restarting it**: if the Airspy stopped responding, unplug it, plug it back in, and power-cycle the computer |
@@ -466,7 +483,7 @@ Read [SECURITY.md](SECURITY.md) before relying on this. The main points:
 - **A server of your own has no encryption:** it uses plain HTTP, so someone who can watch your connection could read your private link and use it. A hosted server from us (`name.slot17.cloud`) uses HTTPS.
 - **One key does everything:** your private link can view everything and send every request below, including stopping the detector and powering off the car computer. Keep it like a password; `/server new-keys` or a new server setup replaces it.
 - **The car computer accepts no incoming connections from the internet.** It collects the phone's requests from the server, and knows only these: stop the detector, power off, save a recording, send its log, run its setup check, switch its Pushover messages off or on, switch Bluetooth off or on or rename it, and make a support package. None of them can start the receiver.
-- **Bluetooth, if on:** a phone nearby can connect and read the alerts, but they are signed with a key only your phones get, through the server. The car computer takes only two commands over Bluetooth, switch Bluetooth off and rename it, and only signed with that key.
+- **Bluetooth, if on: signed, not encrypted.** Everything the car computer sends is signed with a key only your phones get, through the server, so nobody can feed your app false alerts. But no pairing is asked, so a phone nearby that connects can **read** what it sends: the alerts, and the car computer's state, which includes its health, its drives, its setup check, the network it uses and, with a 4G stick, the stick's provider and mobile cell, and a Pi log sent to your phone. It can't make the car computer do anything: the requests above go over Bluetooth too (except switching Bluetooth on and the key), only signed with that key, and each works once, so a recorded one can't be played back.
 - **Support packages** leave out keys, passwords and your private link, and include places only if you choose so. One goes to the Slot17 team only when you press **Send to team** and agree; the team's inbox can't be read from the internet, and deletes it after 30 days, or sooner when you take it back.
 
 ## Limits
@@ -476,7 +493,7 @@ Read [SECURITY.md](SECURITY.md) before relying on this. The main points:
 - **The receiver can hang.** An Airspy can stop responding after being started and stopped many times, and then only unplugging it helps. Slot17 therefore never restarts it automatically.
 - **iOS decides when the app runs.** iOS sometimes pauses the app for 5–36 seconds in the background, and can end it, after which it stays silent until you open it again.
 - **CarPlay shows a Live Activity, not an app.** A CarPlay app needs permission from Apple.
-- **Bluetooth needs iOS 18 on an iPhone**, and the car computer is visible to Bluetooth scanners nearby under its name while no phone is connected. If iOS ended the app, it reconnects but beeps again only once the app is opened, as without Bluetooth.
+- **Bluetooth needs iOS 18 on an iPhone**, reaches about as far as the car, and the car computer is visible to Bluetooth scanners nearby under its name whenever Bluetooth is on, also while your phone is connected (it keeps advertising, more slowly, so a second phone can join). If iOS ended the app, it reconnects but beeps again only once the app is opened, as without Bluetooth. The first set-up needs the server. Everything besides the alerts (1.6.0) has not been tested on a phone yet.
 - **Frequency drift.** A receiver's frequency changes with temperature and age. Ours measured +9.6 and later +4.1 ppm. Detection worked at both settings, but recalibrating now and then does no harm.
 
 ## Repository layout

@@ -33,7 +33,8 @@ The real code, before release, on the same car computer:
 - **Rename and switch-off from the settings:** both worked.
 - **Detector:** the drop counter stayed at its start-up value throughout.
 
-A phone has not been tested yet; that is the next step.
+Phones came next: the operator's iPhone with 1.4.0 and 1.5.0, which found the pairing prompts fixed in 1.5.1
+(below). The 1.6.0 additions have not been tested on a phone yet.
 
 ## The parts
 
@@ -68,11 +69,11 @@ A link that keeps ending is started again after 5, 30 and 120 s, then every 10 m
 | Service | `f9cb0001-aa93-4349-a576-0e70a736266f` |
 | `frames` | `f9cb0002-…`, notify (and read: the last frame) |
 | `info` | `f9cb0003-…`, read: `{"v":1,"name":…,"key_id":…,"software":…,"boot":…}` |
-| `control` | `f9cb0004-…`, write: a signed control frame from a phone (switch off, rename) |
+| `control` | `f9cb0004-…`, write: a signed control frame from a phone (switch off, rename; from 1.6.0 the app's operations) |
 | Advertising | The service UUID and the name, which ends up in the scan response. No TX power: with a 128-bit UUID it would leave no room for the name in 31 bytes |
 | Intervals | Apple's Accessory Design Guidelines (R32, chapter 57): 20 ms for 30 s after a start or a disconnect, then 152.5 ms. While a phone is connected, 1022.5 ms, so a second phone can still join |
 | Name | The adapter's alias, `Slot17` unless changed: up to 20 letters, digits, spaces, `.`, `-` or `_` (Apple advises against `:` and `;`). BlueZ keeps it across restarts |
-| Pairing | None. Apple advises not to require it to discover services; the signature below proves where a frame comes from, and the contents are no secret: anyone with an SDR hears the same band. **But BlueZ must not act as a GATT client** (1.5.1, below) |
+| Pairing | None. Apple advises not to require it to discover services; the signature below proves where a frame comes from. The link is therefore not encrypted, and any phone that connects can read the frames. Matches are no secret (anyone with an SDR hears the same band), but since 1.6.0 the state and the Pi log go this way too: the car computer's health, drives and setup check, its network and a 4G stick's provider and cell. SECURITY.md lists it as a known weakness. **And BlueZ must not act as a GATT client** (1.5.1, below) |
 
 ## Frames (version 1)
 
@@ -96,9 +97,9 @@ larger MTU, which iPhones and Android phones do by themselves.
 | Reply | the action answered, done or not, and a few words (at most 80 bytes) |
 
 **Control frames go the other way:** a phone writes them to `control`, to switch the link off or rename it
-without the server.
+without the server, and from 1.6.0 to send the app's operations (action 3, under "Everything over Bluetooth").
 - **Layout:** the same header with kind 16. Then the action (1 off, 2 rename), the name's length and the
-  name, then the tag.
+  name, then the tag. Action 3 carries a piece of an operation instead of a name.
 - **Boot and counter** are those of the newest frame the phone has from the car computer. The car computer
   takes the command only if:
   1. the tag checks out;

@@ -58,7 +58,7 @@ Yes. An antenna on the outside, like a magnetic roof antenna, hears more than on
 We use the UGREEN Nexode 60 W car charger (EC602). It gives 3 A at 5 V, which was enough for our Pi with the receiver, an SSD and a 4G stick. Bigger car chargers don't give the Pi more: their extra watts are at higher voltages. If Slot17 reports undervoltage, your setup needs more: use a 12 V to 5 V converter rated for 5 A, as the [README](../README.md#what-you-need) explains. Where to buy the parts in your country, with prices and a total: [slot17.cloud/parts/](https://slot17.cloud/parts/).
 
 ### Do I need internet in the car?
-Yes, so the car computer can reach the server. Your phone's hotspot is enough. A 4G USB stick with its own SIM saves your phone's battery; we use a ZTE MF833N.
+Not with Bluetooth on (since 1.6.0). The car computer then sends everything straight to the app, and the app's buttons work over it too. You still need internet once, at home is fine, to set Bluetooth up, and without it in the car you miss the web page, the car computer's part of the drive report and support packages; updates come when the car computer starts on your home Wi-Fi. Without Bluetooth, yes: the car computer reaches the server over your phone's hotspot, or a 4G USB stick with its own SIM, which saves your phone's battery (we use a ZTE MF833N). The [README](https://github.com/efeorman/Slot17#bluetooth-or-the-server) compares the two.
 
 ### What happens when I switch the car off?
 It just loses power, and that's fine. It starts again by itself the next time the car computer gets power. [POWER-LOSS.md](https://github.com/efeorman/Slot17/blob/main/docs/operations/POWER-LOSS.md) explains what that keeps.
@@ -80,7 +80,7 @@ It only receives, and it never decodes, decrypts or transmits anything. The rule
 No. Use the ready-made image: flash it with Raspberry Pi Imager, fill in one text file on the card, and start the Pi. [BUILD.md](https://github.com/efeorman/Slot17/blob/main/docs/BUILD.md) walks through it. Doing it by hand is one install line, and the [README](https://github.com/efeorman/Slot17#readme) goes step by step. Not used to it? [SETUP-WITH-AI.md](https://github.com/efeorman/Slot17/blob/main/docs/SETUP-WITH-AI.md) has a prompt that lets any AI chat assistant walk you through it.
 
 ### Why does it need a server?
-The Pi sits behind your phone's hotspot, so your phone can't reach it directly. Both can reach a small server on the internet, and that's all the server is for.
+The Pi sits behind your phone's hotspot, so your phone can't reach it over the internet. Both can reach a small server on the internet. With Bluetooth the phone also hears the Pi directly, without internet, but the server is still where the phone gets the Bluetooth key, and where the web page, updates, drive reports and support packages go through.
 
 ### Your server or my own?
 Ours is the easy way: type `/server create` in the Discord and you get your own address on slot17.cloud with HTTPS and your own keys, linked to your Discord account. Want to keep everything yourself? Rent a cheap Linux VPS and run one command. Both work the same in the app. [Step 2 of the README](https://github.com/efeorman/Slot17#step-2-set-up-the-display-server) has both.
