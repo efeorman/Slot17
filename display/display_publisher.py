@@ -22,7 +22,8 @@ analyses 0.5 s windows and confirms before an event is written.
     python3 display_publisher.py --once     # push the current state once (no history)
 """
 import argparse
-from collections import deque
+import base64
+from collections import OrderedDict, deque
 import hashlib
 import http.client
 import json
@@ -39,6 +40,7 @@ import sys
 import threading
 import time
 from urllib.parse import urlencode, urlsplit
+import zlib
 
 HEARTBEAT = Path("/run/tetra/watch.heartbeat")
 CONFIG = Path.home() / ".config/slot17-display.json"
@@ -52,7 +54,10 @@ FAST_RETRIES = 6       # ...this many times; then every KEEPALIVE_S, so an outag
 LINK_REPORT_S = 60.0   # a 'link:' line in the log this often: pushes, failures, milliseconds
 LOOP_S = 0.05          # events.jsonl check interval (0.1 s until 15 November 2026)
 HEARTBEAT_EVERY_S = 0.5
-STOPPED_EXIT_S = 30.0  # PartOf= does not follow a detector that dies on its own
+# Until 1.6.0 the publisher ended 30 s after a detector that died on its own (PartOf= does not follow
+# that), and took the Bluetooth link with it: in the car on 23 November the phone then heard nothing, not
+# even that the detector had stopped, and could not power the car computer off. It now keeps reporting
+# "stopped" with the reason; `systemctl stop` still ends both, and a start finds it already running.
 # A receiver that hears nothing is the one fault that wastes a whole drive, and the
 # detector treats it as telemetry only. Warn after a run far longer than the
 # transients seen on a working drive and far short of a dead antenna (806 windows).
@@ -871,6 +876,69 @@ BLUETOOTH_RESTART_S = (5.0, 30.0, 120.0, 600.0)  # after the link's process ende
 BLUETOOTH_SETTINGS_EVERY_S = 60.0                # re-read, in case setup.sh changed them
 BLUETOOTH_LINE_BYTES = 4096                      # one command: a pipe write this small is all or nothing
 BLUETOOTH_STOP_S = 3.0
+# 1.6.0: everything the server gets also goes over Bluetooth, for a phone without internet, and the phone's
+# operations come back the same way. Answers stay in the state for a few minutes, the newest 16.
+BLUETOOTH_STATE_EVERY_S = 2.0
+BLUETOOTH_ANSWERS_S = 300.0
+BLUETOOTH_ANSWERS = 16
+BLUETOOTH_OPS = {"mark", "poweroff", "logs", "notify", "doctor", "bluetooth", "support", "stop"}
+OPS_SEEN = Path.home() / ".cache/slot17-ops-seen.json"
+OPS_SEEN_KEEP = 512
+
+
+class OpMemory:
+    """The operations carried out, by id, so one that comes by both routes, or again later, runs once.
+
+    An app sends over Bluetooth when it can, and through the server when it can't or hears nothing back; the
+    server can also hand over an old one on the next drive. So the answers are kept in a small file, and the
+    same id is answered the same way again. Only answers are kept: an operation still running in a process
+    that ended is carried out again, as it always was.
+    """
+
+    def __init__(self, path=None):
+        """`path` None keeps the answers in memory only (tests, --once)."""
+        self.path, self.running, self.answers = Path(path) if path else None, set(), OrderedDict()
+        self.lock = threading.Lock()        # answers also come from the log, doctor and support threads
+        if self.path is None:
+            return
+        try:
+            rows = json.loads(self.path.read_text(encoding="utf-8"))
+            for row in rows[-OPS_SEEN_KEEP:]:
+                if isinstance(row, list) and len(row) == 3 and all(isinstance(x, str) for x in row):
+                    self.answers[row[0]] = (row[1], row[2])
+        except (OSError, ValueError, TypeError):
+            pass                            # none yet, or unreadable: nothing to remember
+
+    def seen(self, op_id):
+        """("state", "detail") of an answered one, "running", or None for a new one."""
+        with self.lock:
+            if op_id in self.answers:
+                return self.answers[op_id]
+            return "running" if op_id in self.running else None
+
+    def start(self, op_id):
+        with self.lock:
+            self.running.add(op_id)
+
+    def answer(self, op_id, state, detail):
+        with self.lock:
+            if op_id not in self.running and op_id not in self.answers:
+                return
+            self.running.discard(op_id)
+            self.answers[op_id] = (state, str(detail)[:160])
+            self.answers.move_to_end(op_id)
+            while len(self.answers) > OPS_SEEN_KEEP:
+                self.answers.popitem(last=False)
+            if self.path is None:
+                return
+            rows = [[k, s, d] for k, (s, d) in self.answers.items()]
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = self.path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(rows), encoding="utf-8")
+                os.replace(tmp, self.path)
+            except OSError as exc:
+                print(f"operation answers not saved: {type(exc).__name__}: {exc}", flush=True)
 
 
 def bluetooth_module():
@@ -900,6 +968,10 @@ class BluetoothLink:
         self.failures, self.next_start = 0, 0.0
         self.dropped = 0
         self.last_feed = -1e9
+        self.last_state = -1e9          # the whole state, last sent (1.6.0)
+        self.sent_detector = None       # the detector state the link last heard, so a change goes at once
+        self.was_subscribed = False
+        self.ops = deque(maxlen=64)     # operations a phone sent over Bluetooth, for the main loop
         self.settings, self.settings_at = None, -1e9
 
     def _spawn(self):
@@ -958,6 +1030,10 @@ class BluetoothLink:
                 line = json.loads(raw)
             except ValueError:
                 continue
+            if isinstance(line, dict) and "op" in line:
+                if isinstance(line["op"], dict):
+                    self.ops.append(line["op"])     # carried out by the main loop, like the server's
+                continue
             if isinstance(line, dict):
                 with self.lock:
                     self.status = line
@@ -965,6 +1041,19 @@ class BluetoothLink:
                     self.failures = 0
                 if line.get("settings_changed"):
                     self.settings_at = -1e9     # a phone changed them over Bluetooth: read them again
+
+    def take_ops(self):
+        """The operations phones sent over Bluetooth since the last call."""
+        out = []
+        while self.ops:
+            out.append(self.ops.popleft())
+        return out
+
+    def subscribed(self):
+        """A phone listens: only then is a whole state worth packing."""
+        with self.lock:
+            listening = bool(self.status.get("subscribed"))
+        return listening and self.running()
 
     def feed(self, command):
         """Hand one command to the link, or drop it when the link is busy. Returns True when written."""
@@ -1275,9 +1364,14 @@ class Pusher:
 
 
 class Publisher:
-    def __init__(self, send, heartbeat=HEARTBEAT, phone=None, bluetooth=None):
+    def __init__(self, send, heartbeat=HEARTBEAT, phone=None, bluetooth=None, ops_seen=None):
         self.phone = phone
         self.bluetooth = bluetooth    # a BluetoothLink, or None
+        self.ops_seen = ops_seen if ops_seen is not None else OpMemory()
+        self.answers = OrderedDict()  # op id -> what the phone sees of it over Bluetooth (1.6.0)
+        self.state_due = False        # an answer is new: the next state goes at once
+        self.session_dir = None       # the detector's session folder, also once it stopped
+        self.stop_reason = (None, None)   # (session folder, why it ended), read once per session
         self.pusher = None            # a Pusher in the running service; None sends in line (--once, tests)
         self.support = SupportJob()   # a support package asked for from the app
         self.drives, self.drives_at = None, -1e9
@@ -1315,6 +1409,28 @@ class Publisher:
     def ack(self, op_id, state, detail=""):
         with self.acks_lock:
             self.acks.append({"id": op_id, "state": state, "detail": str(detail)[:160]})
+            if op_id in self.answers:
+                self.answers[op_id].update(state=state, detail=str(detail)[:160], at=time.monotonic())
+                self.answers.move_to_end(op_id)
+                self.state_due = True
+        self.ops_seen.answer(op_id, state, detail)
+
+    def taken(self, op):
+        """An operation is being carried out: the phone sees "sent" over Bluetooth until its answer."""
+        with self.acks_lock:
+            self.answers[op["id"]] = {"id": op["id"], "kind": str(op.get("kind"))[:20], "state": "sent", "detail": "",
+                                      "at": time.monotonic()}
+            self.answers.move_to_end(op["id"])
+            while len(self.answers) > 4 * BLUETOOTH_ANSWERS:
+                self.answers.popitem(last=False)
+            self.state_due = True
+        self.ops_seen.start(op["id"])
+
+    def _answers(self, now_mono):
+        with self.acks_lock:
+            rows = [{k: a[k] for k in ("id", "kind", "state", "detail")} for a in self.answers.values()
+                    if now_mono - a["at"] <= BLUETOOTH_ANSWERS_S]
+        return rows[-BLUETOOTH_ANSWERS:]
 
     def session_path(self):
         session = (self.heartbeat.hb or {}).get("session")
@@ -1351,9 +1467,30 @@ class Publisher:
         while len(self.mark_ops) > 256:
             self.mark_ops.pop(next(iter(self.mark_ops)))
 
-    def finished(self, now_mono):
-        """True once the detector has been gone for STOPPED_EXIT_S."""
-        return self.stopped_since is not None and now_mono - self.stopped_since >= STOPPED_EXIT_S
+    def detector_state(self, now_mono):
+        """The heartbeat's state; once the detector has stopped, with why its session ended, when it says so."""
+        detector = self.heartbeat.state(now_mono)
+        if detector["state"] == "stopped" and self.session_dir is not None:
+            reason = self._stop_reason(now_mono)
+            if reason:
+                detector["reasons"] = [reason]
+        return detector
+
+    def _stop_reason(self, now_mono):
+        """`failure_reason` from the stopped session's summary.json, read once per session (a small file)."""
+        if self.stop_reason[0] != self.session_dir:
+            reason = None
+            try:
+                with open(self.session_dir / "summary.json", "rb") as fh:
+                    found = json.loads(fh.read(256 << 10)).get("failure_reason")
+                if isinstance(found, str) and found.strip():
+                    reason = found.strip()[:60]
+            except (OSError, ValueError, AttributeError):
+                pass                            # not written yet, or unreadable: no reason to give
+            if reason is None and self.stopped_since is not None and now_mono - self.stopped_since < 10:
+                return None                     # the detector may still be writing it: ask again
+            self.stop_reason = (self.session_dir, reason)
+        return self.stop_reason[1]
 
     def _follow(self, hb, now_mono):
         session = Path(hb["session"]) if isinstance(hb.get("session"), str) and hb["session"] else None
@@ -1361,6 +1498,7 @@ class Publisher:
             return
         joining = self.session is None
         self.session = session.name
+        self.session_dir = session
         self.channels, self.pending = Channels(), deque(maxlen=PENDING_MATCHES)
         # The input level belongs to the hardware, not the session, so the window
         # count carries over; only the notice re-arms, so a restart with the antenna
@@ -1391,31 +1529,120 @@ class Publisher:
         self.pending.extend(new)
         state = self.heartbeat.state(now_mono)["state"]
         changed = state != self.last_state            # e.g. running -> stale/stopped: say so at once
+        self.report_marks()                           # answers go out by Bluetooth too, not only with a push
         if self.bluetooth is not None:
-            self._feed_bluetooth(now_mono, new, changed)
+            self._feed_bluetooth(now_mono, new, state)
         # After a failed push, try again within half a second rather than at the next keepalive.
         wait = RETRY_S if 0 < self.failures <= FAST_RETRIES else KEEPALIVE_S
         if not new and not changed and not self.owed and now_mono - self.last_push < wait:
             return False
         return self.push(now_mono)
 
-    def _feed_bluetooth(self, now_mono, new, changed):
-        """New matches to the Bluetooth link at once; the detector and channels at the server's rhythm.
+    def _feed_bluetooth(self, now_mono, new, state):
+        """New matches to the Bluetooth link at once; the detector and channels at the server's rhythm; and
+        from 1.6.0 the whole state every 2 s, while a phone listens.
 
         A match carries the same fields as in the push to the server, so the phone decides the same
-        way whichever route brings it first.
+        way whichever route brings it first. This keeps its own rhythm: a push that hangs on a server
+        that does not answer must not hold Bluetooth up, which is the route for exactly that.
         """
         link = self.bluetooth
         link.poll(now_mono)
         if not link.running():
+            link.was_subscribed = False
             return
+        changed = state != link.sent_detector
         if new:
             link.feed({"matches": [{"id": m["id"], "ch": m["ch"], "strength_db": m["strength_db"],
                                     "age_s": round(max(0.0, now_mono - m["seen"]), 3), "rule": m.get("rule")}
                                    for m in new]})
         if new or changed or now_mono - link.last_feed >= KEEPALIVE_S:
-            link.last_feed = now_mono
-            link.feed({"status": self.heartbeat.state(now_mono), "channels": self.channels.snapshot(now_mono)})
+            link.last_feed, link.sent_detector = now_mono, state
+            link.feed({"status": self.detector_state(now_mono), "channels": self.channels.snapshot(now_mono)})
+        listening = link.subscribed()
+        joined, link.was_subscribed = listening and not link.was_subscribed, listening
+        if listening and (joined or changed or self.state_due or now_mono - link.last_state >= BLUETOOTH_STATE_EVERY_S):
+            link.last_state, self.state_due = now_mono, False
+            self._feed_state(now_mono)
+
+    def send_state_now(self):
+        """Before this process may end (power off, stop): the newest answers to a listening phone at once."""
+        link = self.bluetooth
+        if link is not None and link.subscribed():
+            now = time.monotonic()
+            link.last_state, self.state_due = now, False
+            self._feed_state(now)
+
+    def _feed_state(self, now_mono):
+        """The whole state, packed, as one line for the link. Too long for one line (the pipe takes 4 KB at
+        once): the drives list goes first, then the doctor's verdicts; the app keeps the last ones it had."""
+        doc = self.bluetooth_state(now_mono)
+        for drop in (None, "drives", "doctor"):
+            if drop:
+                doc["state"].pop(drop, None)
+            deflate = zlib.compressobj(9, zlib.DEFLATED, -15)
+            packed = deflate.compress(json.dumps(doc, separators=(",", ":")).encode("utf-8")) + deflate.flush()
+            line = {"state": base64.b64encode(packed).decode("ascii")}
+            if len(line["state"]) + 16 <= BLUETOOTH_LINE_BYTES:
+                return self.bluetooth.feed(line)
+        self.bluetooth.dropped += 1
+        return False
+
+    def bluetooth_state(self, now_mono):
+        """Everything the server gets, as the app reads it from the server (`PiState`), and the answers to the
+        phone's operations: `{"v": 1, "state": {...}, "ops": [...]}`. Matches have their own frames."""
+        self._details(now_mono)
+        state = {"source": "bluetooth", "session": self.session, "snapshot_age_s": 0.0,
+                 "detector": self.detector_state(now_mono), "channels": self.channels.snapshot(now_mono),
+                 "matches": [], "features": FEATURES, "pi": self._pi()}
+        for key, value in (("link", getattr(self, "link", None)), ("notify", getattr(self, "notify_state", None)),
+                           ("update", self.update_status), ("drives", self.drives), ("software", self.software)):
+            if value:
+                state[key] = value
+        bluetooth = self.bluetooth.state(now_mono) if self.bluetooth is not None else None
+        if bluetooth:
+            state["bluetooth"] = bluetooth
+        if self.support is not None and self.support.state:
+            state["support"] = dict(self.support.state)
+        doctor = getattr(self, "doctor", None)
+        if doctor is not None and doctor.result is not None:
+            state["doctor"] = {"items": doctor.result["items"],
+                               "age_s": round(max(0.0, time.monotonic() - doctor.result["at"]), 1)}
+        return {"v": 1, "state": state, "ops": self._answers(now_mono)}
+
+    def _details(self, now_mono):
+        """The slow parts of a state, read now and then: for the server's pushes and for Bluetooth alike."""
+        if now_mono - self.last_health >= PI_HEALTH_EVERY_S:
+            self.last_health = now_mono
+            self.pi_health = read_pi_health(self.session_path())
+            self.notify_state = notify_state()
+            try:
+                self.link = read_link(getattr(self, "link_stats", None), synced=getattr(self, "clock_synced", None))
+            except Exception:               # noqa: BLE001 - a detail for the app; the push must go
+                self.link = None
+        if now_mono - self.drives_at >= DRIVES_EVERY_S:
+            self.drives_at, self.drives = now_mono, drives_state()
+        doctor = getattr(self, "doctor", None)
+        if doctor is not None and doctor.due(now_mono):
+            doctor.start(now_mono)
+        if self.updater is not None and now_mono - self.last_update_status >= UPDATE_STATUS_EVERY_S:
+            self.last_update_status = now_mono
+            try:
+                self.update_status = self.updater.status()
+            except Exception as exc:        # noqa: BLE001 - never worth losing a push for
+                self.update_status = {"state": "error", "commit": "", "seq": 0, "detail": type(exc).__name__}
+        if self.software is None:
+            self.software = software_version() or ""
+
+    def _pi(self):
+        hb = self.heartbeat.hb or {}
+        pi = dict(self.pi_health)
+        if finite(hb.get("dropped")):
+            pi["dropped_samples"] = float(hb["dropped"])
+        if finite(hb.get("windows")):
+            window_s = float(hb["window_s"]) if finite(hb.get("window_s")) and hb["window_s"] > 0 else 3.0
+            pi["session_s"] = float(hb["windows"]) * window_s     # never from a clock: see CONTRIBUTING.md
+        return pi
 
     def _antenna_notice(self, now_mono):
         """Tell the phone once when the receiver stops hearing anything, and once when it recovers."""
@@ -1463,27 +1690,13 @@ class Publisher:
                     "age_s": round(max(0.0, now_mono - m["seen"]), 2), "delay_s": m["delay_s"],
                     **({"rule": m["rule"]} if m.get("rule") else {})}
                    for m in fresh]
-        detector = self.heartbeat.state(now_mono)
+        detector = self.detector_state(now_mono)
         self.last_state = detector["state"]
-        if now_mono - self.last_health >= PI_HEALTH_EVERY_S:
-            self.last_health = now_mono
-            self.pi_health = read_pi_health(self.session_path())
-            self.notify_state = notify_state()
-            try:
-                self.link = read_link(getattr(self, "link_stats", None), synced=getattr(self, "clock_synced", None))
-            except Exception:               # noqa: BLE001 - a detail for the app; the push must go
-                self.link = None
-        hb = self.heartbeat.hb or {}
-        pi = dict(self.pi_health)
-        if finite(hb.get("dropped")):
-            pi["dropped_samples"] = float(hb["dropped"])
-        if finite(hb.get("windows")):
-            window_s = float(hb["window_s"]) if finite(hb.get("window_s")) and hb["window_s"] > 0 else 3.0
-            pi["session_s"] = float(hb["windows"]) * window_s     # never from a clock: see CONTRIBUTING.md
+        self._details(now_mono)
         self.report_marks()
         out = {"v": 3, "snapshot_mono": now_mono, "seq": self.seq, "session": self.session, "detector": detector,
                "channels": self.channels.snapshot(now_mono), "matches": matches,
-               "features": FEATURES, "pi": pi, "acks": self._acks_to_send()}
+               "features": FEATURES, "pi": self._pi(), "acks": self._acks_to_send()}
         if getattr(self, "link", None):
             out["link"] = self.link
         if getattr(self, "notify_state", None):
@@ -1492,30 +1705,17 @@ class Publisher:
             bluetooth = self.bluetooth.state(now_mono)
             if bluetooth:
                 out["bluetooth"] = bluetooth
-        if now_mono - self.drives_at >= DRIVES_EVERY_S:
-            self.drives_at, self.drives = now_mono, drives_state()
         if self.drives is not None:
             out["drives"] = self.drives
         if self.support is not None and self.support.state:
             out["support"] = dict(self.support.state)
         doctor = getattr(self, "doctor", None)
         if doctor is not None:
-            if doctor.due(now_mono):
-                doctor.start(now_mono)
             verdicts = doctor.for_push(now_mono)
             if verdicts:
                 out["doctor"] = verdicts
-        if self.updater is not None:
-            if now_mono - self.last_update_status >= UPDATE_STATUS_EVERY_S:
-                self.last_update_status = now_mono
-                try:
-                    self.update_status = self.updater.status()
-                except Exception as exc:        # noqa: BLE001 - never worth losing a push for
-                    self.update_status = {"state": "error", "commit": "", "seq": 0, "detail": type(exc).__name__}
-            if self.update_status:
-                out["update"] = self.update_status
-        if self.software is None:
-            self.software = software_version() or ""
+        if self.updater is not None and self.update_status:
+            out["update"] = self.update_status
         if self.software:
             out["software"] = self.software
         return out
@@ -1632,7 +1832,8 @@ def publisher_lock(path):
 def run(args):
     cfg = load_config(args.config)
     sender = Sender(cfg["url"], cfg["token"], take_commands=not args.once)
-    pub = Publisher(sender, phone=phone_sender(), bluetooth=None if args.once else BluetoothLink())
+    pub = Publisher(sender, phone=phone_sender(), bluetooth=None if args.once else BluetoothLink(),
+                    ops_seen=None if args.once else OpMemory(OPS_SEEN))
     if not args.once:
         pub.pusher = Pusher(sender)            # --once sends in line: its first step is its answer
     return run_publisher(args, sender, pub, cfg)
@@ -1708,6 +1909,8 @@ def run_poweroff(op, pub, runner=None):
         return True
     # Report first: once this works there is no publisher left to report anything.
     pub.ack(op_id, "done", "Powering off")
+    if hasattr(pub, "send_state_now"):
+        pub.send_state_now()                # over Bluetooth at once: the server may be out of reach
     pub.push_now(time.monotonic())
     runner = runner or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=30))
     print("operator command: power off", flush=True)
@@ -1821,31 +2024,117 @@ class Doctor:
 
 
 def handle_ops(sender, pub, cfg):
-    """Carry out the app's operations. Returns False when the publisher should wind up."""
+    """Carry out the app's operations, from the server and (1.6.0) over Bluetooth. Returns False when the
+    publisher should wind up."""
     keep_going = True
     while sender.pending_ops:
-        op = sender.pending_ops.popleft()
-        if not re.fullmatch(r"[0-9a-f]{32}", str(op.get("id"))):
-            continue
-        if op.get("kind") == "mark":
-            pub.handle_mark(op)
-        elif op.get("kind") == "logs":
-            upload_pi_log(op, pub, cfg)
-        elif op.get("kind") == "poweroff":
-            keep_going = run_poweroff(op, pub) and keep_going
-        elif op.get("kind") == "notify":
-            run_notify(op, pub)
-        elif op.get("kind") == "bluetooth":
-            run_bluetooth(op, pub)
-        elif op.get("kind") == "support":
-            run_support(op, pub, cfg)
-        elif op.get("kind") == "doctor":
-            doctor = getattr(pub, "doctor", None)
-            if doctor is None or doctor.busy:
-                pub.ack(op["id"], "failed", "the check is already running" if doctor else "not available")
-            else:
-                doctor.start(time.monotonic(), then=lambda ok, detail, i=op["id"]: pub.ack(i, "done" if ok else "failed", detail))
+        keep_going = run_op(sender.pending_ops.popleft(), pub, cfg, "server") and keep_going
+    link = getattr(pub, "bluetooth", None)
+    for op in (link.take_ops() if link is not None else []):
+        keep_going = run_op(op, pub, cfg, "bluetooth") and keep_going
     return keep_going
+
+
+def bluetooth_op_problem(op):
+    """Why an operation that came over Bluetooth is refused, or None. The server checks the ones it passes
+    on; these come from a phone with the link's key, and are checked here the same way."""
+    kind = op.get("kind")
+    if kind not in BLUETOOTH_OPS:
+        return "Not something the car computer does over Bluetooth"
+    if kind == "bluetooth" and "pair" in op:
+        return "The key only comes through the server"
+    if kind == "mark" and (not isinstance(op.get("note", ""), str) or len(op.get("note", "")) > 500):
+        return "The note is too long"
+    if kind in ("mark", "poweroff") and (not finite(op.get("age_s", 0)) or not 0 <= op.get("age_s", 0) <= 86400):
+        return "Unknown age"
+    return None
+
+
+def run_op(op, pub, cfg, route="server"):
+    """One operation, whichever route brought it. One that came before is answered as it was then, so a
+    sighting sent over Bluetooth and through the server is saved once. Returns False to wind up."""
+    if not isinstance(op, dict) or not re.fullmatch(r"[0-9a-f]{32}", str(op.get("id"))):
+        return True
+    seen = pub.ops_seen.seen(op["id"])
+    if isinstance(seen, tuple):
+        pub.taken(op)                           # so the phone sees the answer over Bluetooth as well
+        pub.ack(op["id"], *seen)
+        return True
+    if seen == "running" and op.get("kind") != "mark":        # a sighting may be offered again: that is safe
+        return True
+    pub.taken(op)
+    if route == "bluetooth":
+        problem = bluetooth_op_problem(op)
+        if problem:
+            pub.ack(op["id"], "failed", problem)
+            return True
+    kind = op.get("kind")
+    if kind == "mark":
+        pub.handle_mark(op)
+    elif kind == "logs":
+        if op.get("to") == "phone":
+            send_pi_log_over_bluetooth(op, pub)
+        else:
+            upload_pi_log(op, pub, cfg)
+    elif kind == "poweroff":
+        return run_poweroff(op, pub)
+    elif kind == "notify":
+        run_notify(op, pub)
+    elif kind == "bluetooth":
+        run_bluetooth(op, pub)
+    elif kind == "support":
+        run_support(op, pub, cfg)
+    elif kind == "stop":
+        pub.ack(op["id"], "done", "Stopping the detector")
+        pub.send_state_now()                    # the answer goes before this process is stopped with it
+        if run_stop_command({"action": "stop", "note": str(op.get("note") or "from the app, over Bluetooth")[:120]}, pub):
+            pub.ack(op["id"], "failed", "The car computer refused to stop the detector")
+            return True
+        return False
+    elif kind == "doctor":
+        doctor = getattr(pub, "doctor", None)
+        if doctor is None or doctor.busy:
+            pub.ack(op["id"], "failed", "the check is already running" if doctor else "not available")
+        else:
+            doctor.start(time.monotonic(), then=lambda ok, detail, i=op["id"]: pub.ack(i, "done" if ok else "failed", detail))
+    return True
+
+
+def send_pi_log_over_bluetooth(op, pub, collect=collect_pi_log):
+    """The Pi log, straight to the phone that asked over Bluetooth (1.6.0): for a car without internet. The
+    same report as the server gets, packed into a file the link sends in pieces."""
+    link = getattr(pub, "bluetooth", None)
+    if link is None or not link.subscribed():
+        pub.ack(op["id"], "failed", "No phone is connected over Bluetooth")
+        return None
+    if not pub.log_upload_busy.acquire(blocking=False):
+        pub.ack(op["id"], "failed", "A log is already being sent")
+        return None
+
+    def work():
+        path = Path.home() / ".cache" / f"slot17-bt-{op['id'][:16]}.z"
+        try:
+            text = collect(pub.session_path(), pub.heartbeat.path).decode("utf-8", "replace")
+            deflate = zlib.compressobj(9, zlib.DEFLATED, -15)
+            packed = deflate.compress(json.dumps({"v": 1, "op": op["id"], "kind": "pi-log", "text": text},
+                                                 separators=(",", ":")).encode("utf-8")) + deflate.flush()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(packed)
+            if not link.feed({"file": {"path": str(path)}}):
+                raise OSError("the Bluetooth link is busy")
+            print(f"Pi log sent over Bluetooth ({len(text.encode())} bytes, {len(packed)} packed)", flush=True)
+            pub.ack(op["id"], "done", f"Sent over Bluetooth ({max(1, len(packed) // 1024)} KB)")
+        except Exception as exc:            # noqa: BLE001 - report it, keep the display running
+            print(f"Pi log over Bluetooth failed: {type(exc).__name__}: {exc}", flush=True)
+            pub.ack(op["id"], "failed", f"Not sent: {type(exc).__name__}")
+            path.unlink(missing_ok=True)
+        finally:
+            pub.log_upload_busy.release()
+    thread = threading.Thread(target=work, daemon=True, name="bluetooth-log")
+    thread.start()
+    return thread
 
 
 def clock_synced():
@@ -1887,6 +2176,7 @@ def run_publisher(args, sender, pub, cfg=None):
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     print(f"publishing to {sender.host}:{sender.port}", flush=True)
+    said_stopped = False
     link_since = time.monotonic()
     synced = clock_synced()
     pub.clock_synced, pub.link_stats = synced, sender.stats
@@ -1903,9 +2193,9 @@ def run_publisher(args, sender, pub, cfg=None):
         if not handle_ops(sender, pub, cfg or {}):
             break
         pub.check_for_update(time.monotonic())
-        if pub.finished(time.monotonic()):
-            print(f"no detector heartbeat for {STOPPED_EXIT_S:.0f} s; exiting", flush=True)
-            break
+        if pub.stopped_since is not None and not said_stopped:
+            print("no detector heartbeat: reporting it as stopped, and staying for the app", flush=True)
+        said_stopped = pub.stopped_since is not None
         time.sleep(max(0.02, LOOP_S - (time.monotonic() - started)))
     pub.stopped()
     if pub.bluetooth is not None:

@@ -25,6 +25,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import nl.slot17.core.AlertDecision
+import nl.slot17.core.BluetoothFile
+import nl.slot17.core.BluetoothView
 import nl.slot17.core.AlertEngine
 import nl.slot17.core.AlertRecord
 import nl.slot17.core.AlertSettings
@@ -112,10 +114,11 @@ class AppModel(private val context: Context) {
     private val faultNotices = FaultNotices()
     /** The Bluetooth route to the car computer, beside the server (1.4.0). */
     val bluetooth = BluetoothRoute(context, store, sendOp = { kind, fields, apply -> sendOp(kind, fields, apply) },
-        carState = { lastMessage?.state }, deliver = ::bluetoothMatches, changed = ::refresh, note = ::note)
+        carState = { carStateNow }, deliver = ::bluetoothMatches, changed = ::refresh, note = ::note,
+        carStateAge = { carStateAge }, answered = ::bluetoothAnswers, fileArrived = ::bluetoothFile)
     /** Support packages from the Pi screen (1.5.0). */
     val support = SupportRoute(context, scope, client, sendOp = { kind, fields, apply -> sendOp(kind, fields, apply) },
-        carState = { if (demo) null else lastMessage?.state }, phoneFiles = ::supportPhoneFiles, note = ::note)
+        carState = { if (demo) null else carStateNow }, phoneFiles = ::supportPhoneFiles, note = ::note)
 
     // What the screens show
     var tab by mutableStateOf(Tab.LIVE)
@@ -181,6 +184,9 @@ class AppModel(private val context: Context) {
     var driveUpload by mutableStateOf(ActionState())
         private set
     var piState by mutableStateOf<PiState?>(null)
+        private set
+    /** Pi logs that came over Bluetooth (1.6.0), newest first. Declared before init, which loads them. */
+    var phonePiLogs by mutableStateOf(emptyList<PhoneLog>())
         private set
     var lastMessage by mutableStateOf<ServerMessage?>(null)
         private set
@@ -251,6 +257,7 @@ class AppModel(private val context: Context) {
     }
 
     init {
+        loadPhonePiLogs()
         audio.onPlayed = { kind, peak -> note("sound played: ${kind.name.lowercase()}, peak ${Fmt.fixed(peak, 1)} dBFS, output ${audio.routeName}") }
         location.onChange = { locationStatus = location.statusText }
         location.trackEvery = settings.trackEvery
@@ -624,6 +631,7 @@ class AppModel(private val context: Context) {
         checkAutoSleep(now)
         checkDriveEnded(now)
         bluetooth.stats.settle(now)
+        checkBluetoothSent(now)
         updateLocationPower(now)
         resendPending(now)
         checkFaultNotices(now)
@@ -660,9 +668,12 @@ class AppModel(private val context: Context) {
 
     private fun checkEquipmentTones(now: Double) {
         if (demo || !audio.armed || !settings.sound || now < mutedUntil) return
-        val live = tracker.live(now)
+        // Live by either route: with the server gone and Bluetooth live there is nothing to warn about (1.6.0).
+        val live = tracker.live(now) || bluetooth.feed.live(now)
         if (live) { wasLiveAt = now; linkToneOutageDone = false; expectingSilence = false }
-        if (tracker.detectorState == "stopped") expectingSilence = true
+        // A stop asked for is expected silence. One by itself (1.6.0 car computers say why) is not: the warning plays.
+        val detectorNow = if (serverCarFresh(now)) tracker.frame?.message?.state?.detector else bluetooth.feed.currentDetector(now)
+        if (detectorNow?.state == "stopped" && detectorNow?.reasons.isNullOrEmpty()) expectingSilence = true
         val last = wasLiveAt
         if (settings.linkLostTone && last != null && !live && !expectingSilence && !linkToneOutageDone && now - last >= settings.linkLostAfter) {
             playLinkWarning("link lost for ${Fmt.fixed(settings.linkLostAfter, 0)} s: playing the warning, silence no longer means anything")
@@ -672,7 +683,7 @@ class AppModel(private val context: Context) {
             now - listeningSince >= max(settings.linkLostAfter, 60.0)) {
             playLinkWarning("never connected since the app was opened: playing the warning, silence means nothing")
         }
-        if (StatusBuilder.receiverQuiet(tracker, settings, now) && now - lastQuietTone >= settings.receiverToneRepeat) {
+        if (StatusBuilder.receiverQuiet(tracker, settings, now, bluetoothView(now)) && now - lastQuietTone >= settings.receiverToneRepeat) {
             lastQuietTone = now
             note("receiver hears nothing: playing the warning")
             audio.play(SoundKind.WARNING)
@@ -825,18 +836,18 @@ class AppModel(private val context: Context) {
     private fun refresh() {
         val now = mono()
         nowMs = System.currentTimeMillis() / 1000 * 1000
-        headline = StatusBuilder.headline(tracker, now, engine.lastDelay, hasLink || demo)
-        chain = StatusBuilder.chain(tracker, now, hasLink || demo, StatusBuilder.quietLimit(tracker.frame?.message?.state?.detector, settings))
+        val view = bluetoothView(now)
+        headline = StatusBuilder.headline(tracker, now, engine.lastDelay, hasLink || demo, view)
+        chain = StatusBuilder.chain(tracker, now, hasLink || demo,
+            StatusBuilder.quietLimit(view?.detector ?: tracker.frame?.message?.state?.detector, settings), view)
         val frame = tracker.frame
         val state = frame?.message?.state
         lastMessage = frame?.message
-        val serverFresh = frame != null && tracker.carAge(now) <= LinkTracker.CAR_STALE
-        // Without the server, the car computer's own state over Bluetooth, on top of the server's last report.
+        val serverFresh = serverCarFresh(now)
+        // Without the server, the car computer's own state over Bluetooth: from 1.6.0 car computers all of it, from
+        // older ones the detector and channels on top of the server's last report.
         val overBluetooth = !serverFresh && bluetooth.feed.live(now)
-        piState = if (serverFresh) state else if (overBluetooth) bluetooth.feed.piState(state, now) else null
-        if (overBluetooth) {
-            headline = HeadlineStatus(Level.OK, "Live over Bluetooth", "No link to the server: alerts come straight from the car computer")
-        }
+        piState = if (serverFresh) state else if (bluetooth.feed.heard(now)) bluetooth.feed.piState(state, now) else null
         val carFresh = frame != null && tracker.clockReady(now) && tracker.carAge(now) <= LinkTracker.CAR_STALE &&
             tracker.sinceRx(now) <= LinkTracker.LINK_LOST
         val bars = carFresh && tracker.detectorActive
@@ -860,7 +871,7 @@ class AppModel(private val context: Context) {
         moreChannels = max(0, rows.size - 3)
         extraMeters = rows.drop(3).take(6)
         meters = rows.take(3)
-        receiverQuiet = StatusBuilder.receiverQuiet(tracker, settings, now)
+        receiverQuiet = StatusBuilder.receiverQuiet(tracker, settings, now, view)
         settlePushoverWanted()
         bluetooth.settleWanted()
         mutedSeconds = if (now < mutedUntil) ceil(mutedUntil - now).toInt() else 0
@@ -909,12 +920,43 @@ class AppModel(private val context: Context) {
     val ignoringBatteryOptimisation: Boolean
         get() = (context.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(context.packageName)
 
-    /** Why this action cannot be used right now, in words, or null if it can. */
+    /** The server has fresh data from the car computer. */
+    private fun serverCarFresh(now: Double): Boolean = tracker.frame != null && tracker.carAge(now) <= LinkTracker.CAR_STALE
+
+    /** Bluetooth's word on the car, for the lights and the line: only when the server has nothing fresh from it. */
+    private fun bluetoothView(now: Double): BluetoothView? {
+        if (demo || serverCarFresh(now) || !bluetooth.feed.heard(now)) return null
+        return bluetooth.feed.currentDetector(now)?.let { BluetoothView(it) }
+    }
+
+    /** The newest state there is, whichever route brought it, however old: [carStateAge] says how old. */
+    val carStateNow: PiState? get() = piState ?: lastMessage?.state
+
+    val carStateAge: Double?
+        get() {
+            val now = mono()
+            if (serverCarFresh(now)) return tracker.carAge(now)
+            piState?.let { return it.snapshotAge }
+            return if (tracker.frame == null) null else tracker.carAge(now)
+        }
+
+    /** The detector runs, by whichever route says so freshly. */
+    private val detectorActiveNow: Boolean
+        get() {
+            val now = mono()
+            return if (serverCarFresh(now)) tracker.detectorActive else bluetooth.feed.live(now)
+        }
+
+    /**
+     * Why this action cannot be used right now, in words, or null if it can. Only a sighting needs the detector
+     * running; power off, the Pi log and the check work on a car computer whose detector stopped (1.6.0).
+     */
     fun unavailable(feature: String): String? {
         if (demo) return "Not available in demo mode"
         val state = piState ?: return "The Pi is not sending data"
-        if (!tracker.detectorActive) return "The detector is not running, so the Pi has no link to the app"
+        if (feature == "mark" && !detectorActiveNow) return "The detector is not running, so there is no session to save it in"
         if (feature !in (state.features ?: emptyList())) return "The Pi needs the newer publisher for this"
+        if (!serverCarFresh(mono()) && !bluetooth.canSendOps) return "Only over the server, or over Bluetooth from car computer software 1.6.0"
         return null
     }
 
@@ -1018,12 +1060,17 @@ class AppModel(private val context: Context) {
 
     private fun send(s: Sighting) {
         if (demo) { update(s.id) { it.copy(phase = Sighting.Phase.SAVED, detail = "Demo only, nothing was sent") }; return }
-        if (!hasLink) return
         val text = listOf(s.note, s.place?.noteText ?: "").filter { it.isNotEmpty() }.joinToString("; ")
         val json = buildJsonObject {
             put("kind", "mark"); put("id", s.id); put("label", s.label.wire); put("note", text.take(500))
             put("age_s", max(0.0, (System.currentTimeMillis() - s.seenAtMs) / 1000.0)); put("phone_utc", s.seenAtMs / 1000.0)
         }
+        // Over Bluetooth first (1.6.0): the car computer answers in its next state; the server is the fallback.
+        if (sendOverBluetooth(json)) {
+            update(s.id) { if (it.phase == Sighting.Phase.SENDING) it.copy(phase = Sighting.Phase.WAITING_FOR_PI, detail = "Sent over Bluetooth") else it }
+            return
+        }
+        if (!hasLink) return
         scope.launch {
             client.send("api/op", json).onSuccess {
                 update(s.id) { if (it.phase == Sighting.Phase.SENDING) it.copy(phase = Sighting.Phase.WAITING_FOR_PI, detail = "Waiting for the Pi") else it }
@@ -1036,10 +1083,12 @@ class AppModel(private val context: Context) {
 
     /** Keeps trying until the Pi has answered. Repeats are harmless: both ends ignore a known id. */
     private fun resendPending(now: Double) {
-        if (now - lastResend < 5 || demo || !hasLink) return
+        if (now - lastResend < 5 || demo || !(hasLink || bluetooth.canSendOps)) return
         lastResend = now
-        val listed = tracker.frame?.message?.ops?.map { it.id }?.toSet() ?: emptySet()
-        sightings.filter { it.needsSending && (it.phase == Sighting.Phase.SENDING || it.id !in listed) }.take(50).forEach(::send)
+        // Listed by either route: the server's queue, or the car computer's answers over Bluetooth.
+        val listed = (tracker.frame?.message?.ops?.map { it.id } ?: emptyList()).toSet() + bluetooth.feed.answers.map { it.id }
+        sightings.filter { it.needsSending && (it.phase == Sighting.Phase.SENDING || it.id !in listed) && it.id !in bluetoothSent }
+            .take(50).forEach(::send)
     }
 
     private fun update(id: String, change: (Sighting) -> Sighting) {
@@ -1070,10 +1119,14 @@ class AppModel(private val context: Context) {
             "support" -> support.apply(op)
             "doctor" -> if (op.id == doctorAction.id) doctorAction = actionState(op, "The car computer is checking itself…",
                 op.detail.ifEmpty { "Checked" })
-            "logs" -> if (op.id == piLogs.id) {
+            // Bluetooth repeats an answer in every state for a few minutes: only one that changes something counts.
+            "logs" -> if (op.id == piLogs.id && (piLogs.busy || op.state == "failed")) {
                 if (piLogs.busy && op.state == "done") refreshServerLogs()
                 piLogs = actionState(op, "Waiting for the Pi…", op.detail.ifEmpty { "Saved on the server" })
             }
+            // Over Bluetooth (1.6.0); through the server a stop is a command, handled below.
+            "stop" -> if (op.id == stopAction.id) stopAction = actionState(op, "The Pi has it. It should stop within seconds.",
+                "Stopped. It starts again when the Pi next powers up.")
         }
         if (stopAction.id == "stop" && stopAction.busy && tracker.detectorState == "stopped") {
             stopAction = ActionState("stop", "Stopped. It starts again when the Pi next powers up.", Level.OK)
@@ -1097,8 +1150,57 @@ class AppModel(private val context: Context) {
         val id = Sighting.newId()
         apply(ActionState(id, "Sending…", Level.IDLE, true))
         val json = JsonObject(fields + mapOf("kind" to JsonPrimitive(kind), "id" to JsonPrimitive(id)))
+        if (sendOverBluetooth(json)) {
+            apply(ActionState(id, "Sent over Bluetooth…", Level.IDLE, true))
+            return
+        }
         scope.launch {
             client.send("api/op", json).onFailure { apply(ActionState(id, "Could not reach the server: ${it.message}", Level.BAD)) }
+        }
+    }
+
+    /** Operations sent over Bluetooth and not yet heard of, with when, for the fallback through the server. */
+    private val bluetoothSent = LinkedHashMap<String, Pair<JsonObject, Double>>()
+
+    /**
+     * Straight to the car computer when Bluetooth can carry it: no server, no internet needed (1.6.0). The Bluetooth
+     * switch has its own way (control frames), and its key only ever comes through the server.
+     */
+    private fun sendOverBluetooth(json: JsonObject): Boolean {
+        val kind = json["kind"]?.jsonPrimitive?.content ?: return false
+        val id = json["id"]?.jsonPrimitive?.content ?: return false
+        if (demo || kind !in BLUETOOTH_OP_KINDS || !bluetooth.send(json)) return false
+        bluetoothSent[id] = json to mono()
+        note("sent over Bluetooth: $kind")
+        return true
+    }
+
+    /** The car computer's answers in its newest state over Bluetooth: applied like the server's. */
+    private fun bluetoothAnswers(ops: List<OpStatus>) {
+        ops.forEach { bluetoothSent.remove(it.id) }
+        applyOps(ops, null)
+    }
+
+    /**
+     * No word over Bluetooth in time: the same operation through the server too, when there is one; the car computer
+     * carries an id out once, whichever route brings it. A Pi log asked for over Bluetooth then goes to the server.
+     */
+    private fun checkBluetoothSent(now: Double) {
+        val late = bluetoothSent.filterValues { now - it.second >= BLUETOOTH_ANSWER_WAIT_S }
+        for ((id, sent) in late) {
+            bluetoothSent.remove(id)
+            if (!hasLink) continue
+            val json = JsonObject(sent.first - "to")
+            val kind = json["kind"]?.jsonPrimitive?.content
+            note("no answer over Bluetooth for $kind: sending it through the server as well")
+            scope.launch {
+                if (kind == "stop") {
+                    stopAction = ActionState("stop", "No answer over Bluetooth: sent through the server", Level.IDLE, true)
+                    client.send("api/command", buildJsonObject { put("action", "stop"); put("note", "from the Android app") })
+                } else {
+                    client.send("api/op", json)
+                }
+            }
         }
     }
 
@@ -1115,14 +1217,14 @@ class AppModel(private val context: Context) {
         sendOp("notify", JsonObject(mapOf("pushover" to JsonPrimitive(on)))) { pushoverAction = it }
     }
 
-    val pushoverOnCar: NotifySwitch? get() = lastMessage?.state?.notify
+    val pushoverOnCar: NotifySwitch? get() = carStateNow?.notify
     val pushoverShown: Boolean get() = pushoverWanted ?: pushoverOnCar?.pushover ?: true
 
     val pushoverUnavailable: String?
         get() {
             if (demo) return "Not available in demo mode"
-            if (!hasLink) return "Add the private link first"
-            val state = lastMessage?.state ?: return "The car computer has not reported yet"
+            if (!hasLink && !bluetooth.canSendOps) return "Add the private link first"
+            val state = carStateNow ?: return "The car computer has not reported yet"
             if ("notify" !in (state.features ?: emptyList())) return "The car computer needs software 1.2.9 or later for this"
             if (state.notify?.configured == false) return "Pushover is not set up on the car computer"
             return null
@@ -1140,11 +1242,21 @@ class AppModel(private val context: Context) {
 
     fun requestDoctor() { note("setup check requested"); sendOp("doctor") { doctorAction = it } }
 
-    fun requestPiLogs() { note("Pi log requested"); sendOp("logs") { piLogs = it } }
+    /** Over Bluetooth the log comes straight to this phone (1.6.0) and shows under Logs; otherwise it goes to the server. */
+    fun requestPiLogs() {
+        note("Pi log requested")
+        val fields = if (bluetooth.canReceiveFiles) JsonObject(mapOf("to" to JsonPrimitive("phone"))) else JsonObject(emptyMap())
+        sendOp("logs", fields) { piLogs = it }
+    }
 
     fun requestStop() {
         expectingSilence = true
         note("detector stop requested")
+        val id = Sighting.newId()
+        if (sendOverBluetooth(buildJsonObject { put("kind", "stop"); put("id", id); put("note", "from the Android app, over Bluetooth") })) {
+            stopAction = ActionState(id, "Sent over Bluetooth…", Level.IDLE, true)
+            return
+        }
         stopAction = ActionState("stop", "Sending…", Level.IDLE, true)
         scope.launch {
             client.send("api/command", buildJsonObject { put("action", "stop"); put("note", "from the Android app") })
@@ -1156,7 +1268,7 @@ class AppModel(private val context: Context) {
 
     val release: ReleaseInfo? get() = lastMessage?.release
     val appUpdate: String? get() = Updates.newer(release?.android, version)
-    val piUpdate: String? get() = Updates.newer(release?.software, lastMessage?.state?.software)
+    val piUpdate: String? get() = Updates.newer(release?.software, carStateNow?.software)
 
     /** Settings > About: download the newer APK and let Android install it over this one. */
     fun installUpdate() {
@@ -1228,7 +1340,45 @@ class AppModel(private val context: Context) {
         }
     }
 
+    /** A Pi log that came over Bluetooth (1.6.0), kept on this phone. */
+    data class PhoneLog(val name: String, val file: java.io.File, val size: Long, val atMs: Long)
+
+    private val piLogFolder: java.io.File get() = java.io.File(context.filesDir, "pi-logs")
+
+    fun loadPhonePiLogs() {
+        phonePiLogs = (piLogFolder.listFiles { f -> f.name.endsWith(".log") } ?: emptyArray())
+            .map { PhoneLog(it.name, it, it.length(), it.lastModified()) }.sortedByDescending { it.atMs }
+    }
+
+    /** The car computer's log, straight over Bluetooth: saved on this phone, the newest ten kept. */
+    private fun bluetoothFile(data: ByteArray) {
+        val file = runCatching { ProtocolJson.decodeFromString(BluetoothFile.serializer(), data.toString(Charsets.UTF_8)) }.getOrNull()
+        if (file == null || file.kind != "pi-log") {
+            note("PROBLEM a file over Bluetooth could not be read")
+            return
+        }
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.UK).format(java.util.Date())
+        runCatching {
+            piLogFolder.mkdirs()
+            val target = java.io.File(piLogFolder, "pi-$stamp-bluetooth.log")
+            val tmp = java.io.File(piLogFolder, target.name + ".tmp")
+            tmp.writeText(file.text)
+            tmp.renameTo(target)
+        }.onFailure {
+            note("PROBLEM the Pi log from Bluetooth could not be saved: ${it.message}")
+            return
+        }
+        loadPhonePiLogs()
+        phonePiLogs.drop(PHONE_PI_LOGS_KEPT).forEach { it.file.delete() }
+        loadPhonePiLogs()
+        note("Pi log received over Bluetooth (${file.text.length} characters)")
+        if (file.op == piLogs.id || piLogs.busy) piLogs = ActionState(piLogs.id, "Received over Bluetooth: see Logs, On server", Level.OK)
+    }
+
+    fun readPhonePiLog(log: PhoneLog): String = runCatching { log.file.readText() }.getOrElse { "Could not read it" }
+
     fun refreshServerLogs() {
+        loadPhonePiLogs()
         scope.launch {
             client.listLogs().onSuccess {
                 serverLogs = it
@@ -1286,6 +1436,11 @@ class AppModel(private val context: Context) {
     fun stopTickLoop() = main.removeCallbacks(tickRunnable)
 
     companion object {
+        /** What may go over Bluetooth (1.6.0); the Bluetooth switch and its key do not. */
+        private val BLUETOOTH_OP_KINDS = setOf("mark", "poweroff", "logs", "notify", "doctor", "support", "stop")
+        /** Seconds an operation over Bluetooth waits for the car computer's first word before the server gets it too. */
+        const val BLUETOOTH_ANSWER_WAIT_S = 8.0
+        private const val PHONE_PI_LOGS_KEPT = 10
         private const val CONFIG_CACHE = "remote-config.json"
         private val SOUND_KINDS = listOf(SoundKind.URGENT, SoundKind.CHIME, SoundKind.CALL, SoundKind.WARNING, SoundKind.LINK_LOST)
         const val version = BuildConfig.VERSION_NAME

@@ -154,13 +154,16 @@ final class AppModel: ObservableObject {
         audio.onStateChange = { [weak self] in self?.refresh() }
         client.onMessage = { [weak self] in self?.received($0) }
         bluetooth.sendOp = { [weak self] kind, fields, apply in self?.sendOp(kind: kind, fields: fields, update: apply) }
-        bluetooth.carState = { [weak self] in self?.tracker.frame?.message.state }
+        bluetooth.carState = { [weak self] in self?.carStateNow }
+        bluetooth.carStateAge = { [weak self] in self?.carStateAge }
         bluetooth.deliver = { [weak self] matches, at in self?.bluetoothMatches(matches, receivedAt: at) }
+        bluetooth.answered = { [weak self] in self?.bluetoothAnswers($0) }
+        bluetooth.fileArrived = { [weak self] in self?.bluetoothFile($0) }
         bluetooth.changed = { [weak self] in self?.refresh() }
         bluetooth.note = { [weak self] in self?.note($0) }
         support.client = client
         support.sendOp = { [weak self] kind, fields, apply in self?.sendOp(kind: kind, fields: fields, update: apply) }
-        support.carState = { [weak self] in self?.demo == true ? nil : self?.tracker.frame?.message.state }
+        support.carState = { [weak self] in self?.demo == true ? nil : self?.carStateNow }
         support.phoneFiles = { [weak self] log, places, then in self?.supportPhoneFiles(log: log, places: places, then: then) }
         support.note = { [weak self] in self?.note($0) }
         client.onStreamEvent = { [weak self] in self?.note($0) }
@@ -197,6 +200,7 @@ final class AppModel: ObservableObject {
         // Not started here. iOS sometimes starts this app in the background by itself, also after it
         // was swiped away (seen in the log on 8 November); only opening the app starts sound and link.
         recomputeSummary()
+        loadPhonePiLogs()
         #if DEBUG
         if arguments.contains("--seed-pending-mark") {
             MarkInbox.standard.add(PendingMark(label: .police, seenAt: Date().addingTimeInterval(-60), place: nil))
@@ -653,6 +657,7 @@ final class AppModel: ObservableObject {
         checkAutoSleep(now)
         checkDriveEnded(now)
         bluetooth.settle(now)
+        checkBluetoothSent(now)
         updateLocationPower(now)
         resendPending(now)
         checkFaultNotices(now)
@@ -669,6 +674,7 @@ final class AppModel: ObservableObject {
         // A server that answers while the Pi's data is old is not "listening".
         let carFresh = tracker.frame != nil && tracker.clockReady(now) && tracker.carAge(now) <= LinkTracker.carStale
             && tracker.sinceRx(now) <= LinkTracker.linkLost && !tracker.authFailed
+        let bluetoothLive = !demo && bluetooth.feed.live(now)
         var heardAt: Date?
         var burstID: String?
         if let top = meters.first, let frame = tracker.frame,
@@ -677,7 +683,7 @@ final class AppModel: ObservableObject {
             burstID = channel.burstID
         }
         return LiveTileBuilder.make(.init(
-            linkLost: !carFresh && !demo, detectorRunning: tracker.detectorActive || demo,
+            linkLost: !carFresh && !bluetoothLive && !demo, detectorRunning: tracker.detectorActive || bluetoothLive || demo,
             receiverQuiet: receiverQuiet, top: meters.first,
             lastAlert: alerts.first { $0.sound == .urgent || $0.sound == .chime },
             lastMark: sightings.first { !$0.isRecordingRequest },
@@ -690,7 +696,7 @@ final class AppModel: ObservableObject {
 
     /// The tile's word about the car computer's software, for a few minutes after its state changes.
     private func softwareNote(_ now: Double) -> LiveTileState.Software? {
-        guard !demo, let update = tracker.frame?.message.state?.update, let made = SoftwareNote.make(update) else { return nil }
+        guard !demo, let update = carStateNow?.update, let made = SoftwareNote.make(update) else { return nil }
         let key = "\(update.state) \(update.seq ?? 0)"
         if key != softwareKey {
             softwareKey = key
@@ -767,13 +773,16 @@ final class AppModel: ObservableObject {
 
     private func checkEquipmentTones(_ now: Double) {
         guard !demo, audio.armed, settings.sound, now >= mutedUntil else { return }
-        let live = tracker.live(now)
+        // Live by either route: with the server gone and Bluetooth live there is nothing to warn about (1.6.0).
+        let live = tracker.live(now) || bluetooth.feed.live(now)
         if live {
             wasLiveAt = now
             linkToneOutageDone = false
             expectingSilence = false
         }
-        if tracker.detectorState == "stopped" { expectingSilence = true }
+        // A stop asked for is expected silence. One by itself (1.6.0 car computers say why) is not: the warning plays.
+        let detectorNow = serverCarFresh(now) ? tracker.frame?.message.state?.detector : bluetooth.feed.currentDetector(now)
+        if detectorNow?.state == "stopped" && (detectorNow?.reasons ?? []).isEmpty { expectingSilence = true }
         if settings.linkLostTone, let last = wasLiveAt, !live, !expectingSilence, !linkToneOutageDone,
            now - last >= settings.linkLostAfter {
             playLinkWarning(String(format: "link lost for %.0f s: playing the warning, silence no longer means anything", settings.linkLostAfter))
@@ -784,7 +793,8 @@ final class AppModel: ObservableObject {
            now - listeningSince >= max(settings.linkLostAfter, 60) {
             playLinkWarning("never connected since the app was opened: playing the warning, silence means nothing")
         }
-        if StatusBuilder.receiverQuiet(tracker, settings: settings, now: now), now - lastQuietTone >= settings.receiverToneRepeat {
+        if StatusBuilder.receiverQuiet(tracker, settings: settings, now: now, bluetooth: bluetoothView(now)),
+           now - lastQuietTone >= settings.receiverToneRepeat {
             lastQuietTone = now
             note("receiver hears nothing: playing the warning")
             audio.play(.warning)
@@ -1012,23 +1022,21 @@ final class AppModel: ObservableObject {
 
     private func refresh() {
         let now = Mono.now()
-        let newHeadline = StatusBuilder.headline(tracker, now: now, lastDelay: engine.lastDelay, hasCredentials: hasLink || demo)
+        // Every assignment to a @Published value redraws every screen watching the model, even when
+        // nothing changed; this runs four times a second, so only real changes are assigned.
+        let view = bluetoothView(now)
+        let newHeadline = StatusBuilder.headline(tracker, now: now, lastDelay: engine.lastDelay, hasCredentials: hasLink || demo,
+                                                 bluetooth: view)
         if newHeadline != headline { headline = newHeadline }
         let newChain = StatusBuilder.chain(tracker, now: now, hasCredentials: hasLink || demo,
-                                           quietWindows: StatusBuilder.quietLimit(tracker.frame?.message.state?.detector, settings))
+                                           quietWindows: StatusBuilder.quietLimit(view?.detector ?? tracker.frame?.message.state?.detector, settings),
+                                           bluetooth: view)
         if newChain != chain { chain = newChain }
 
         let state = tracker.frame?.message.state
         let carFresh = tracker.frame != nil && tracker.clockReady(now) && tracker.carAge(now) <= LinkTracker.carStale
             && tracker.sinceRx(now) <= LinkTracker.linkLost
-        // Every assignment to a @Published value redraws every screen watching the model, even when
-        // nothing changed; this runs four times a second, so only real changes are assigned.
         let overBluetooth = !carFresh && bluetooth.feed.live(now)
-        if overBluetooth {
-            let line = HeadlineStatus(level: .ok, title: "Live over Bluetooth",
-                                      detail: "No link to the server: alerts come straight from the car computer")
-            if line != headline { headline = line }
-        }
         let bars = carFresh && tracker.detectorActive || overBluetooth
         if bars != showBars { showBars = bars }
         var rows: [MeterRow] = []
@@ -1057,7 +1065,7 @@ final class AppModel: ObservableObject {
         if extra != extraMeters { extraMeters = extra }
         let shown = Array(rows.prefix(3))
         if shown != meters { meters = shown }
-        let quiet = StatusBuilder.receiverQuiet(tracker, settings: settings, now: now)
+        let quiet = StatusBuilder.receiverQuiet(tracker, settings: settings, now: now, bluetooth: view)
         if quiet != receiverQuiet { receiverQuiet = quiet }
         settlePushoverWanted()
         bluetooth.settleWanted()
@@ -1123,19 +1131,53 @@ final class AppModel: ObservableObject {
 
     // MARK: Info for the Pi screen
 
-    var piState: PiState? {
-        let now = Mono.now()
-        if let frame = tracker.frame, tracker.carAge(now) <= LinkTracker.carStale { return frame.message.state }
-        // Without the server, the car computer's own state over Bluetooth, on top of the server's last report.
-        return bluetooth.feed.live(now) ? bluetooth.feed.piState(base: tracker.frame?.message.state, now: now) : nil
+    /// The server has fresh data from the car computer.
+    private func serverCarFresh(_ now: Double) -> Bool {
+        tracker.frame != nil && tracker.carAge(now) <= LinkTracker.carStale
     }
 
-    /// Why this action cannot be used right now, in words, or nil if it can.
+    /// Bluetooth's word on the car, for the lights and the line: only when the server has nothing fresh from it.
+    private func bluetoothView(_ now: Double) -> BluetoothView? {
+        guard !demo, !serverCarFresh(now), bluetooth.feed.heard(now), let detector = bluetooth.feed.currentDetector(now) else { return nil }
+        return BluetoothView(detector: detector)
+    }
+
+    /// The car computer's state now: the server's while it is fresh, else what Bluetooth brought a moment ago
+    /// (from 1.6.0 car computers all of it, from older ones the detector and channels on the server's last), else nil.
+    var piState: PiState? {
+        let now = Mono.now()
+        if let frame = tracker.frame, serverCarFresh(now) { return frame.message.state }
+        guard bluetooth.feed.heard(now) else { return nil }
+        return bluetooth.feed.piState(base: tracker.frame?.message.state, now: now)
+    }
+
+    /// The newest state there is, whichever route brought it, however old: `carStateAge` says how old.
+    var carStateNow: PiState? { piState ?? tracker.frame?.message.state }
+
+    var carStateAge: Double? {
+        let now = Mono.now()
+        if serverCarFresh(now) { return tracker.carAge(now) }
+        if let state = piState { return state.snapshotAge }
+        return tracker.frame == nil ? nil : tracker.carAge(now)
+    }
+
+    /// The detector runs, by whichever route says so freshly.
+    private var detectorActiveNow: Bool {
+        let now = Mono.now()
+        if serverCarFresh(now) { return tracker.detectorActive }
+        return bluetooth.feed.live(now)
+    }
+
+    /// Why this action cannot be used right now, in words, or nil if it can. Only a sighting needs the detector
+    /// running; power off, the Pi log and the check work on a car computer whose detector stopped (1.6.0).
     func unavailable(_ feature: String) -> String? {
         if demo { return "Not available in demo mode" }
         guard let state = piState else { return "The Pi is not sending data" }
-        if !tracker.detectorActive { return "The detector is not running, so the Pi has no link to the app" }
+        if feature == "mark" && !detectorActiveNow { return "The detector is not running, so there is no session to save it in" }
         if !(state.features ?? []).contains(feature) { return "The Pi needs the newer publisher for this" }
+        if !serverCarFresh(Mono.now()) && !bluetooth.canSendOps {
+            return "Only over the server, or over Bluetooth from car computer software 1.6.0"
+        }
         return nil
     }
 
@@ -1223,10 +1265,15 @@ final class AppModel: ObservableObject {
             update(s.id) { $0.phase = .saved; $0.detail = "Demo only, nothing was sent" }
             return
         }
-        guard hasLink else { return }
         let note = [s.note, s.place?.noteText ?? ""].filter { !$0.isEmpty }.joined(separator: "; ")
         let json: [String: Any] = ["kind": "mark", "id": s.id, "label": s.label.rawValue, "note": String(note.prefix(500)),
                                    "age_s": max(0, Date().timeIntervalSince(s.seenAt)), "phone_utc": s.seenAt.timeIntervalSince1970]
+        // Over Bluetooth first (1.6.0): the car computer answers in its next state; the server is the fallback.
+        if sendOverBluetooth(json) {
+            update(s.id) { if $0.phase == .sending { $0.phase = .waitingForPi; $0.detail = "Sent over Bluetooth" } }
+            return
+        }
+        guard hasLink else { return }
         client.send(path: "api/op", json: json) { [weak self] result in
             switch result {
             case .success:
@@ -1242,10 +1289,12 @@ final class AppModel: ObservableObject {
 
     /// Keeps trying until the Pi has answered. Repeats are harmless: both ends ignore a known id.
     private func resendPending(_ now: Double) {
-        guard now - lastResend >= 5, !demo, hasLink else { return }
+        guard now - lastResend >= 5, !demo, hasLink || bluetooth.canSendOps else { return }
         lastResend = now
-        let listed = Set(tracker.frame?.message.ops?.map(\.id) ?? [])
-        let waiting = sightings.filter { $0.needsSending && ($0.phase == .sending || !listed.contains($0.id)) }
+        // Listed by either route: the server's queue, or the car computer's answers over Bluetooth.
+        let listed = Set((tracker.frame?.message.ops?.map(\.id) ?? []) + bluetooth.feed.answers.map(\.id))
+        let waiting = sightings.filter { $0.needsSending && ($0.phase == .sending || !listed.contains($0.id))
+            && bluetoothSent[$0.id] == nil }
         for s in waiting.prefix(50) { send(s) }
     }
 
@@ -1285,10 +1334,17 @@ final class AppModel: ObservableObject {
                     doctorAction = Self.actionState(op, waiting: "The car computer is checking itself…", done: op.detail.ifEmpty("Checked"))
                 }
             case "logs":
-                if op.id == piLogs.id {
+                // Bluetooth repeats an answer in every state for a few minutes: only one that changes something counts.
+                if op.id == piLogs.id, piLogs.busy || op.state == "failed" {
                     let done = op.detail.ifEmpty("Saved on the server")
                     if piLogs.busy && op.state == "done" { refreshServerLogs() }
                     piLogs = Self.actionState(op, waiting: "Waiting for the Pi…", done: done)
+                }
+            case "stop":
+                // Over Bluetooth (1.6.0); through the server a stop is a command, handled below.
+                if op.id == stopAction.id {
+                    stopAction = Self.actionState(op, waiting: "The Pi has it. It should stop within seconds.",
+                                                  done: "Stopped. It starts again when the Pi next powers up.")
                 }
             default:
                 break
@@ -1315,15 +1371,61 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// What may go over Bluetooth (1.6.0). The Bluetooth switch has its own way (control frames), and its key
+    /// only ever comes through the server.
+    private static let bluetoothOpKinds: Set<String> = ["mark", "poweroff", "logs", "notify", "doctor", "support", "stop"]
+    /// Seconds an operation sent over Bluetooth waits for the car computer's first word before it goes through the
+    /// server as well; the car computer carries an id out once, whichever route brings it.
+    static let bluetoothAnswerWait = 8.0
+    /// Operations sent over Bluetooth and not yet heard of, for that fallback.
+    private var bluetoothSent: [String: (json: [String: Any], at: Double)] = [:]
+
     private func sendOp(kind: String, fields: [String: Any] = [:], update apply: @escaping (ActionState) -> Void) {
         let id = Sighting.newID()
         apply(.init(id: id, text: "Sending…", level: .idle, busy: true))
         var json = fields
         json["kind"] = kind
         json["id"] = id
+        if sendOverBluetooth(json) {
+            apply(.init(id: id, text: "Sent over Bluetooth…", level: .idle, busy: true))
+            return
+        }
         client.send(path: "api/op", json: json) { result in
             if case .failure(let error) = result {
                 apply(.init(id: id, text: "Could not reach the server: \(error.localizedDescription)", level: .bad))
+            }
+        }
+    }
+
+    /// Straight to the car computer when Bluetooth can carry it: no server, no internet needed (1.6.0).
+    private func sendOverBluetooth(_ json: [String: Any]) -> Bool {
+        guard !demo, let kind = json["kind"] as? String, let id = json["id"] as? String,
+              Self.bluetoothOpKinds.contains(kind), bluetooth.send(json) else { return false }
+        bluetoothSent[id] = (json, Mono.now())
+        note("sent over Bluetooth: \(kind)")
+        return true
+    }
+
+    /// The car computer's answers in its newest state over Bluetooth: applied like the server's.
+    private func bluetoothAnswers(_ ops: [OpStatus]) {
+        for op in ops { bluetoothSent.removeValue(forKey: op.id) }
+        applyOps(ops, command: nil)
+    }
+
+    /// No word over Bluetooth in time: the same operation through the server too, when there is one. A Pi log asked
+    /// for over Bluetooth then goes to the server instead.
+    private func checkBluetoothSent(_ now: Double) {
+        for (id, sent) in bluetoothSent where now - sent.at >= Self.bluetoothAnswerWait {
+            bluetoothSent.removeValue(forKey: id)
+            guard hasLink else { continue }
+            var json = sent.json
+            json.removeValue(forKey: "to")
+            note("no answer over Bluetooth for \(json["kind"] ?? "?"): sending it through the server as well")
+            if json["kind"] as? String == "stop" {
+                stopAction = .init(id: "stop", text: "No answer over Bluetooth: sent through the server", level: .idle, busy: true)
+                client.send(path: "api/command", json: ["action": "stop", "note": "from the iPhone app"]) { _ in }
+            } else {
+                client.send(path: "api/op", json: json) { _ in }
             }
         }
     }
@@ -1344,7 +1446,7 @@ final class AppModel: ObservableObject {
     }
 
     /// The car computer's own report, or nil when it has not sent one.
-    var pushoverOnCar: NotifySwitch? { tracker.frame?.message.state?.notify }
+    var pushoverOnCar: NotifySwitch? { carStateNow?.notify }
 
     // MARK: Updates
 
@@ -1354,7 +1456,7 @@ final class AppModel: ObservableObject {
     /// A newer app than this one, or nil.
     var appUpdate: String? { Updates.newer(release?.app, than: Self.shortVersion) }
     /// Newer car computer software than it reports running, or nil.
-    var piUpdate: String? { Updates.newer(release?.software, than: tracker.frame?.message.state?.software) }
+    var piUpdate: String? { Updates.newer(release?.software, than: carStateNow?.software) }
 
     /// One notification per new version, and only where notifications are already allowed for the
     /// fault messages: the app never asks for permission just for this.
@@ -1376,7 +1478,7 @@ final class AppModel: ObservableObject {
     var pushoverUnavailable: String? {
         if demo { return "Not available in demo mode" }
         if !hasLink { return "Add the private link first" }
-        guard let state = tracker.frame?.message.state else { return "The car computer has not reported yet" }
+        guard let state = carStateNow else { return "The car computer has not reported yet" }
         if !(state.features ?? []).contains("notify") { return "The car computer needs software 1.2.9 or later for this" }
         if state.notify?.configured == false { return "Pushover is not set up on the car computer" }
         return nil
@@ -1399,14 +1501,20 @@ final class AppModel: ObservableObject {
         sendOp(kind: "doctor") { [weak self] in self?.doctorAction = $0 }
     }
 
+    /// Over Bluetooth the log comes straight to this phone (1.6.0) and shows under Logs; otherwise it goes to the server.
     func requestPiLogs() {
         note("Pi log requested")
-        sendOp(kind: "logs") { [weak self] in self?.piLogs = $0 }
+        sendOp(kind: "logs", fields: bluetooth.canReceiveFiles ? ["to": "phone"] : [:]) { [weak self] in self?.piLogs = $0 }
     }
 
     func requestStop() {
         expectingSilence = true
         note("detector stop requested")
+        let id = Sighting.newID()
+        if sendOverBluetooth(["kind": "stop", "id": id, "note": "from the iPhone app, over Bluetooth"]) {
+            stopAction = .init(id: id, text: "Sent over Bluetooth…", level: .idle, busy: true)
+            return
+        }
         stopAction = .init(id: "stop", text: "Sending…", level: .idle, busy: true)
         client.send(path: "api/command", json: ["action": "stop", "note": "from the iPhone app"]) { [weak self] result in
             if case .failure(let error) = result {
@@ -1491,7 +1599,61 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Pi logs that came over Bluetooth (1.6.0), kept on this phone, newest first.
+    struct PhoneLog: Identifiable, Equatable {
+        let name: String
+        let url: URL
+        let size: Int
+        let at: Date
+        var id: String { name }
+    }
+    @Published private(set) var phonePiLogs: [PhoneLog] = []
+    private static let phonePiLogsKept = 10
+
+    private static var piLogFolder: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("pi-logs", isDirectory: true)
+    }
+
+    func loadPhonePiLogs() {
+        let urls = (try? FileManager.default.contentsOfDirectory(at: Self.piLogFolder, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])) ?? []
+        let logs = urls.filter { $0.pathExtension == "log" }.compactMap { url -> PhoneLog? in
+            let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            return PhoneLog(name: url.lastPathComponent, url: url, size: values?.fileSize ?? 0, at: values?.contentModificationDate ?? .distantPast)
+        }.sorted { $0.at > $1.at }
+        if logs != phonePiLogs { phonePiLogs = logs }
+    }
+
+    /// The car computer's log, straight over Bluetooth: saved on this phone, the newest ten kept.
+    private func bluetoothFile(_ data: Data) {
+        guard let file = try? JSONDecoder().decode(BluetoothFile.self, from: data), file.kind == "pi-log" else {
+            note("PROBLEM a file over Bluetooth could not be read")
+            return
+        }
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
+        let folder = Self.piLogFolder
+        let url = folder.appendingPathComponent("pi-\(stamp)-bluetooth.log")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data(file.text.utf8).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        } catch {
+            note("PROBLEM the Pi log from Bluetooth could not be saved: \(error.localizedDescription)")
+            return
+        }
+        loadPhonePiLogs()
+        for old in phonePiLogs.dropFirst(Self.phonePiLogsKept) { try? FileManager.default.removeItem(at: old.url) }
+        loadPhonePiLogs()
+        note("Pi log received over Bluetooth (\(file.text.utf8.count) bytes)")
+        if file.op == piLogs.id || piLogs.busy {
+            piLogs = .init(id: piLogs.id, text: "Received over Bluetooth: see Logs, On server", level: .ok)
+        }
+    }
+
+    func readPhonePiLog(_ log: PhoneLog) -> String {
+        (try? String(contentsOf: log.url, encoding: .utf8)) ?? "Could not read it"
+    }
+
     func refreshServerLogs() {
+        loadPhonePiLogs()
         client.listLogs { [weak self] result in
             switch result {
             case .success(let logs):

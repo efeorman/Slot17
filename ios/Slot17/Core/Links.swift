@@ -79,6 +79,8 @@ struct Sighting: Codable, Identifiable, Equatable {
     }
 
     mutating func apply(state: String, detail newDetail: String) {
+        // Saved stays saved: from 1.6.0 a sighting can go by both routes, and the server's copy may expire later.
+        if phase == .saved && state != "done" { return }
         switch state {
         case "pending", "sent":
             phase = .waitingForPi

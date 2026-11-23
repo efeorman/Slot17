@@ -131,10 +131,22 @@ object Format {
     }
 }
 
+/**
+ * What Bluetooth says of the car computer (1.6.0), for when the server has nothing fresh from it: its detector as
+ * the car computer sent it a moment ago.
+ */
+data class BluetoothView(val detector: DetectorState)
+
 object StatusBuilder {
     const val QUIET_ALARM_WINDOWS = 40
 
-    fun headline(t: LinkTracker, now: Double, lastDelay: Double?, hasCredentials: Boolean): HeadlineStatus {
+    /**
+     * [bluetooth] only when the server has nothing fresh from the car: then Bluetooth's word counts. Before 1.6.0
+     * the lights and the line read only the server, so on 23 November they said Pi silent while Bluetooth was live.
+     */
+    fun headline(t: LinkTracker, now: Double, lastDelay: Double?, hasCredentials: Boolean,
+                 bluetooth: BluetoothView? = null): HeadlineStatus {
+        if (bluetooth != null) return detectorLine(bluetooth.detector, lastDelay, demo = false, overBluetooth = true)
         if (!hasCredentials) return HeadlineStatus(Level.IDLE, "Not set up", "Add your private link in Settings")
         if (t.authFailed) return HeadlineStatus(Level.BAD, "Link not accepted", "Check your private link in Settings")
         val f = t.frame ?: return HeadlineStatus(Level.IDLE, "Connecting…", "Looking for the server")
@@ -151,26 +163,47 @@ object StatusBuilder {
         if (carAge > LinkTracker.CAR_STALE) {
             return HeadlineStatus(Level.IDLE, "No data from the car", "Last update ${Format.ago(carAge)}. Hotspot or Pi offline")
         }
-        val d = st.detector
+        return detectorLine(st.detector, lastDelay, t.demo, overBluetooth = false)
+    }
+
+    /** The line for the detector's own state, whichever route told it. */
+    fun detectorLine(d: DetectorState, lastDelay: Double?, demo: Boolean, overBluetooth: Boolean): HeadlineStatus {
+        val via = if (overBluetooth) " (over Bluetooth: no link to the server)" else ""
         return when (d.state) {
             "running" -> {
                 val detail = lastDelay?.let { "Delay up to ${Fmt.fixed(ceil(it * 10) / 10, 1)} s after the burst" }
                     ?: "${d.windows ?: 0} windows analysed"
-                if (t.demo) HeadlineStatus(Level.OK, "Demo running", "Fake data, nothing is being detected")
-                else HeadlineStatus(Level.OK, "Detector running", detail)
+                when {
+                    overBluetooth -> HeadlineStatus(Level.OK, "Live over Bluetooth",
+                        "No link to the server: everything comes straight from the car computer")
+                    demo -> HeadlineStatus(Level.OK, "Demo running", "Fake data, nothing is being detected")
+                    else -> HeadlineStatus(Level.OK, "Detector running", detail)
+                }
             }
-            "starting" -> HeadlineStatus(Level.IDLE, "Detector starting", "Waiting for the first analysis")
+            "starting" -> HeadlineStatus(Level.IDLE, "Detector starting", "Waiting for the first analysis$via")
             "degraded" -> HeadlineStatus(Level.WARN, "Detector degraded",
-                (d.reasons ?: emptyList()).joinToString(", ").ifEmpty { "See status on the Pi" })
+                (d.reasons ?: emptyList()).joinToString(", ").ifEmpty { "See status on the Pi" } + via)
             "stale" -> HeadlineStatus(Level.BAD, "Detector not responding",
-                "Heartbeat unchanged for ${(d.heartbeatUnchanged ?: 0.0).toInt()} s")
-            "stopped" -> HeadlineStatus(Level.IDLE, "Detector stopped", "It starts again when the Pi next powers up")
-            else -> HeadlineStatus(Level.IDLE, "Unknown state", d.state)
+                "Heartbeat unchanged for ${(d.heartbeatUnchanged ?: 0.0).toInt()} s$via")
+            "stopped" -> {
+                // Stopped by itself (1.6.0 says why, from the session's summary): a fault, not a quiet road.
+                val reason = d.reasons?.firstOrNull { it.isNotEmpty() }
+                if (reason != null) HeadlineStatus(Level.BAD, "Detector stopped by itself",
+                    "$reason. It starts again when the Pi next powers up$via")
+                else HeadlineStatus(Level.IDLE, "Detector stopped", "It starts again when the Pi next powers up$via")
+            }
+            else -> HeadlineStatus(Level.IDLE, "Unknown state", d.state + via)
         }
     }
 
-    fun receiverQuiet(t: LinkTracker, settings: AlertSettings, now: Double): Boolean {
-        if (!t.detectorActive || t.demo || !settings.antennaWarning) return false
+    fun receiverQuiet(t: LinkTracker, settings: AlertSettings, now: Double, bluetooth: BluetoothView? = null): Boolean {
+        if (t.demo || !settings.antennaWarning) return false
+        if (bluetooth != null) {
+            val d = bluetooth.detector
+            if (d.state != "running" && d.state != "degraded") return false
+            return (d.quietWindows ?: 0) >= quietLimit(d, settings)
+        }
+        if (!t.detectorActive) return false
         // Old data says nothing about the receiver now; losing the link has its own warning.
         if (t.carAge(now) > LinkTracker.CAR_STALE) return false
         val detector = t.frame?.message?.state?.detector ?: return false
@@ -183,10 +216,47 @@ object StatusBuilder {
         return if (own != null && own > 0) own else settings.receiverQuietWindows
     }
 
-    fun chain(t: LinkTracker, now: Double, hasCredentials: Boolean, quietWindows: Int = QUIET_ALARM_WINDOWS): List<ChainItem> {
+    fun chain(t: LinkTracker, now: Double, hasCredentials: Boolean, quietWindows: Int = QUIET_ALARM_WINDOWS,
+              bluetooth: BluetoothView? = null): List<ChainItem> {
+        val items = serverChain(t, now, hasCredentials, quietWindows)
+        if (bluetooth == null || items[1].level == Level.OK) return items
+        // The server has nothing fresh from the car, Bluetooth has: the car computer is there, over Bluetooth.
+        val server = items[0]
+        if (server.level != Level.OK) {
+            server.level = Level.IDLE
+            server.detail = if (hasCredentials) "Not reachable; Bluetooth instead" else "Not set up; Bluetooth instead"
+        }
+        val d = bluetooth.detector
+        val active = d.state == "running" || d.state == "degraded"
+        val receiver = when {
+            !active -> ChainItem("receiver", "Receiver", Level.IDLE, "Closed")
+            (d.quietWindows ?: 0) >= quietWindows -> ChainItem("receiver", "Receiver", Level.BAD, "Hears nothing")
+            else -> ChainItem("receiver", "Receiver", Level.OK, "No fault")
+        }
+        return listOf(server, ChainItem("pi", "Pi", Level.OK, "Over Bluetooth"), detectorItem(d), receiver)
+    }
+
+    fun detectorItem(d: DetectorState): ChainItem {
+        val item = ChainItem("detector", "Detector", Level.IDLE, "Unknown")
+        when (d.state) {
+            "running" -> { item.level = Level.OK; item.detail = "Running" }
+            "degraded" -> { item.level = Level.WARN; item.detail = "Degraded" }
+            "starting" -> item.detail = "Starting"
+            "stale" -> { item.level = Level.BAD; item.detail = "Not responding" }
+            "stopped" -> {
+                val byItself = !d.reasons.isNullOrEmpty()
+                item.level = if (byItself) Level.BAD else Level.IDLE
+                item.detail = if (byItself) "Stopped by itself" else "Stopped"
+            }
+            else -> item.detail = d.state
+        }
+        return item
+    }
+
+    private fun serverChain(t: LinkTracker, now: Double, hasCredentials: Boolean, quietWindows: Int): List<ChainItem> {
         val server = ChainItem("server", "Server", Level.BAD, "Not reachable")
         val pi = ChainItem("pi", "Pi", Level.IDLE, "Unknown")
-        val detector = ChainItem("detector", "Detector", Level.IDLE, "Unknown")
+        var detector = ChainItem("detector", "Detector", Level.IDLE, "Unknown")
         val receiver = ChainItem("receiver", "Receiver", Level.IDLE, "Unknown")
         if (!hasCredentials) { server.level = Level.IDLE; server.detail = "Not set up" }
         if (t.authFailed) server.detail = "Link refused"
@@ -202,14 +272,7 @@ object StatusBuilder {
                 carAge > LinkTracker.CAR_STALE -> { pi.level = Level.BAD; pi.detail = "Silent ${Format.ago(carAge)}" }
                 d != null -> {
                     pi.level = Level.OK; pi.detail = "Connected"
-                    when (d.state) {
-                        "running" -> { detector.level = Level.OK; detector.detail = "Running" }
-                        "degraded" -> { detector.level = Level.WARN; detector.detail = "Degraded" }
-                        "starting" -> detector.detail = "Starting"
-                        "stale" -> { detector.level = Level.BAD; detector.detail = "Not responding" }
-                        "stopped" -> detector.detail = "Stopped"
-                        else -> detector.detail = d.state
-                    }
+                    detector = detectorItem(d)
                     if (t.detectorActive) {
                         if ((d.quietWindows ?: 0) >= quietWindows) {
                             receiver.level = Level.BAD; receiver.detail = "Hears nothing"

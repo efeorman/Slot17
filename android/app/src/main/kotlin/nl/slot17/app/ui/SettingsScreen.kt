@@ -274,10 +274,11 @@ private fun BluetoothCard(bt: BluetoothRoute, @Suppress("UNUSED_PARAMETER") nowM
     var name by remember { mutableStateOf("") }
     var nameProblem by remember { mutableStateOf<String?>(null) }
     Card("Bluetooth to the car computer") {
-        Hint("Alerts also come straight from the car computer over Bluetooth: faster, and where there is no internet. With this phone connected, switching off and renaming go over Bluetooth too; switching on goes through the server.")
+        Hint("Everything also comes straight from the car computer over Bluetooth: alerts, its state, the Pi screen. With this phone connected, sightings, stop, power off, the Pi log and the other actions go over Bluetooth too, so it all works without internet. Switching Bluetooth on and support packages go through the server.")
         ToggleRow("Bluetooth on the car computer", bt.shownOn,
             enabled = (bt.unavailable == null || bt.overBluetooth) && !bt.carAction.busy) { bt.setOnCar(it) }
         LabelledRow("On the car computer", BluetoothWords.car(bt.onCar))
+        bt.onCarIsOld?.let { Hint(it) }
         if (bt.onCar?.phonesPair == true) {
             Hint("This car computer makes phones confirm a pairing at every connection. Run the installer once more on it " +
                 "(bash setup.sh car --bluetooth) and it stops; then unpair \"${bt.onCar?.name ?: "Slot17"}\" in Android's Bluetooth settings.", C.red)
@@ -299,7 +300,7 @@ private fun BluetoothCard(bt: BluetoothRoute, @Suppress("UNUSED_PARAMETER") nowM
             val asked = Build.VERSION.SDK_INT >= 31 &&
                 context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
             if (asked) permission.launch(Manifest.permission.BLUETOOTH_CONNECT) else bt.startPairing()
-        }, enabled = bt.unavailable == null && !bt.pairing.busy)
+        }, enabled = bt.setUpUnavailable == null && !bt.pairing.busy)
         if (bt.paired) ActionButton("Remove from this phone", onClick = { bt.remove() })
         ActionNote(bt.pairing)
         val s = bt.stats
@@ -310,6 +311,6 @@ private fun BluetoothCard(bt: BluetoothRoute, @Suppress("UNUSED_PARAMETER") nowM
             s.medianLead?.let { LabelledRow("Bluetooth ahead by", "%.2f s, median".format(it)) }
             LabelledRow("Only over Bluetooth", "${s.bluetoothOnly}")
         }
-        Hint("Setting up needs the car computer on and nearby, and Location on while Android looks for it. Android asks once to allow Nearby devices. The car computer's key comes through the server, never over Bluetooth.")
+        Hint("Setting up needs the car computer on and nearby, and Location on while Android looks for it. Android asks once to allow Nearby devices. The car computer's key comes through the server once, never over Bluetooth; after that, setting up again needs no internet.")
     }
 }

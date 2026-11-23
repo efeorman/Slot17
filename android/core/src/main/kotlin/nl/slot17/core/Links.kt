@@ -84,7 +84,8 @@ data class Sighting(
             Phase.SAVED, Phase.FAILED -> detail
         }
 
-    fun apply(state: String, newDetail: String): Sighting = when (state) {
+    /** Saved stays saved: from 1.6.0 a sighting can go by both routes, and the server's copy may expire later. */
+    fun apply(state: String, newDetail: String): Sighting = if (phase == Phase.SAVED && state != "done") this else when (state) {
         "pending", "sent" -> copy(phase = Phase.WAITING_FOR_PI, detail = if (state == "sent") "The Pi has it" else "Waiting for the Pi")
         "done" -> copy(phase = Phase.SAVED, detail = newDetail.ifEmpty { "Saved on the Pi" })
         "failed", "expired" -> copy(phase = Phase.FAILED, detail = newDetail.ifEmpty { "Not saved" })

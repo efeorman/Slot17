@@ -2,6 +2,54 @@
 
 What changed, why, and what was tried and left out. Newest first. Figures come from our own car, receiver and drives; yours will differ.
 
+## 1.6.0, iPhone app 1.9.0 and Android app 1.11.0: everything over Bluetooth (23 November 2026)
+
+The operator's first drive with 1.5.1, with an iPhone and a car computer that had no internet. The detector's recognition is unchanged. [BLUETOOTH.md](design/BLUETOOTH.md) describes the link.
+
+- **What they saw:**
+  - "Live over Bluetooth", with Pi and Detector red.
+  - Actions that said they could not work.
+  - "A phone is connected" for the car computer, and "Not set up on this phone" for the phone.
+  - They expect Bluetooth to carry everything the internet carries.
+- **Read from the car computer's journal and the display host's:**
+  - **The detector stopped by itself after 80 s.** The car computer had undervoltage, and the Airspy dropped off USB at 60 s. With one stream attempt it stayed stopped, as designed.
+  - **The publisher ended 30 s later, and Bluetooth with it.** After that the phone heard nothing, not even "stopped".
+  - **Two set-ups pressed in the car waited on the server.** They only reached the car computer when it was home on a cable.
+- **Causes in the apps, both of them:**
+  1. The status chain read only the server.
+  2. The actions checked the detector through the server only.
+  3. "On the car computer" was the server's last report, however old.
+  4. **iPhone: "Not set up" while frames came in.** Forgetting Slot17 under iOS Settings (the 1.5.1 instructions) removes the AccessorySetupKit accessory. The app set its accessory to nil but never cancelled its connection request, so iOS still connected.
+  5. Setting up always asked the server for the key, even when the phone had it.
+  6. **The link-lost tone listened only to the server.** In a car without internet it would have played while Bluetooth was live.
+- **The link now carries everything** (frame kinds 5 and 6, control action 3; old apps ignore them):
+  - **State:** every 2 s the whole state the server gets, raw DEFLATE in signed pieces, with the answers to operations. Measured on our car computer: 2669 bytes, 961 packed, about six frames.
+  - **Operations from the phone:** sightings, recording requests, stop, power off, the Pushover switch, the setup check, the Pi log and support packages. Each is the same JSON as for the server, in signed control frames. The car computer carries an id out once, whichever route brings it, and remembers its answers across a restart (`~/.cache/slot17-ops-seen.json`).
+  - **Fallback:** an operation with no word over Bluetooth within 8 s also goes through the server.
+  - **The Pi log** comes straight to the phone over Bluetooth, at about 14 KB/s so a match never waits behind it. It shows under Logs, On server, and is kept on the phone.
+  - **Still only through the server:** switching Bluetooth on, and the link key.
+- **The car computer:**
+  - **The publisher no longer ends with a detector that stopped by itself.** It reports "stopped" with the reason from the session's summary (for example `StreamStall`), so the phone can still read the Pi, get its log or power it off. `systemctl stop` still ends both.
+  - **Its state over Bluetooth keeps its own 2 s rhythm,** so a server that hangs cannot hold it up.
+  - **A stopped detector's reason** reaches the server as well.
+- **The apps:**
+  - **Lights, line and receiver warning** follow Bluetooth when the server has nothing fresh. The Pi is "Over Bluetooth", and a detector that stopped by itself is red: "Stopped by itself".
+  - **The link-lost tone** counts Bluetooth too. It plays when the detector stopped by itself, not only when the link is lost.
+  - **The Pi screen and its actions** work over Bluetooth. Only a sighting needs a running detector.
+  - **Set up again needs no server** when the phone has the key: on the iPhone the picker, on Android the chooser. The server is asked only for a first key or a different car computer.
+  - **iPhone:**
+    - A removed accessory's connection is cancelled.
+    - A connection without an accessory is dropped, so the app never shows data from a link it says is not set up.
+    - The pairing hint says to tap Set up after forgetting Slot17 under iOS Settings.
+  - **Old reports are labelled:** "On the car computer" says "As the car computer last reported, … ago" when it is the server's old report.
+  - **A saved sighting stays saved,** even when the server's copy expires later.
+- **Not tested on a phone yet.** A test from a Windows PC failed at −80 dBm: Windows could not read the services, the car computer being further away than on 22 November. The link was tested with unit tests on all three sides, the car computer and both apps, against the same shared fixture.
+- **Tests:**
+  - Detector: 235 (10 new: pieces, files, operations, the link).
+  - Publisher and server: 9 new.
+  - Android core: 5 new; iPhone: 5 new (built on Codemagic).
+  - `shared/parity/ble-frames.json` has messages and operations. Its compressed state is a constant, because zlib and zlib-ng compress the same input differently.
+
 ## 1.5.1, iPhone app 1.8.1 and Android app 1.10.1: Bluetooth without pairing, and storage that keeps up (23 November 2026)
 
 Two problems from the field, one from the operator's iPhone and one from a user's SD card. The detector's recognition is unchanged.

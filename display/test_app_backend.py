@@ -1173,5 +1173,112 @@ class SupportPackages(Base):
         self.assertEqual(len(packages.listing()), srv.PACKAGE_KEEP)
 
 
+class OperationsOverBluetooth(Base):
+    """1.6.0: the app's operations over Bluetooth, for a car without internet: carried out like the server's,
+    once by id whichever route brings them, and answered in the state the phone gets over Bluetooth."""
+
+    class Link:
+        def __init__(self):
+            self.ops, self.fed, self.listening = [], [], True
+            self.last_feed = self.last_state = -1e9
+            self.sent_detector, self.was_subscribed, self.dropped = None, False, 0
+
+        def poll(self, now):
+            pass
+
+        def running(self):
+            return True
+
+        def state(self, now):
+            return {"on": True, "state": "connected", "name": "Slot17", "subscribed": True}
+
+        def take_ops(self):
+            out, self.ops = self.ops, []
+            return out
+
+        def subscribed(self):
+            return self.listening
+
+        def feed(self, command):
+            self.fed.append(command)
+            return True
+
+    def setUp(self):
+        super().setUp()
+        self.link = self.Link()
+        self.pub.bluetooth = self.link
+        self.pub.heartbeat.poll(time.monotonic())
+
+    def over_bluetooth(self, **op):
+        self.link.ops.append(op)
+        return pub.handle_ops(self.sender, self.pub, self.cfg)
+
+    def answer(self, op_id):
+        return next(a for a in self.pub._answers(time.monotonic()) if a["id"] == op_id)
+
+    def test_a_sighting_over_bluetooth_is_saved_like_one_from_the_server(self):
+        self.assertTrue(self.over_bluetooth(kind="mark", id=ID_A, label="police", note="A12", age_s=1.0,
+                                            phone_utc=1793814741.0))
+        saved = json.loads((self.session / "marks" / (ID_A + ".request.json")).read_text())
+        self.assertIn("A12", saved["note"])
+        self.assertEqual(self.answer(ID_A)["state"], "sent", "until the detector reports it")
+
+    def test_the_same_sighting_by_both_routes_is_saved_once(self):
+        self.over_bluetooth(kind="mark", id=ID_A, label="police", age_s=1.0, phone_utc=1793814741.0)
+        self.pub.ack(ID_A, "done", "Saved with recording (queued)")
+        (self.session / "marks" / (ID_A + ".request.json")).replace(self.session / "marks" / (ID_A + ".x"))
+        self.assertEqual(self.mark()[0], 200)                 # the phone also queued it on the server
+        self.cycle()
+        self.cycle()
+        self.assertFalse((self.session / "marks" / (ID_A + ".request.json")).exists(), "not saved a second time")
+        self.assertEqual(self.op_state()["detail"], "Saved with recording (queued)", "the server hears the answer")
+
+    def test_answers_are_remembered_across_a_restart(self):
+        path = self.dir / "ops-seen.json"
+        first = pub.OpMemory(path)
+        first.start(ID_B)
+        first.answer(ID_B, "done", "Pushover messages off")
+        first.start(ID_A)                                   # still running when the process ended
+        again = pub.OpMemory(path)
+        self.assertEqual(again.seen(ID_B), ("done", "Pushover messages off"))
+        self.assertIsNone(again.seen(ID_A), "carried out again, as before 1.6.0")
+
+    def test_what_is_refused_over_bluetooth(self):
+        for op_id, op, why in (("1" * 32, {"kind": "bluetooth", "pair": True}, "only comes through the server"),
+                               ("2" * 32, {"kind": "reboot"}, "Not something"),
+                               ("3" * 32, {"kind": "mark", "label": "police", "note": "n" * 501}, "too long"),
+                               ("4" * 32, {"kind": "poweroff", "age_s": "soon"}, "Unknown age")):
+            self.assertTrue(self.over_bluetooth(id=op_id, **op))
+            self.assertEqual(self.answer(op_id)["state"], "failed")
+            self.assertIn(why, self.answer(op_id)["detail"])
+
+    def test_stop_over_bluetooth_answers_first_then_winds_up(self):
+        calls = []
+        real = pub.run_stop_command
+        self.addCleanup(setattr, pub, "run_stop_command", real)
+        pub.run_stop_command = lambda command, p, runner=None: (calls.append(command), False)[1]
+        self.assertFalse(self.over_bluetooth(kind="stop", id=ID_A))
+        self.assertEqual(calls[0]["action"], "stop")
+        self.assertEqual(self.answer(ID_A)["state"], "done")
+        self.assertTrue(any("state" in c for c in self.link.fed), "the answer went out before the end")
+
+    def test_the_pi_log_goes_to_the_phone_that_asked(self):
+        import zlib
+        home = self.dir / "home"
+        self.addCleanup(setattr, pub.Path, "home", pub.Path.home)
+        pub.Path.home = staticmethod(lambda: home)
+        thread = pub.send_pi_log_over_bluetooth({"id": ID_A, "kind": "logs", "to": "phone"}, self.pub,
+                                                collect=lambda session, hb: b"journal lines\n")
+        thread.join(5)
+        path = pub.Path(self.link.fed[-1]["file"]["path"])
+        self.assertEqual(path.parent, home / ".cache")
+        doc = json.loads(zlib.decompress(path.read_bytes(), -15))
+        self.assertEqual(doc, {"v": 1, "op": ID_A, "kind": "pi-log", "text": "journal lines\n"})
+        self.assertEqual(self.pub.acks[-1]["state"], "done")
+        self.link.listening = False
+        pub.send_pi_log_over_bluetooth({"id": ID_B, "kind": "logs", "to": "phone"}, self.pub)
+        self.assertIn("No phone", self.pub.acks[-1]["detail"])
+
+
 if __name__ == "__main__":
     unittest.main()

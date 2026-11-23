@@ -3,7 +3,10 @@ package nl.slot17.core
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
+import java.util.zip.Inflater
 import kotlin.math.max
+import kotlin.random.Random
+import kotlinx.serialization.Serializable
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -30,9 +33,21 @@ object BluetoothFormat {
     private val RULES = listOf(null, "standard", "weak", "coherent")
     private val ACTIVITIES = listOf(null, "active", "intermittent")
     private const val CONTROL_KIND = 16
+    /** 1.6.0: a message too long for one frame goes in pieces: message number, index, count, then a slice. */
+    const val PIECE_HEADER = 6
+    const val CONTROL_PIECE_BYTES = MAX_FRAME - HEADER_BYTES - 2 - TAG_BYTES - PIECE_HEADER     // 154
+    const val MAX_PIECES = 4096
+    const val STATE_LIMIT = 256 shl 10
+    const val FILE_LIMIT = 4 shl 20
 
-    /** What a phone can ask over the link itself. Switching on needs the server: an off link hears nothing. */
-    enum class Action(val code: Int) { OFF(1), RENAME(2) }
+    /**
+     * What a phone can ask over the link itself. Switching on needs the server: an off link hears nothing.
+     * From 1.6.0 also any operation the app would send the server ([OP]), as its JSON in pieces.
+     */
+    enum class Action(val code: Int) { OFF(1), RENAME(2), OP(3) }
+
+    /** What comes in pieces (1.6.0): the car computer's whole state, or a file such as its log. */
+    enum class PieceKind(val code: Int) { STATE(5), FILE(6) }
 
     class FrameError(message: String) : Exception(message)
 
@@ -45,6 +60,50 @@ object BluetoothFormat {
         data class Matches(override val boot: Long, override val counter: Long, val matches: List<MatchRow>) : Frame()
         data class Channels(override val boot: Long, override val counter: Long, val channels: List<ChannelRow>) : Frame()
         data class Reply(override val boot: Long, override val counter: Long, val action: Action?, val ok: Boolean, val text: String) : Frame()
+        class Piece(override val boot: Long, override val counter: Long, val kind: PieceKind, val message: Int, val index: Int,
+                    val count: Int, val data: ByteArray) : Frame()
+    }
+
+    /**
+     * An operation for the car computer (1.6.0): [json], exactly the bytes the server would get, in control frames.
+     * [boot] and [counter] are the newest frame's; every piece may name them, since the car computer carries an
+     * operation out once by its id. [message] is this phone's own random number for it.
+     */
+    fun opFrames(key: ByteArray, boot: Long, counter: Long, message: Int, json: ByteArray): List<ByteArray> {
+        val count = max(1, (json.size + CONTROL_PIECE_BYTES - 1) / CONTROL_PIECE_BYTES)
+        return List(count) { i ->
+            val slice = json.copyOfRange(minOf(json.size, i * CONTROL_PIECE_BYTES), minOf(json.size, (i + 1) * CONTROL_PIECE_BYTES))
+            val head = ByteBuffer.allocate(HEADER_BYTES + 2 + PIECE_HEADER + slice.size).order(ByteOrder.LITTLE_ENDIAN)
+                .put(VERSION.toByte()).put(CONTROL_KIND.toByte()).putInt(boot.toInt()).putInt(counter.toInt())
+                .put(Action.OP.code.toByte()).put((PIECE_HEADER + slice.size).toByte())
+                .putShort(message.toShort()).putShort(i.toShort()).putShort(count.toShort()).put(slice).array()
+            head + hmac(key, head).copyOf(TAG_BYTES)
+        }
+    }
+
+    /**
+     * Raw DEFLATE (RFC 1951), as the car computer packs states and files; null when damaged or over [limit].
+     * Inflater(nowrap = true) wants one byte more than the data in this mode, so a zero is added.
+     */
+    fun inflate(data: ByteArray, limit: Int): ByteArray? {
+        if (data.isEmpty()) return null
+        val inflater = Inflater(true)
+        return try {
+            inflater.setInput(data + byteArrayOf(0))
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            while (!inflater.finished()) {
+                val n = inflater.inflate(buffer)
+                if (n == 0 && (inflater.needsInput() || inflater.needsDictionary())) return null
+                out.write(buffer, 0, n)
+                if (out.size() > limit) return null
+            }
+            out.toByteArray()
+        } catch (e: java.util.zip.DataFormatException) {
+            null
+        } finally {
+            inflater.end()
+        }
     }
 
     /**
@@ -122,6 +181,15 @@ object BluetoothFormat {
                 val text = ByteArray(n).also { b.get(it) }.toString(Charsets.UTF_8)
                 Frame.Reply(boot, counter, Action.entries.firstOrNull { it.code == action }, ok, text)
             }
+            5, 6 -> {
+                if (body < PIECE_HEADER) throw FrameError("piece length")
+                val message = b.u16()
+                val index = b.u16()
+                val count = b.u16()
+                if (index >= count || count > MAX_PIECES) throw FrameError("piece numbers")
+                val data = ByteArray(body - PIECE_HEADER).also { b.get(it) }
+                Frame.Piece(boot, counter, if (kind == 5) PieceKind.STATE else PieceKind.FILE, message, index, count, data)
+            }
             else -> throw FrameError("kind $kind")
         }
     }
@@ -169,6 +237,51 @@ class FrameAcceptor(private val remember: Int = 32) {
         return true
     }
 }
+
+/**
+ * The pieces of a message back together (1.6.0), the same rule as p0/bluetooth_frames.py's Assembler: any order,
+ * repeats ignored, at most [keep] messages at a time, so a lost piece costs only its own message.
+ */
+class PieceAssembler(private val keep: Int = 2, private val limit: Int = BluetoothFormat.FILE_LIMIT) {
+    private class Part(val message: Int, val count: Int) {
+        val pieces = HashMap<Int, ByteArray>()
+        var bytes = 0
+    }
+    private val parts = ArrayDeque<Part>()
+
+    /** The whole message once its last piece is in, else null. */
+    fun add(message: Int, index: Int, count: Int, data: ByteArray): ByteArray? {
+        if (count <= 0 || count > BluetoothFormat.MAX_PIECES || index < 0 || index >= count) return null
+        var part = parts.firstOrNull { it.message == message && it.count == count }
+        if (part == null) {
+            parts.removeAll { it.message == message }
+            part = Part(message, count)
+            parts.addLast(part)
+            while (parts.size > keep) parts.removeFirst()
+        }
+        if (index !in part.pieces) {
+            part.bytes += data.size
+            if (part.bytes > limit) {
+                parts.remove(part)
+                return null
+            }
+            part.pieces[index] = data
+        }
+        if (part.pieces.size < count) return null
+        parts.remove(part)
+        return (0 until count).fold(ByteArray(0)) { acc, i -> acc + (part.pieces[i] ?: ByteArray(0)) }
+    }
+
+    fun reset() = parts.clear()
+}
+
+/** The car computer's whole state over Bluetooth (1.6.0): what the server gets, and the answers to operations. */
+@Serializable
+data class BluetoothMessage(val state: PiState, val ops: List<OpStatus>? = null)
+
+/** A file the car computer sent over Bluetooth (1.6.0): for now its log. */
+@Serializable
+data class BluetoothFile(val op: String, val kind: String, val text: String)
 
 /**
  * Which route brought each match first, and by how much: the measured answer to "is Bluetooth faster here".
@@ -230,6 +343,12 @@ class BluetoothFeed(key: ByteArray? = null) {
         /** The car computer's answer to a control frame from this phone. */
         data class Reply(val action: BluetoothFormat.Action?, val ok: Boolean, val text: String) : Received()
         data class Refused(val why: String) : Received()
+        /** A whole state came in (1.6.0): [carState] and [answers] are new. */
+        data object CarState : Received()
+        /** A file asked for (its inflated JSON). */
+        class File(val data: ByteArray) : Received()
+        /** One piece of a message, more to come. */
+        data object Partial : Received()
     }
 
     var key: ByteArray? = key
@@ -254,6 +373,16 @@ class BluetoothFeed(key: ByteArray? = null) {
         private set
     private var lastBoot: Long? = null
     private var lastCounter = 0L
+    /** The car computer's whole state, as the server would have it, and when it came (1.6.0 car computers). */
+    var carState: PiState? = null
+        private set
+    var carStateAt = Double.NEGATIVE_INFINITY
+        private set
+    /** The car computer's answers to operations, from its newest state. */
+    var answers: List<OpStatus> = emptyList()
+        private set
+    private val stateParts = PieceAssembler(2, BluetoothFormat.STATE_LIMIT)
+    private val fileParts = PieceAssembler(1, BluetoothFormat.FILE_LIMIT)
 
     fun receive(bytes: ByteArray, now: Double): Received {
         val k = key ?: return refuse("no key for this car computer yet")
@@ -280,7 +409,24 @@ class BluetoothFeed(key: ByteArray? = null) {
                 Received.State
             }
             is BluetoothFormat.Frame.Matches -> Received.Matches(frame.matches)
+            is BluetoothFormat.Frame.Piece -> piece(frame, now)
         }
+    }
+
+    private fun piece(frame: BluetoothFormat.Frame.Piece, now: Double): Received {
+        val state = frame.kind == BluetoothFormat.PieceKind.STATE
+        val whole = (if (state) stateParts else fileParts).add(frame.message, frame.index, frame.count, frame.data)
+            ?: return Received.Partial
+        val raw = BluetoothFormat.inflate(whole, if (state) BluetoothFormat.STATE_LIMIT else BluetoothFormat.FILE_LIMIT)
+            ?: return refuse("a message that does not inflate")
+        if (!state) return Received.File(raw)
+        val doc = runCatching { ProtocolJson.decodeFromString(BluetoothMessage.serializer(), raw.toString(Charsets.UTF_8)) }
+            .getOrNull() ?: return refuse("a state that does not read")
+        // A state too long for the car computer's pipe leaves these out: keep the last ones it had.
+        carState = doc.state.copy(drives = doc.state.drives ?: carState?.drives, doctor = doc.state.doctor ?: carState?.doctor)
+        carStateAt = now
+        answers = doc.ops ?: emptyList()
+        return Received.CarState
     }
 
     private fun refuse(why: String): Received {
@@ -289,15 +435,31 @@ class BluetoothFeed(key: ByteArray? = null) {
         return Received.Refused(why)
     }
 
-    /** The car is live over Bluetooth: a fresh status that says the detector runs, by LinkTracker's rule. */
-    fun live(now: Double): Boolean =
-        now - statusAt <= LinkTracker.CAR_STALE && detector?.state.let { it == "running" || it == "degraded" }
+    /** The whole state while it is fresh, by LinkTracker's rule for the server's. */
+    fun fullState(now: Double): PiState? = if (now - carStateAt <= LinkTracker.CAR_STALE) carState else null
 
-    /** Any checked frame lately, whatever the detector says. */
+    /**
+     * The detector as Bluetooth last told it: from the whole state (it has the reasons, such as why it stopped),
+     * else from the status frames of a car computer before 1.6.0.
+     */
+    fun currentDetector(now: Double): DetectorState? =
+        fullState(now)?.detector ?: detector.takeIf { now - statusAt <= LinkTracker.CAR_STALE }
+
+    /** The car is live over Bluetooth: a fresh state that says the detector runs, by LinkTracker's rule. */
+    fun live(now: Double): Boolean = currentDetector(now)?.state.let { it == "running" || it == "degraded" }
+
+    /** Any checked frame lately, whatever the detector says: the car computer is there. */
     fun heard(now: Double): Boolean = now - lastFrameAt <= LinkTracker.CAR_STALE
 
-    /** What the screens show when only Bluetooth brings data: the last server state with Bluetooth's detector and channels. */
+    /**
+     * What the screens show when only Bluetooth brings data. From a 1.6.0 car computer its whole state, aged since
+     * it came; from an older one the last server state with Bluetooth's detector and channels on top.
+     */
     fun piState(base: PiState?, now: Double): PiState? {
+        fullState(now)?.let { s ->
+            val age = max(0.0, now - carStateAt)
+            return s.copy(snapshotAge = age, channels = s.channels.map { it.copy(age = it.age + age) }, matches = emptyList())
+        }
         val d = detector ?: return null
         val aged = channels.map { it.copy(age = it.age + (now - channelsAt)) }
         val start = base ?: PiState(snapshotAge = 0.0, detector = d, channels = emptyList(), matches = emptyList())
@@ -311,6 +473,13 @@ class BluetoothFeed(key: ByteArray? = null) {
         return BluetoothFormat.control(k, boot, lastCounter, action, name)
     }
 
+    /** Control frames for an operation (1.6.0), or null before any frame came from the car computer. */
+    fun opFrames(json: ByteArray, message: Int = Random.nextInt(0, 0x10000)): List<ByteArray>? {
+        val k = key ?: return null
+        val boot = lastBoot ?: return null
+        return BluetoothFormat.opFrames(k, boot, lastCounter, message, json)
+    }
+
     fun reset() {
         lastBoot = null
         acceptor = FrameAcceptor()
@@ -318,6 +487,11 @@ class BluetoothFeed(key: ByteArray? = null) {
         channels = emptyList()
         statusAt = Double.NEGATIVE_INFINITY
         channelsAt = Double.NEGATIVE_INFINITY
+        carState = null
+        carStateAt = Double.NEGATIVE_INFINITY
+        answers = emptyList()
+        stateParts.reset()
+        fileParts.reset()
     }
 }
 

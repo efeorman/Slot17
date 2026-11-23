@@ -178,7 +178,9 @@ class FakePeripheral:
         return self.subscribed
 
 
-class LinkTests(unittest.TestCase):
+class LinkBase(unittest.TestCase):
+    """A link on a fake BlueZ peripheral. No tests of its own, so the classes below do not run each other's."""
+
     def setUp(self):
         self.t = [100.0]
         self.lines = []
@@ -193,6 +195,20 @@ class LinkTests(unittest.TestCase):
         self.p.subscribed = True
         self.link.event("subscribed", True)
 
+    def controlled(self):
+        """A connected link that has sent a few frames, with its settings saved in this test."""
+        self.saved = []
+        self.link.save = lambda **change: (self.saved.append(change), self.settings.update(change))[1]
+        self.connect()
+        for _ in range(3):
+            self.link.command({"status": DETECTOR})
+        return self.link.encoder.boot, self.link.encoder.counter
+
+    def replies(self):
+        return [frames.decode(f, KEY) for f in self.p.notified if frames.decode(f, KEY)["kind"] == "reply"]
+
+
+class LinkTests(LinkBase):
     def test_registers_then_advertises_fast_then_slower(self):
         self.link.event("registered", None)
         self.assertEqual(self.p.calls[-1], ("advertise", "Slot17", link.FAST_MS))
@@ -263,7 +279,7 @@ class LinkTests(unittest.TestCase):
     def test_info_names_the_key_but_never_holds_it(self):
         info = json.loads(self.link.info())
         self.assertEqual(info, {"v": 1, "name": "Slot17", "key_id": frames.key_id(KEY), "software": "1.4.0",
-                                "boot": "00000007"})
+                                "boot": "00000007", "can": ["state", "ops", "files"]})
         self.assertNotIn(KEY.hex(), self.link.info().decode())
 
     def test_status_lines_on_change_and_every_few_seconds(self):
@@ -278,18 +294,6 @@ class LinkTests(unittest.TestCase):
         self.assertNotIn(KEY.hex(), json.dumps(self.lines))
         self.link.event("read", 185)
         self.assertEqual(self.lines[-1]["mtu"], 185)
-
-    def controlled(self):
-        """A connected link that has sent a few frames, with its settings saved in this test."""
-        self.saved = []
-        self.link.save = lambda **change: (self.saved.append(change), self.settings.update(change))[1]
-        self.connect()
-        for _ in range(3):
-            self.link.command({"status": DETECTOR})
-        return self.link.encoder.boot, self.link.encoder.counter
-
-    def replies(self):
-        return [frames.decode(f, KEY) for f in self.p.notified if frames.decode(f, KEY)["kind"] == "reply"]
 
     def test_renamed_over_bluetooth(self):
         boot, counter = self.controlled()
@@ -353,6 +357,150 @@ class LinkTests(unittest.TestCase):
         for bad in (None, [], "x", {"matches": "x"}, {"status": 3}):
             self.assertTrue(self.link.command(bad))
         self.assertEqual(self.p.notified, [])
+
+
+class PieceTests(unittest.TestCase):
+    """1.6.0: a state, a file or a phone's operation, in signed pieces."""
+
+    def test_a_message_in_pieces_back_together_in_any_order_and_twice(self):
+        data = bytes(range(256)) * 3
+        enc = frames.Encoder(KEY, boot=7)
+        pieces = [frames.decode(f, KEY) for f in enc.pieces(frames.FILE, data)]
+        self.assertEqual(len(pieces), 5)
+        self.assertTrue(all(len(f) <= frames.MAX_FRAME for f in enc.pieces(frames.FILE, data)))
+        a = frames.Assembler()
+        order = [pieces[i] for i in (3, 0, 0, 4, 1)]
+        self.assertEqual([a.add(p["message"], p["index"], p["count"], bytes.fromhex(p["data"])) for p in order],
+                         [None] * 5)
+        self.assertEqual(a.add(pieces[2]["message"], 2, 5, bytes.fromhex(pieces[2]["data"])), data)
+
+    def test_a_lost_piece_costs_only_its_own_message(self):
+        enc = frames.Encoder(KEY, boot=7)
+        first, second, third = ([frames.decode(f, KEY) for f in enc.pieces(frames.STATE, b"x" * 400)] for _ in range(3))
+        a = frames.Assembler(keep=2)
+        a.add(first[0]["message"], 0, 3, b"x")                  # its other pieces never come
+        for p in second[:2] + third:
+            a.add(p["message"], p["index"], p["count"], bytes.fromhex(p["data"]))
+        self.assertNotIn(first[0]["message"], a.parts)
+        got = a.add(second[2]["message"], 2, 3, bytes.fromhex(second[2]["data"]))
+        self.assertEqual(got, b"x" * 400)
+
+    def test_limits(self):
+        with self.assertRaises(frames.FrameError):
+            frames.Assembler(limit=100).add(1, 0, 2, b"y" * 101)
+        with self.assertRaises(frames.FrameError):
+            frames.Assembler().add(1, 2, 2, b"")
+        with self.assertRaises(frames.FrameError):
+            frames.unpack(frames.pack({"a": "z" * 5000}), 1000)
+        with self.assertRaises(frames.FrameError):
+            frames.unpack(b"not deflate", 1000)
+        self.assertEqual(frames.unpack(frames.pack({"a": [1, 2]}), 1000), {"a": [1, 2]})
+        self.assertEqual(frames.unpack(frames.stored(b'{"a":1}'), 1000), {"a": 1})
+
+    def test_the_parity_state_blob_still_holds_the_parity_state(self):
+        self.assertEqual(frames.unpack(frames.PARITY_STATE_Z, frames.STATE_MAX_BYTES), frames.PARITY_STATE)
+
+    def test_an_operation_is_its_json_in_control_frames(self):
+        op = {"kind": "mark", "id": "d" * 32, "label": "police", "note": "n" * 400}
+        fs = frames.op_frames(KEY, 7, 42, 0x1234, op)
+        self.assertEqual(len(fs), 4)
+        decoded = [frames.decode_control(f, KEY) for f in fs]
+        self.assertEqual({(d["action"], d["boot"], d["counter"], d["message"], d["count"]) for d in decoded},
+                         {("op", 7, 42, 0x1234, 4)})
+        self.assertEqual(json.loads(b"".join(d["data"] for d in decoded)), op)
+        with self.assertRaises(frames.FrameError):
+            frames.decode_control(frames.op_frames(bytes(32), 7, 42, 1, op)[0], KEY)
+
+
+class LinkMessageTests(LinkBase):
+    """1.6.0: the whole state and files over the link, and operations from the phone back to the publisher."""
+
+    def setUp(self):
+        super().setUp()
+        self.cache = tempfile.TemporaryDirectory()
+        self.addCleanup(self.cache.cleanup)
+        self.link.cache = Path(self.cache.name)
+        self.woken = []
+        self.link.wake = lambda: self.woken.append(True)
+
+    def decoded(self):
+        return [frames.decode(f, KEY) for f in self.p.notified]
+
+    def test_the_state_goes_in_pieces_only_to_a_listening_phone(self):
+        import base64
+        doc = {"v": 1, "state": {"detector": {"state": "running"}, "pi": {"temp_c": 50.1}}, "ops": []}
+        line = {"state": base64.b64encode(frames.pack(doc)).decode()}
+        self.link.command(line)
+        self.assertEqual(self.p.notified, [])
+        self.connect()
+        self.link.command(line)
+        got = self.decoded()
+        self.assertEqual({g["kind"] for g in got}, {"state"})
+        a = frames.Assembler()
+        whole = [a.add(g["message"], g["index"], g["count"], bytes.fromhex(g["data"])) for g in got][-1]
+        self.assertEqual(frames.unpack(whole, frames.STATE_MAX_BYTES), doc)
+        self.link.command({"state": "not base64!"})
+        self.assertEqual(len(self.p.notified), len(got))
+
+    def test_a_file_goes_a_few_pieces_at_a_time_each_signed_as_it_goes(self):
+        self.connect()
+        packed = os.urandom(2000)                       # does not compress: 13 pieces
+        path = Path(self.cache.name) / "slot17-bt-0123456789abcdef.z"
+        path.write_bytes(packed)
+        self.link.command({"file": {"path": str(path)}})
+        self.assertFalse(path.exists(), "the link deletes it once read")
+        self.assertEqual(self.woken, [True])
+        self.assertTrue(self.link.pump(4))
+        self.link.command({"status": DETECTOR})        # a frame between two pieces
+        while self.link.pump(4):
+            pass
+        counters = [g["counter"] for g in self.decoded()]
+        self.assertEqual(counters, sorted(counters), "numbered as sent, so the phone takes every one")
+        pieces = [g for g in self.decoded() if g["kind"] == "file"]
+        self.assertEqual(len(pieces), 13)
+        a = frames.Assembler()
+        whole = [a.add(g["message"], g["index"], g["count"], bytes.fromhex(g["data"])) for g in pieces][-1]
+        self.assertEqual(whole, packed)
+
+    def test_only_its_own_files_and_none_after_the_phone_left(self):
+        self.connect()
+        elsewhere = tempfile.TemporaryDirectory()
+        self.addCleanup(elsewhere.cleanup)
+        for path in (Path(elsewhere.name) / "slot17-bt-0123456789abcdef.z", Path(self.cache.name) / "notes.txt"):
+            path.write_bytes(b"x")
+            self.link.command({"file": {"path": str(path)}})
+            self.assertTrue(path.exists(), "not its own: left alone")
+        good = Path(self.cache.name) / "slot17-bt-0123456789abcdef.z"
+        good.write_bytes(os.urandom(1000))
+        self.link.command({"file": {"path": str(good)}})
+        self.p.subscribed = False
+        self.link.event("subscribed", False)
+        self.assertFalse(self.link.pump(4))
+        self.assertEqual([g for g in self.decoded() if g["kind"] == "file"], [])
+
+    def test_an_operation_from_the_phone_goes_to_the_publisher(self):
+        boot, counter = self.controlled()
+        op = {"kind": "mark", "id": "e" * 32, "label": "police", "note": "n" * 300, "age_s": 1.0}
+        for f in frames.op_frames(KEY, boot, counter, 0x77, op):       # every piece names the same counter
+            self.link.event("control", f)
+        self.assertEqual([line["op"] for line in self.lines if "op" in line], [op])
+        self.assertEqual(self.replies(), [], "answered in the state, not with a reply")
+
+    def test_an_operation_is_refused_from_another_boot_too_old_or_malformed(self):
+        boot, counter = self.controlled()
+        op = {"kind": "poweroff", "id": "f" * 32, "age_s": 0}
+        self.link.event("control", frames.op_frames(KEY, boot ^ 1, counter, 1, op)[0])
+        self.assertIn("before a restart", self.replies()[-1]["text"])
+        for _ in range(frames.CONTROL_WINDOW + 1):
+            self.link.command({"status": DETECTOR})
+        self.link.event("control", frames.op_frames(KEY, boot, counter, 2, op)[0])
+        self.assertIn("too old", self.replies()[-1]["text"])
+        counter = self.link.encoder.counter
+        for bad, why in (({"kind": "poweroff", "id": "nope"}, "not an operation"), ([1, 2], "not an operation")):
+            self.link.event("control", frames.op_frames(KEY, boot, counter, 3, bad)[0])
+            self.assertIn(why, self.replies()[-1]["text"])
+        self.assertEqual([line for line in self.lines if "op" in line], [])
+        self.assertEqual(self.replies()[-1]["action"], "op")
 
 
 class GattClient(unittest.TestCase):

@@ -1,8 +1,9 @@
 # The Bluetooth link to the apps (1.4.0)
 
 Besides the display server, the car computer can send alerts and the detector's state straight to the iPhone and
-Android apps over Bluetooth Low Energy. It is faster, and it keeps working where there is no internet. The
-server stays for everything else: logs, controls, updates and more than one viewer.
+Android apps over Bluetooth Low Energy. It is faster, and it keeps working where there is no internet. From 1.6.0
+it carries everything the server carries: the whole state, the app's controls and the Pi log (see "Everything over
+Bluetooth" below). The server stays for the link key, switching Bluetooth on, updates and more than one viewer.
 
 ## Why, in numbers
 
@@ -81,7 +82,7 @@ larger MTU, which iPhones and Android phones do by themselves.
 | Offset | Size | Field |
 |---|---|---|
 | 0 | 1 | version, 1 |
-| 1 | 1 | kind: 1 status, 2 matches, 3 channels, 4 reply; 16 control (from a phone) |
+| 1 | 1 | kind: 1 status, 2 matches, 3 channels, 4 reply, 5 state and 6 file (1.6.0); 16 control (from a phone) |
 | 2 | 4 | boot: random for each start of the link |
 | 6 | 4 | counter: one higher for every frame in a boot |
 | 10 | n | body |
@@ -179,9 +180,74 @@ So a recording of the link, replayed later, cannot raise an alert.
 
 ## Not in this version
 
-- Bluetooth without any server: it needs another way to share the key.
-- Other controls over Bluetooth (stop, power off, sightings). Switching the link off and renaming it work.
+- Bluetooth without any server: it needs another way to share the key. Once a phone has the key, though, setting it
+  up again needs no server (1.6.0).
+- Support packages are made on the car computer and go to the server; over Bluetooth only the request goes.
 - The web page: Safari has no Web Bluetooth.
+
+## Everything over Bluetooth (1.6.0)
+
+**Why.** On 23 November the operator drove with 1.5.1, an iPhone and a car computer without internet.
+- **The app said "Live over Bluetooth" with Pi and Detector red.** The lights, the actions and the car computer's
+  Bluetooth row read only the server.
+- **"Not set up on this phone" while frames came in.** Forgetting Slot17 under iOS Settings removes the
+  AccessorySetupKit accessory, but the app kept its connection request, so iOS still connected.
+- **Two set-ups pressed in the car waited on the server** until the car computer was home on a cable.
+- **The detector stopped by itself after 80 s** (undervoltage, the Airspy off USB at 60 s). The publisher ended
+  30 s later and took Bluetooth with it, so the phone heard nothing more.
+
+**State frames (kind 5).**
+- **What:** every 2 s, while a phone listens, the whole state the server gets: `{"v": 1, "state": {...}, "ops": [...]}`.
+  `state` reads as the app's `PiState`, with `source` "bluetooth", `snapshot_age_s` 0 (the app ages it from its
+  arrival) and no matches, which have their own frames. `ops` holds the answers to operations, in the server's form,
+  for 5 minutes, the newest 16.
+- **Packing:** compact JSON, raw DEFLATE (RFC 1951), in pieces: message number (2 bytes), index (2), count (2), then
+  up to 156 bytes. Each piece is a signed, numbered frame like any other, so it cannot be changed, swapped or played
+  back. A lost piece costs only its own message; the next comes 2 s later.
+- **Size:** 2669 bytes, 961 packed, measured on our car computer: about six frames. The publisher's pipe to the link
+  takes 4 KB at once, so a state too long leaves out the drives list first, then the doctor's verdicts; the app keeps
+  the last ones it had.
+- **Its own rhythm:** a push that hangs on a server that does not answer cannot hold it up.
+
+**Operations (control action 3).**
+- **What goes:** sightings and recording requests, stop, power off, the Pushover switch, the setup check, the Pi
+  log and support packages. Each is the same JSON the app sends the server, in control frames: message, index, count,
+  then up to 154 bytes of plain JSON.
+- **Replays:** every piece names the boot and the counter of the newest frame, and must be from this boot and within
+  the last 300 frames. An operation is carried out once by its id, whichever route brings it.
+- **Memory:** the publisher keeps its answers in `~/.cache/slot17-ops-seen.json`. A sighting sent over Bluetooth in
+  the car and queued on the server is saved once, also when the server hands it over on the next drive.
+- **Answers:** "sent" at once, then done or failed, in the next state.
+- **Refused over Bluetooth:** the key (`pair`). Switching Bluetooth on can't go this way either: a link that is off
+  hears nothing.
+- **Fallback:** an app that hears nothing back within 8 s sends the same operation through the server as well.
+
+**Files (kind 6).**
+- **What:** the Pi log asked for over Bluetooth (`"to": "phone"`) comes straight to the phone, packed:
+  `{"v": 1, "op", "kind": "pi-log", "text"}`. The app keeps the newest ten and shows them under Logs, On server.
+- **Pace:** the link sends 4 pieces every 50 ms, about 14 KB/s, each signed as it goes. A match never waits behind a
+  file, and a status sent in between cannot make the next piece look like a replay.
+
+**What the link can do** is in its info characteristic: `"can": ["state", "ops", "files"]`. An app uses only what is
+listed, so it still works with a car computer before 1.6.0. An app before 1.6.0 refuses the new frames and works
+as before.
+
+**On the car computer:** the publisher no longer ends 30 s after a detector that stopped by itself. It reports
+"stopped" with the reason from the session's `summary.json` (`failure_reason`, for example `StreamStall`), over
+Bluetooth and to the server. `systemctl stop` still ends both.
+
+**In the apps:**
+- **Lights and line:** when the server has nothing fresh and Bluetooth has, they follow Bluetooth. The Pi is
+  "Over Bluetooth", and a detector that stopped by itself is red: "Stopped by itself".
+- **Warnings:** the link-lost tone and the receiver warning count Bluetooth. The tone plays when the detector stopped
+  by itself.
+- **Actions** go over Bluetooth whenever it is connected, and work on a car computer whose detector stopped.
+  Only a sighting needs a running detector.
+- **Setting up again** with the key on the phone needs no server: on the iPhone the picker, on Android the chooser.
+- **iPhone:** a removed accessory's connection is cancelled, and a connection without an accessory is dropped.
+
+**Not tested on a phone yet.** A test from a Windows PC failed at −80 dBm; the unit tests on all three sides check
+the same frames in `shared/parity/ble-frames.json`.
 
 ## Sources
 

@@ -141,6 +141,88 @@ final class BluetoothTests: XCTestCase {
         XCTAssertNotNil(feed.control(.rename, name: "Car 2"))
     }
 
+    // MARK: 1.6.0: everything over Bluetooth
+
+    private func message(_ name: String) throws -> (frames: [Data], json: [String: Any]) {
+        let messages = try XCTUnwrap(fixture["messages"] as? [[String: Any]])
+        let m = try XCTUnwrap(messages.first { $0["name"] as? String == name })
+        let frames = try XCTUnwrap(m["frames"] as? [String]).map { try XCTUnwrap(hexData($0)) }
+        return (frames, try XCTUnwrap(m["json"] as? [String: Any]))
+    }
+
+    func testTheWholeStateComesInPiecesWithItsAnswers() throws {
+        let (frames, want) = try message("state")
+        XCTAssertGreaterThan(frames.count, 1)
+        var feed = BluetoothFeed(key: key)
+        for (i, f) in frames.enumerated() {
+            XCTAssertEqual(feed.receive(f, now: 5), i == frames.count - 1 ? .carState : .partial)
+        }
+        let state = try XCTUnwrap(feed.fullState(5))
+        let w = try XCTUnwrap(want["state"] as? [String: Any])
+        XCTAssertEqual(state.detector.state, "stopped")
+        XCTAssertEqual(state.detector.reasons, (w["detector"] as? [String: Any])?["reasons"] as? [String])
+        XCTAssertEqual(state.software, w["software"] as? String)
+        XCTAssertEqual(state.bluetooth?.state, "connected")
+        XCTAssertEqual(state.doctor?.items.count, 2)
+        XCTAssertEqual(feed.answers.map(\.state), ["done", "sent"])
+        XCTAssertTrue(feed.heard(5))
+        XCTAssertFalse(feed.live(5), "the detector stopped")
+        XCTAssertEqual(feed.piState(base: nil, now: 7)?.snapshotAge ?? 0, 2, accuracy: 1e-9)
+        XCTAssertNil(feed.fullState(5 + LinkTracker.carStale + 0.1))
+    }
+
+    func testAFileComesInPiecesAndReads() throws {
+        let (frames, want) = try message("file")
+        var feed = BluetoothFeed(key: key)
+        var got: Data?
+        for f in frames { if case .file(let data) = feed.receive(f, now: 1) { got = data } }
+        let file = try JSONDecoder().decode(BluetoothFile.self, from: try XCTUnwrap(got))
+        XCTAssertEqual(file.kind, "pi-log")
+        XCTAssertEqual(file.text, want["text"] as? String)
+        XCTAssertEqual(file.op, want["op"] as? String)
+    }
+
+    func testOperationFramesAreTheCarComputers() throws {
+        for o in try XCTUnwrap(fixture["operations"] as? [[String: Any]]) {
+            let made = BluetoothFormat.opFrames(key: key, boot: UInt32(try XCTUnwrap(o["boot"] as? Int)),
+                                                counter: UInt32(try XCTUnwrap(o["counter"] as? Int)),
+                                                message: UInt16(try XCTUnwrap(o["message"] as? Int)),
+                                                json: Data(try XCTUnwrap(o["text"] as? String).utf8))
+            XCTAssertEqual(made.map { BluetoothFormat.hex($0) }, o["frames"] as? [String])
+            XCTAssertTrue(made.allSatisfy { $0.count <= BluetoothFormat.maxFrame })
+        }
+        XCTAssertEqual(Set(fixture["can"] as? [String] ?? []), ["state", "ops", "files"])
+    }
+
+    func testPiecesInAnyOrderAndALostOneCostsOnlyItsMessage() {
+        var a = PieceAssembler(keep: 2, limit: 100)
+        XCTAssertNil(a.add(message: 1, index: 1, count: 2, data: Data([2])))
+        XCTAssertNil(a.add(message: 1, index: 1, count: 2, data: Data([2])))
+        XCTAssertEqual(a.add(message: 1, index: 0, count: 2, data: Data([1])), Data([1, 2]))
+        XCTAssertNil(a.add(message: 2, index: 0, count: 2, data: Data([9])))          // its second piece is lost
+        XCTAssertNil(a.add(message: 3, index: 0, count: 1, data: Data(count: 101)), "over the limit")
+        XCTAssertNil(a.add(message: 4, index: 2, count: 2, data: Data([1])))
+        XCTAssertEqual(a.add(message: 5, index: 0, count: 1, data: Data([5])), Data([5]))
+        XCTAssertNil(BluetoothFormat.inflate(Data([1, 2, 3]), limit: 100))
+    }
+
+    func testTheLightsFollowBluetoothWhenTheServerHasNothing() {
+        let running = BluetoothView(detector: DetectorState(state: "running"))
+        let chain = StatusBuilder.chain(LinkTracker(), now: 1, hasCredentials: true, bluetooth: running)
+        XCTAssertEqual(chain.map(\.level), [.idle, .ok, .ok, .ok])
+        XCTAssertEqual(chain[1].detail, "Over Bluetooth")
+        XCTAssertEqual(StatusBuilder.headline(LinkTracker(), now: 1, lastDelay: nil, hasCredentials: true, bluetooth: running).title,
+                       "Live over Bluetooth")
+        var crashed = DetectorState(state: "stopped")
+        crashed.reasons = ["StreamStall: receiver sample stream stalled"]
+        let stopped = StatusBuilder.chain(LinkTracker(), now: 1, hasCredentials: true, bluetooth: BluetoothView(detector: crashed))
+        XCTAssertEqual(stopped[2].level, .bad)
+        XCTAssertEqual(stopped[2].detail, "Stopped by itself")
+        let line = StatusBuilder.headline(LinkTracker(), now: 1, lastDelay: nil, hasCredentials: true, bluetooth: BluetoothView(detector: crashed))
+        XCTAssertEqual(line.level, .bad)
+        XCTAssertTrue(line.detail.hasPrefix("StreamStall"))
+    }
+
     func testRouteStats() {
         var stats = RouteStats()
         stats.arrived("a", .bluetooth, at: 10)

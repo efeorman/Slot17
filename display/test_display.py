@@ -3,6 +3,7 @@
 Kept outside tests/ so the detector's preflight suite and its pinned count are unchanged.
 Browser behaviour is covered separately by test_display_browser.py.
 """
+from collections import deque
 import contextlib
 import http.client
 import io
@@ -338,19 +339,24 @@ class PublisherTests(unittest.TestCase):
         p.step(now_mono=now)
         self.assertEqual(len(calls), before + 1)
 
-    def test_exits_only_after_detector_gone_long_enough(self):
+    def test_a_stopped_detector_is_reported_with_its_reason_and_the_publisher_stays(self):
+        """1.6.0: on 23 November the publisher ended 30 s after a receiver stall, and the phone, over Bluetooth,
+        then heard nothing at all. It now stays and says why the detector stopped."""
         heartbeat(self.hb, self.s1)
         self.pub.step(now_mono=0)
         self.hb.unlink()
         self.pub.step(now_mono=1)
         self.assertEqual(self.sent[-1]["detector"]["state"], "stopped")
-        self.assertFalse(self.pub.finished(1 + pub.STOPPED_EXIT_S - 0.5))
+        self.assertNotIn("reasons", self.sent[-1]["detector"], "no summary yet: no reason")
+        (self.s1 / "summary.json").write_text(json.dumps({"failure_reason": "StreamStall: receiver sample stream stalled"}))
+        self.pub.step(now_mono=5)
+        self.assertEqual(self.sent[-1]["detector"]["reasons"], ["StreamStall: receiver sample stream stalled"])
+        self.pub.step(now_mono=500)
+        self.assertEqual(self.sent[-1]["detector"]["reasons"], ["StreamStall: receiver sample stream stalled"])
+        self.assertFalse(hasattr(self.pub, "finished"), "nothing ends it but systemd")
         heartbeat(self.hb, self.s1, samples=9)
-        self.pub.step(now_mono=20)
-        self.assertFalse(self.pub.finished(20 + pub.STOPPED_EXIT_S))
-        self.hb.unlink()
-        self.pub.step(now_mono=25)
-        self.assertTrue(self.pub.finished(25 + pub.STOPPED_EXIT_S))
+        self.pub.step(now_mono=520)
+        self.assertEqual(self.sent[-1]["detector"].get("reasons"), [], "running again: no stop reason")
 
 
 class CallAndRisingTests(unittest.TestCase):
@@ -1003,8 +1009,10 @@ class BluetoothPublisherTests(unittest.TestCase):
     """The link gets new matches at once, with the server's fields, and the state at the server's rhythm."""
 
     class Recorder:
-        def __init__(self, fail=False):
+        def __init__(self, fail=False, listening=False):
             self.fed, self.last_feed, self.fail = [], -1e9, fail
+            self.last_state, self.sent_detector, self.was_subscribed, self.dropped = -1e9, None, False, 0
+            self.listening, self.ops = listening, []
 
         def poll(self, now):
             if self.fail:
@@ -1013,12 +1021,25 @@ class BluetoothPublisherTests(unittest.TestCase):
         def running(self):
             return True
 
+        def subscribed(self):
+            return self.listening
+
+        def take_ops(self):
+            out, self.ops = self.ops, []
+            return out
+
         def feed(self, command):
             self.fed.append(command)
             return True
 
         def state(self, now):
             return {"on": True, "state": "connected", "name": "Slot17", "subscribed": True, "frames": 1, "matches": 0}
+
+        def states(self):
+            """The whole states fed so far, unpacked as the link and then the phone do."""
+            import base64
+            import zlib
+            return [json.loads(zlib.decompress(base64.b64decode(c["state"]), -15)) for c in self.fed if "state" in c]
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -1059,6 +1080,52 @@ class BluetoothPublisherTests(unittest.TestCase):
         self.assertEqual(len([c for c in self.link.fed if "status" in c]), 1)
         self.pub.step(now_mono=52.1)
         self.assertEqual(len([c for c in self.link.fed if "status" in c]), 2)
+
+    def test_the_whole_state_goes_only_while_a_phone_listens(self):
+        """1.6.0: everything the server gets, over Bluetooth, every 2 s and at once when a phone joins."""
+        heartbeat(self.hb, self.s1)
+        self.pub.step(now_mono=50)
+        self.assertEqual(self.link.states(), [], "nobody listens: nothing packed")
+        self.link.listening = True
+        self.pub.step(now_mono=50.2)
+        self.assertEqual(len(self.link.states()), 1, "a phone joined: at once")
+        doc = self.link.states()[-1]
+        self.assertEqual(doc["v"], 1)
+        state = doc["state"]
+        self.assertEqual((state["source"], state["snapshot_age_s"], state["matches"]), ("bluetooth", 0.0, []))
+        self.assertEqual(state["detector"]["state"], "running")
+        self.assertEqual(state["features"], pub.FEATURES)
+        self.assertEqual(state["session"], self.s1.name)
+        self.assertEqual(state["bluetooth"]["state"], "connected")
+        self.assertIn("pi", state)
+        self.pub.step(now_mono=51)
+        self.assertEqual(len(self.link.states()), 1)
+        self.pub.step(now_mono=52.3)
+        self.assertEqual(len(self.link.states()), 2, "and then every 2 s")
+
+    def test_the_state_goes_on_while_a_push_hangs_and_its_answers_with_it(self):
+        heartbeat(self.hb, self.s1)
+        self.link.listening = True
+        self.pub.pusher = SimpleNamespace(busy=True, results=deque())     # a server that never answers
+        self.pub.step(now_mono=50)
+        op = {"id": "a" * 32, "kind": "doctor"}
+        self.pub.doctor = SimpleNamespace(busy=True, due=lambda now: False, result=None, for_push=lambda now: None)
+        self.link.ops.append(op)
+        pub.handle_ops(SimpleNamespace(pending_ops=deque()), self.pub, {})
+        self.pub.step(now_mono=50.1)
+        answers = self.link.states()[-1]["ops"]
+        self.assertEqual(answers, [{"id": "a" * 32, "kind": "doctor", "state": "failed",
+                                    "detail": "the check is already running"}])
+
+    def test_a_long_state_drops_the_drives_first(self):
+        heartbeat(self.hb, self.s1)
+        self.link.listening = True
+        self.pub.drives_at = 1e12                                         # no real drives list in a test
+        self.pub.drives = [{"session": os.urandom(36).hex(), "start": "2026-11-23T11:41:29+00:00", "minutes": 1.5,
+                            "matches": i, "faults": 0, "mb": 1.0, "recordings": 0} for i in range(400)]
+        self.pub.step(now_mono=50)
+        self.assertNotIn("drives", self.link.states()[-1]["state"])
+        self.assertEqual(self.sent[-1]["drives"], self.pub.drives, "the server still gets them")
 
     def test_a_link_that_cannot_start_never_stops_the_pushes(self):
         config = pub.bluetooth_module()

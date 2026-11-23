@@ -20,7 +20,13 @@ final class BluetoothRoute: ObservableObject {
 
     var sendOp: (String, [String: Any], @escaping (ActionState) -> Void) -> Void = { _, _, _ in }
     var carState: () -> PiState? = { nil }
+    /// How old `carState` is, in seconds: over 8 it is the server's last report, not the car computer now.
+    var carStateAge: () -> Double? = { nil }
     var deliver: ([MatchRow], Double) -> Void = { _, _ in }
+    /// The car computer's answers to operations, from each whole state over Bluetooth (1.6.0).
+    var answered: ([OpStatus]) -> Void = { _ in }
+    /// A file the car computer sent over Bluetooth: its log, asked for on the Pi screen (1.6.0).
+    var fileArrived: (Data) -> Void = { _ in }
     var changed: () -> Void = {}
     var note: (String) -> Void = { _ in }
 
@@ -82,6 +88,25 @@ final class BluetoothRoute: ObservableObject {
         return link.state == .connected && feed.heard(Mono.now())
     }
 
+    /// Operations can go over Bluetooth now (a 1.6.0 car computer, connected and heard).
+    var canSendOps: Bool {
+        guard overBluetooth, #available(iOS 18.0, *), let link = link as? BluetoothLink else { return false }
+        return link.can.contains("ops")
+    }
+
+    /// The car computer can send files (its log) over Bluetooth now.
+    var canReceiveFiles: Bool {
+        guard canSendOps, #available(iOS 18.0, *), let link = link as? BluetoothLink else { return false }
+        return link.can.contains("files")
+    }
+
+    /// An operation over Bluetooth, the same JSON the server would get. False when it could not go.
+    func send(_ json: [String: Any]) -> Bool {
+        guard canSendOps, let data = try? JSONSerialization.data(withJSONObject: json), let frames = feed.opFrames(data),
+              #available(iOS 18.0, *), let link = link as? BluetoothLink else { return false }
+        return link.write(frames)
+    }
+
     private func control(_ action: BluetoothFormat.Action, name: String = "") -> Bool {
         guard overBluetooth, let frame = feed.control(action, name: name),
               #available(iOS 18.0, *), let link = link as? BluetoothLink, link.write(frame) else { return false }
@@ -96,15 +121,45 @@ final class BluetoothRoute: ObservableObject {
 
     // MARK: This phone
 
+    /// Why "Set up" cannot be used, or nil. With the key already on this phone it needs no server (1.6.0).
+    var setUpUnavailable: String? {
+        if let phoneUnavailable { return phoneUnavailable }
+        if feed.key != nil && keyID != nil { return nil }
+        return unavailable
+    }
+
     /// Step 1 of setting up: the car computer's key, through the server. Step 2 is the system picker.
+    /// From 1.6.0 a phone that has the key skips step 1, so setting up again works in a car without internet:
+    /// on 23 November two set-ups in the car waited on the server until the car computer was home again.
     func startPairing() {
-        guard unavailable == nil, phoneUnavailable == nil else { return }
+        guard phoneUnavailable == nil else { return }
+        if #available(iOS 18.0, *), feed.key != nil, keyID != nil, let link = link as? BluetoothLink, link.state != .wrongCar {
+            note("Bluetooth set-up started with the key this phone already has")
+            setUse(true)
+            if link.isSetUp {
+                pairing = .init(text: "Set up: connecting to the car computer", level: .ok)
+                link.reconnect()
+            } else {
+                showPickerInForeground("bluetooth-picker", link)
+            }
+            return
+        }
+        if let unavailable {
+            pairing = .init(text: unavailable, level: .bad)
+            return
+        }
         guard onCar?.on == true else {
             pairing = .init(text: "Switch Bluetooth on for the car computer first", level: .bad)
             return
         }
         note("Bluetooth set-up started")
         sendOp("bluetooth", ["pair": true]) { [weak self] in self?.pairing = $0 }
+    }
+
+    /// The car computer's own report of its Bluetooth is old: the server's last, from before this drive.
+    var onCarIsOld: String? {
+        guard let age = carStateAge(), age > LinkTracker.carStale, onCar != nil else { return nil }
+        return "As the car computer last reported" + (age.isFinite ? ", \(Format.ago(age))" : "")
     }
 
     /// The server's answers for this route's requests. The key in a pairing answer is never shown or logged.
@@ -208,6 +263,13 @@ final class BluetoothRoute: ObservableObject {
                 lastRefusalNote = now
                 note("PROBLEM Bluetooth frame refused: \(why)")
             }
+        case .carState:
+            answered(feed.answers)
+            changed()
+        case .file(let data):
+            fileArrived(data)
+        case .partial:
+            break
         }
     }
 

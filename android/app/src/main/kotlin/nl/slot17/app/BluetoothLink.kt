@@ -26,6 +26,7 @@ import android.os.Looper
 import android.os.ParcelUuid
 import android.os.SystemClock
 import java.util.UUID
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import nl.slot17.core.BluetoothFormat
@@ -51,6 +52,9 @@ class BluetoothLink(
     var state = State.OFF
         private set
     var mtu: Int? = null
+        private set
+    /** What this car computer's link can do beyond 1.4.0, from its info: "state", "ops", "files" (1.6.0). */
+    var can: Set<String> = emptySet()
         private set
 
     private val main = Handler(Looper.getMainLooper())
@@ -132,6 +136,7 @@ class BluetoothLink(
         }
         gatt = null
         mtu = null
+        can = emptySet()
         set(State.OFF)
     }
 
@@ -195,12 +200,17 @@ class BluetoothLink(
     }
 
     /** Writes a control frame (switch off, rename) to the car computer. False when there is no link to write on. */
-    fun write(data: ByteArray): Boolean {
-        if (state != State.CONNECTED || !permitted()) return false
-        val copy = data.copyOf()
-        queue { g ->
-            val c = g.getService(SERVICE)?.getCharacteristic(CONTROL)
-            if (c == null) false else writeControl(g, c, copy)
+    fun write(data: ByteArray): Boolean = write(listOf(data))
+
+    /** Writes control frames in order, one GATT write each, so the car computer gets every piece of an operation. */
+    fun write(frames: List<ByteArray>): Boolean {
+        if (state != State.CONNECTED || !permitted() || frames.isEmpty()) return false
+        for (data in frames) {
+            val copy = data.copyOf()
+            queue { g ->
+                val c = g.getService(SERVICE)?.getCharacteristic(CONTROL)
+                if (c == null) false else writeControl(g, c, copy)
+            }
         }
         return true
     }
@@ -234,6 +244,7 @@ class BluetoothLink(
         }
         val info = runCatching { ProtocolJson.parseToJsonElement(value.decodeToString()).jsonObject }.getOrNull()
         val keyId = info?.get("key_id")?.jsonPrimitive?.content
+        can = runCatching { info?.get("can")?.jsonArray?.map { it.jsonPrimitive.content }?.toSet() }.getOrNull() ?: emptySet()
         if (expectedKeyId != null && keyId != expectedKeyId) {
             note("PROBLEM Bluetooth: this is a different car computer (key $keyId); set it up again")
             set(State.WRONG_CAR)

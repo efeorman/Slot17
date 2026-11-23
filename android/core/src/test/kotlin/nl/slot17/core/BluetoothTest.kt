@@ -192,5 +192,87 @@ class BluetoothTest {
         assertEquals(null, BluetoothState(on = true).phonesPair)        // an older car computer says nothing
     }
 
+    // 1.6.0: everything over Bluetooth
+
+    private fun message(name: String): Pair<List<ByteArray>, JsonObject> {
+        val m = fixture["messages"]!!.jsonArray.map { it.jsonObject }.single { it["name"]!!.jsonPrimitive.content == name }
+        return m["frames"]!!.jsonArray.map { assertNotNull(hexBytes(it.jsonPrimitive.content)) } to m["json"]!!.jsonObject
+    }
+
+    @Test
+    fun theWholeStateComesInPiecesWithItsAnswers() {
+        val (frames, want) = message("state")
+        assertTrue(frames.size > 1)
+        val feed = BluetoothFeed(key)
+        frames.forEachIndexed { i, f ->
+            val got = feed.receive(f, 5.0)
+            if (i == frames.size - 1) assertEquals(BluetoothFeed.Received.CarState, got) else assertEquals(BluetoothFeed.Received.Partial, got)
+        }
+        val state = assertNotNull(feed.fullState(5.0))
+        val w = want["state"]!!.jsonObject
+        assertEquals("stopped", state.detector.state)
+        assertEquals(w["detector"]!!.jsonObject["reasons"]!!.jsonArray.map { it.jsonPrimitive.content }, state.detector.reasons)
+        assertEquals(w["software"]!!.jsonPrimitive.content, state.software)
+        assertEquals("connected", state.bluetooth?.state)
+        assertEquals(2, state.doctor?.items?.size)
+        assertEquals(listOf("done", "sent"), feed.answers.map { it.state })
+        assertTrue(feed.heard(5.0))
+        assertTrue(!feed.live(5.0), "the detector stopped")
+        assertEquals(2.0, feed.piState(null, 7.0)!!.snapshotAge, 1e-9)
+        assertNull(feed.fullState(5.0 + LinkTracker.CAR_STALE + 0.1))
+    }
+
+    @Test
+    fun aFileComesInPiecesAndReads() {
+        val (frames, want) = message("file")
+        val feed = BluetoothFeed(key)
+        var got: ByteArray? = null
+        for (f in frames) (feed.receive(f, 1.0) as? BluetoothFeed.Received.File)?.let { got = it.data }
+        val file = ProtocolJson.decodeFromString(BluetoothFile.serializer(), assertNotNull(got).toString(Charsets.UTF_8))
+        assertEquals("pi-log", file.kind)
+        assertEquals(want["text"]!!.jsonPrimitive.content, file.text)
+        assertEquals(want["op"]!!.jsonPrimitive.content, file.op)
+    }
+
+    @Test
+    fun operationFramesAreTheCarComputers() {
+        for (o in fixture["operations"]!!.jsonArray.map { it.jsonObject }) {
+            val made = BluetoothFormat.opFrames(key, o["boot"]!!.jsonPrimitive.long, o["counter"]!!.jsonPrimitive.long,
+                o["message"]!!.jsonPrimitive.int, o["text"]!!.jsonPrimitive.content.toByteArray(Charsets.UTF_8))
+            assertEquals(o["frames"]!!.jsonArray.map { it.jsonPrimitive.content }, made.map { it.hex() })
+            assertTrue(made.all { it.size <= BluetoothFormat.MAX_FRAME })
+        }
+        assertEquals(setOf("state", "ops", "files"), fixture["can"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet())
+    }
+
+    @Test
+    fun piecesInAnyOrderAndALostOneCostsOnlyItsMessage() {
+        val a = PieceAssembler(2, 100)
+        assertNull(a.add(1, 1, 2, byteArrayOf(2)))
+        assertNull(a.add(1, 1, 2, byteArrayOf(2)))
+        assertEquals(listOf<Byte>(1, 2), a.add(1, 0, 2, byteArrayOf(1))?.toList())
+        assertNull(a.add(2, 0, 2, byteArrayOf(9)))
+        assertNull(a.add(3, 0, 1, ByteArray(101)), "over the limit")
+        assertNull(a.add(4, 2, 2, byteArrayOf(1)))
+        assertEquals(listOf<Byte>(5), a.add(5, 0, 1, byteArrayOf(5))?.toList())
+        assertNull(BluetoothFormat.inflate(byteArrayOf(1, 2, 3), 100))
+    }
+
+    @Test
+    fun theLightsFollowBluetoothWhenTheServerHasNothing() {
+        val running = BluetoothView(DetectorState(state = "running"))
+        val chain = StatusBuilder.chain(LinkTracker(), 1.0, true, bluetooth = running)
+        assertEquals(listOf(Level.IDLE, Level.OK, Level.OK, Level.OK), chain.map { it.level })
+        assertEquals("Over Bluetooth", chain[1].detail)
+        assertEquals("Live over Bluetooth", StatusBuilder.headline(LinkTracker(), 1.0, null, true, running).title)
+        val crashed = BluetoothView(DetectorState(state = "stopped", reasons = listOf("StreamStall: receiver sample stream stalled")))
+        val stopped = StatusBuilder.chain(LinkTracker(), 1.0, true, bluetooth = crashed)
+        assertEquals(Level.BAD, stopped[2].level)
+        assertEquals("Stopped by itself", stopped[2].detail)
+        val line = StatusBuilder.headline(LinkTracker(), 1.0, null, true, crashed)
+        assertEquals(Level.BAD, line.level)
+        assertTrue(line.detail.startsWith("StreamStall"))
+    }
+
     private fun kotlinx.serialization.json.JsonPrimitive.contentOrNullSafe(): String? = if (isString) content else null
 }

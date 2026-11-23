@@ -37,6 +37,12 @@ class BluetoothRoute(
     private val deliver: (List<MatchRow>, Double) -> Unit,
     private val changed: () -> Unit,
     private val note: (String) -> Unit,
+    /** How old [carState] is, in seconds: over 8 it is the server's last report, not the car computer now. */
+    private val carStateAge: () -> Double? = { null },
+    /** The car computer's answers to operations, from each whole state over Bluetooth (1.6.0). */
+    private val answered: (List<OpStatus>) -> Unit = {},
+    /** A file the car computer sent over Bluetooth: its log, asked for on the Pi screen (1.6.0). */
+    private val fileArrived: (ByteArray) -> Unit = {},
 ) {
     var phone by mutableStateOf(store.load(FILE, PhoneBluetooth.serializer()) ?: PhoneBluetooth())
         private set
@@ -92,6 +98,27 @@ class BluetoothRoute(
     /** The link is up and a frame has come from the car computer, so a signed command can go straight to it. */
     val overBluetooth: Boolean get() = link.state == BluetoothLink.State.CONNECTED && feed.heard(mono())
 
+    /** Operations can go over Bluetooth now (a 1.6.0 car computer, connected and heard). */
+    val canSendOps: Boolean get() = overBluetooth && "ops" in link.can
+
+    /** The car computer can send files (its log) over Bluetooth now. */
+    val canReceiveFiles: Boolean get() = canSendOps && "files" in link.can
+
+    /** An operation over Bluetooth, the same JSON the server would get. False when it could not go. */
+    fun send(json: JsonObject): Boolean {
+        if (!canSendOps) return false
+        val frames = feed.opFrames(json.toString().toByteArray(Charsets.UTF_8)) ?: return false
+        return link.write(frames)
+    }
+
+    /** The car computer's own report of its Bluetooth is old: the server's last, from before this drive. */
+    val onCarIsOld: String?
+        get() {
+            val age = carStateAge() ?: return null
+            if (age <= nl.slot17.core.LinkTracker.CAR_STALE || onCar == null) return null
+            return "As the car computer last reported" + if (age.isFinite()) ", ${nl.slot17.core.Format.ago(age)}" else ""
+        }
+
     private fun control(action: BluetoothFormat.Action, name: String = ""): Boolean {
         if (!overBluetooth) return false
         val frame = feed.control(action, name) ?: return false
@@ -108,9 +135,31 @@ class BluetoothRoute(
 
     // --- this phone --------------------------------------------------------------------------------
 
-    /** Step 1 of setting up: the car computer's key, through the server. Step 2 is the chooser. */
+    /** Why "Set up" cannot be used, or null. With the key already on this phone it needs no server (1.6.0). */
+    val setUpUnavailable: String? get() = if (phone.key != null && phone.keyId != null) null else unavailable
+
+    /**
+     * Step 1 of setting up: the car computer's key, through the server. Step 2 is the chooser. From 1.6.0 a phone
+     * that has the key skips step 1, so setting up again works in a car without internet.
+     */
     fun startPairing() {
-        if (unavailable != null) return
+        if (phone.key != null && phone.keyId != null && link.state != BluetoothLink.State.WRONG_CAR) {
+            note("Bluetooth set-up started with the key this phone already has")
+            if (phone.address != null) {
+                save(phone.copy(use = true))
+                pairing = ActionState("bluetooth-again", "Set up: connecting to the car computer", Level.OK)
+                link.close()
+                start()
+            } else {
+                pairing = ActionState("bluetooth-again", "Choose the car computer in the list Android shows…", Level.IDLE, true)
+                link.choose(show = { chooser = it }, chosen = ::chosen, failed = { pairing = ActionState("bluetooth-again", it, Level.BAD) })
+            }
+            return
+        }
+        unavailable?.let {
+            pairing = ActionState(text = it, level = Level.BAD)
+            return
+        }
         if (onCar?.on != true) {
             pairing = ActionState(text = "Switch Bluetooth on for the car computer first", level = Level.BAD)
             return
@@ -207,6 +256,12 @@ class BluetoothRoute(
                 lastRefusalNote = now
                 note("PROBLEM Bluetooth frame refused: ${got.why}")
             }
+            BluetoothFeed.Received.CarState -> {
+                answered(feed.answers)
+                changed()
+            }
+            is BluetoothFeed.Received.File -> fileArrived(got.data)
+            BluetoothFeed.Received.Partial -> Unit
         }
     }
 

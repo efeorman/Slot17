@@ -1,7 +1,12 @@
 {
-  "about": "Frames of the Bluetooth link (p0/bluetooth_frames.py). Every app must decode each frame to `decoded` with `key`, refuse `tampered`, and give each match id its `key`.",
+  "about": "Frames of the Bluetooth link (p0/bluetooth_frames.py). Every app must decode each frame to `decoded` with `key`, refuse `tampered`, and give each match id its `key`. 1.6.0: each of `messages` is pieces that put together and inflated (raw DEFLATE) give `json`; each of `operations` is the control frames an app writes for `op`.",
   "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
   "key_id": "630dcd29",
+  "can": [
+    "state",
+    "ops",
+    "files"
+  ],
   "frames": [
     {
       "name": "status",
@@ -93,6 +98,128 @@
         "ok": true,
         "text": "Bluetooth name: Car 2"
       }
+    }
+  ],
+  "messages": [
+    {
+      "name": "state",
+      "kind": "state",
+      "frames": [
+        "010507b007510500000001000000040085524b8f9b3010fe2b68ce140169d294e34a957ae8b6abe6d628420e0cc1023c963d24daaef8ef1d1392664feb8b1fe3f95ef61b9ca1c862f0ac18a178034fa3ab6405c77e4426e216a48ade6b32729aa7f926cbf2fc53b64ec394cee34f79515cb5e56a9b27ebe7ef7f438b51d6b7c4a53a61e9a1489334861a192b2637135d1965266bb1961687ca9391bb7bd8b16c861dabbe2f228715ea33bac87cea9ef25e46633d",
+        "010507b0075106000000010001000400abc1f618f9b9289354a5f130c550b5ca18ec43ef21862188c165d3a0e2d1cd3b29b84e882c5dd051d3c8b2a79397c910ebe6551635cdfae2f7f6476bc931089ad5413be360cb0a8acfdb248f61b4ac87d9e426cb83cd9e545d664330bd1548edbbb27188e5e9282d6996ac4471af4d17a0ce5a4908860c0619c81772ddac7cbaab925b76942c250228d88d287ec934fa24b6eaeb895cf6d4f045b91064a2751ed62d10a8",
+        "010507b007510700000001000200040069966c92f49d078108cf776dbe252f20469e63cedea8211ced7ae2eccb6cf9e82ba78f3782183a7c2db5ec60b34aebaacebfc2748f4be0b5641274efe1e921390a71938923e5a305fb10efe1e7d5a7d45e7eff7afaf1ed797e8268b10f07097af93612e87a1222b2015c688202f5c110b44e9b707379f09be3fa1ab37c43a5fb60579db18ec844dc62f4a2c5d1c270fc60fc6778f84bf71f8d861f59742f8bb7f5796af6",
+        "010507b0075108000000010003000400603a4cff0077c8cbda966bffa4"
+      ],
+      "json": {
+        "v": 1,
+        "state": {
+          "source": "bluetooth",
+          "session": "20261122-150122-000000Z_watch_382.5MHz",
+          "snapshot_age_s": 0.0,
+          "detector": {
+            "state": "stopped",
+            "reasons": [
+              "StreamStall: receiver sample stream stalled"
+            ]
+          },
+          "channels": [],
+          "matches": [],
+          "features": [
+            "mark",
+            "poweroff",
+            "logs",
+            "notify",
+            "doctor",
+            "bluetooth",
+            "support"
+          ],
+          "pi": {
+            "temp_c": 48.2,
+            "uptime_s": 612.0,
+            "load_1m": 0.8,
+            "disk_free_gb": 401.3
+          },
+          "link": {
+            "via": "none",
+            "networks": []
+          },
+          "notify": {
+            "pushover": true,
+            "configured": true
+          },
+          "software": "1.6.0",
+          "bluetooth": {
+            "on": true,
+            "state": "connected",
+            "name": "Slot17",
+            "subscribed": true,
+            "key_id": "630dcd29"
+          },
+          "doctor": {
+            "items": [
+              [
+                "Bluetooth",
+                "ok",
+                "on, as Slot17"
+              ],
+              [
+                "Network",
+                "PROBLEM",
+                "no network"
+              ]
+            ],
+            "age_s": 12.5
+          }
+        },
+        "ops": [
+          {
+            "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "kind": "mark",
+            "state": "done",
+            "detail": "Saved on the Pi"
+          },
+          {
+            "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "kind": "poweroff",
+            "state": "sent",
+            "detail": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "file",
+      "kind": "file",
+      "frames": [
+        "010607b007510900000002000000020001cc0033ff7b2276223a312c226f70223a226363636363636363636363636363636363636363636363636363636363636363222c226b696e64223a2270692d6c6f67222c2274657874223a223d3d206a6f75726e616c203d3d5c6e626c7565746f6f74683a207374617274696e67206f6e2032433a43463a36373a39333a41343a38452061732027536c6f743137275c6e4465746563746f722066615723545dbbcac5e0",
+        "010607b007510a000000020001000200696c65643a2053747265616d5374616c6c3a2072656365697665722073616d706c652073747265616d207374616c6c65645c6e227dad46cddb2009944b"
+      ],
+      "json": {
+        "v": 1,
+        "op": "cccccccccccccccccccccccccccccccc",
+        "kind": "pi-log",
+        "text": "== journal ==\nbluetooth: starting on 2C:CF:67:93:A4:8E as 'Slot17'\nDetector failed: StreamStall: receiver sample stream stalled\n"
+      }
+    }
+  ],
+  "operations": [
+    {
+      "op": {
+        "kind": "mark",
+        "id": "dddddddddddddddddddddddddddddddd",
+        "label": "police",
+        "age_s": 1.5,
+        "phone_utc": 1795434100.25,
+        "note": "two cars, blue lights, on the A12 towards Arnhem; a note long enough for a second piece"
+      },
+      "text": "{\"kind\":\"mark\",\"id\":\"dddddddddddddddddddddddddddddddd\",\"label\":\"police\",\"age_s\":1.5,\"phone_utc\":1795434100.25,\"note\":\"two cars, blue lights, on the A12 towards Arnhem; a note long enough for a second piece\"}",
+      "boot": 1359458311,
+      "counter": 9,
+      "message": 10775,
+      "frames": [
+        "011007b007510900000003a0172a000002007b226b696e64223a226d61726b222c226964223a226464646464646464646464646464646464646464646464646464646464646464222c226c6162656c223a22706f6c696365222c226167655f73223a312e352c2270686f6e655f757463223a313739353433343130302e32352c226e6f7465223a2274776f20636172732c20626c7565206c69676874732c206f6e207468652041313220746f4c18ba52e3a50e5e",
+        "011007b0075109000000033b172a0100020077617264732041726e68656d3b2061206e6f7465206c6f6e6720656e6f75676820666f722061207365636f6e64207069656365227de64325cfad04e77b"
+      ]
     }
   ],
   "controls": [

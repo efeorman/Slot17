@@ -14,6 +14,8 @@ final class BluetoothLink: NSObject, CBCentralManagerDelegate, CBPeripheralDeleg
 
     private(set) var state: State = .notSetUp { didSet { if state != oldValue { onChange() } } }
     private(set) var mtu: Int?
+    /// What this car computer's link can do beyond 1.4.0, from its info: "state", "ops", "files" (1.6.0).
+    private(set) var can: Set<String> = []
     var onFrame: (Data) -> Void = { _ in }
     var onChange: () -> Void = {}
     var note: (String) -> Void = { _ in }
@@ -92,9 +94,12 @@ final class BluetoothLink: NSObject, CBCentralManagerDelegate, CBPeripheralDeleg
     }
 
     /// Writes a control frame (switch off, rename) to the car computer. False when there is no link to write on.
-    func write(_ data: Data) -> Bool {
-        guard state == .connected, let peripheral, let controlCharacteristic else { return false }
-        peripheral.writeValue(data, for: controlCharacteristic, type: .withResponse)
+    func write(_ data: Data) -> Bool { write([data]) }
+
+    /// Writes control frames in order, each with a response, so the car computer gets every piece of an operation.
+    func write(_ frames: [Data]) -> Bool {
+        guard state == .connected, let peripheral, let controlCharacteristic, !frames.isEmpty else { return false }
+        for frame in frames { peripheral.writeValue(frame, for: controlCharacteristic, type: .withResponse) }
         return true
     }
 
@@ -114,8 +119,13 @@ final class BluetoothLink: NSObject, CBCentralManagerDelegate, CBPeripheralDeleg
             note("Bluetooth: the car computer was added")
             connectIfReady()
         case .accessoryRemoved:
+            // Removed under iOS Settings (forgetting "Slot17" there does this). Before 1.6.0 the connection request
+            // stayed: iOS still connected and frames came, while the app said "Not set up on this phone".
+            if let peripheral { central?.cancelPeripheralConnection(peripheral) }
+            note("Bluetooth: the car computer was removed from this phone; Set up connects it again")
             accessory = nil
             peripheral = nil
+            can = []
             state = .notSetUp
         default:
             break
@@ -161,13 +171,19 @@ final class BluetoothLink: NSObject, CBCentralManagerDelegate, CBPeripheralDeleg
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        // A connection left over from a car computer this phone no longer has (removed under iOS Settings):
+        // dropped, so the app never shows data from a link it says is not set up.
+        guard accessory != nil else {
+            central.cancelPeripheralConnection(peripheral)
+            return
+        }
         mtu = peripheral.maximumWriteValueLength(for: .withoutResponse) + 3
         peripheral.discoverServices([Self.service])
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         mtu = nil
-        guard wanted, state != .wrongCar else { return }
+        guard wanted, state != .wrongCar, accessory != nil else { return }
         state = .connecting
         central.connect(peripheral)
     }
@@ -211,6 +227,7 @@ final class BluetoothLink: NSObject, CBCentralManagerDelegate, CBPeripheralDeleg
         } else if characteristic.uuid == Self.info {
             let info = (try? JSONSerialization.jsonObject(with: value)) as? [String: Any]
             let keyID = info?["key_id"] as? String
+            can = Set(info?["can"] as? [String] ?? [])
             if let expectedKeyID, keyID != expectedKeyID {
                 note("PROBLEM Bluetooth: this is a different car computer (key \(keyID ?? "?")); set it up again")
                 state = .wrongCar

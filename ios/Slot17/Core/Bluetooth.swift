@@ -20,12 +20,22 @@ enum BluetoothFormat {
     private static let detectorStates = ["stopped", "starting", "running", "degraded", "stale"]
     private static let rules: [String?] = [nil, "standard", "weak", "coherent"]
     private static let activities: [String?] = [nil, "active", "intermittent"]
+    /// 1.6.0: a message too long for one frame goes in pieces: message number, index, count, then a slice.
+    static let pieceHeader = 6
+    static let controlPieceBytes = maxFrame - headerBytes - 2 - tagBytes - pieceHeader     // 154
+    static let maxPieces = 4096
+    static let stateLimit = 256 << 10
+    static let fileLimit = 4 << 20
 
     struct FrameError: Error, Equatable { let why: String }
 
     /// What a phone can ask over the link itself. Switching on needs the server: an off link hears nothing.
-    enum Action: UInt8 { case off = 1, rename = 2 }
+    /// From 1.6.0 also any operation the app would send the server (`op`), as its JSON in pieces.
+    enum Action: UInt8 { case off = 1, rename = 2, op = 3 }
     private static let controlKind: UInt8 = 16
+
+    /// What comes in pieces (1.6.0): the car computer's whole state, or a file such as its log.
+    enum PieceKind: UInt8 { case state = 5, file = 6 }
 
     /// A checked frame. Matches carry the key every route shares, so a match plays once.
     enum Frame {
@@ -33,17 +43,49 @@ enum BluetoothFormat {
         case matches(boot: UInt32, counter: UInt32, matches: [MatchRow])
         case channels(boot: UInt32, counter: UInt32, channels: [ChannelRow])
         case reply(boot: UInt32, counter: UInt32, action: Action?, ok: Bool, text: String)
+        case piece(boot: UInt32, counter: UInt32, kind: PieceKind, message: UInt16, index: Int, count: Int, data: Data)
 
         var boot: UInt32 {
             switch self {
-            case .status(let b, _, _), .matches(let b, _, _), .channels(let b, _, _), .reply(let b, _, _, _, _): return b
+            case .status(let b, _, _), .matches(let b, _, _), .channels(let b, _, _), .reply(let b, _, _, _, _),
+                 .piece(let b, _, _, _, _, _, _): return b
             }
         }
         var counter: UInt32 {
             switch self {
-            case .status(_, let c, _), .matches(_, let c, _), .channels(_, let c, _), .reply(_, let c, _, _, _): return c
+            case .status(_, let c, _), .matches(_, let c, _), .channels(_, let c, _), .reply(_, let c, _, _, _),
+                 .piece(_, let c, _, _, _, _, _): return c
             }
         }
+    }
+
+    /// An operation for the car computer (1.6.0): `json`, exactly the bytes the server would get, in control
+    /// frames. `boot` and `counter` are the newest frame's; every piece may name them, since the car computer
+    /// carries an operation out once by its id. `message` is this phone's own random number for it.
+    static func opFrames(key: Data, boot: UInt32, counter: UInt32, message: UInt16, json: Data) -> [Data] {
+        let bytes = [UInt8](json)
+        let count = max(1, (bytes.count + controlPieceBytes - 1) / controlPieceBytes)
+        return (0..<count).map { i in
+            let slice = Array(bytes[min(bytes.count, i * controlPieceBytes)..<min(bytes.count, (i + 1) * controlPieceBytes)])
+            var head: [UInt8] = [version, controlKind]
+            for value in [boot, counter] { head += le32(value) }
+            let data = le16(message) + le16(UInt16(i)) + le16(UInt16(count)) + slice
+            head += [Action.op.rawValue, UInt8(data.count)] + data
+            let tag = Array(HMAC<SHA256>.authenticationCode(for: head, using: SymmetricKey(data: key))).prefix(tagBytes)
+            return Data(head + tag)
+        }
+    }
+
+    private static func le16(_ v: UInt16) -> [UInt8] { [UInt8(v & 0xFF), UInt8(v >> 8)] }
+    private static func le32(_ v: UInt32) -> [UInt8] { [UInt8(v & 0xFF), UInt8(v >> 8 & 0xFF), UInt8(v >> 16 & 0xFF), UInt8(v >> 24)] }
+
+    /// Raw DEFLATE (RFC 1951), as the car computer packs states and files; nil when damaged or over `limit`.
+    /// Apple's `.zlib` here is raw DEFLATE, with no zlib header, which is what the car computer sends.
+    /// Nothing inflated is refused too: a state or file is never empty, and a stream cut short may give nothing.
+    static func inflate(_ data: Data, limit: Int) -> Data? {
+        guard !data.isEmpty, let out = try? (data as NSData).decompressed(using: .zlib) as Data,
+              !out.isEmpty, out.count <= limit else { return nil }
+        return out
     }
 
     /// A control frame for the car computer: `boot` and `counter` are those of the newest frame from it, and each
@@ -124,6 +166,14 @@ enum BluetoothFormat {
             let n = Int(r.u8())
             guard body == 3 + n else { throw FrameError(why: "reply length") }
             return .reply(boot: boot, counter: counter, action: action, ok: ok, text: String(decoding: r.bytes(n), as: UTF8.self))
+        case 5, 6:
+            guard body >= pieceHeader else { throw FrameError(why: "piece length") }
+            let message = r.u16()
+            let index = Int(r.u16())
+            let count = Int(r.u16())
+            guard index < count, count <= maxPieces else { throw FrameError(why: "piece numbers") }
+            return .piece(boot: boot, counter: counter, kind: kind == 5 ? .state : .file, message: message, index: index,
+                          count: count, data: Data(r.bytes(body - pieceHeader)))
         default:
             throw FrameError(why: "kind \(kind)")
         }
@@ -189,6 +239,53 @@ struct FrameAcceptor {
     }
 }
 
+/// The pieces of a message back together (1.6.0), the same rule as p0/bluetooth_frames.py's Assembler: any
+/// order, repeats ignored, at most `keep` messages at a time, so a lost piece costs only its own message.
+struct PieceAssembler {
+    private struct Part { let message: UInt16; let count: Int; var pieces: [Int: Data] = [:]; var bytes = 0 }
+    private var parts: [Part] = []
+    let keep: Int
+    let limit: Int
+
+    init(keep: Int = 2, limit: Int = BluetoothFormat.fileLimit) {
+        self.keep = keep
+        self.limit = limit
+    }
+
+    /// The whole message once its last piece is in, else nil.
+    mutating func add(message: UInt16, index: Int, count: Int, data: Data) -> Data? {
+        guard count > 0, count <= BluetoothFormat.maxPieces, index >= 0, index < count else { return nil }
+        var at = parts.firstIndex { $0.message == message && $0.count == count }
+        if at == nil {
+            parts.removeAll { $0.message == message }
+            parts.append(Part(message: message, count: count))
+            if parts.count > keep { parts.removeFirst(parts.count - keep) }
+            at = parts.count - 1
+        }
+        guard let i = at else { return nil }
+        if parts[i].pieces[index] == nil {
+            parts[i].bytes += data.count
+            guard parts[i].bytes <= limit else {
+                parts.remove(at: i)
+                return nil
+            }
+            parts[i].pieces[index] = data
+        }
+        guard parts[i].pieces.count == count else { return nil }
+        let done = parts.remove(at: i)
+        return (0..<count).reduce(into: Data()) { $0.append(done.pieces[$1] ?? Data()) }
+    }
+
+    mutating func reset() { parts = [] }
+}
+
+/// The car computer's whole state over Bluetooth (1.6.0): what the server gets, as `PiState`, and the answers to
+/// this phone's operations, in the server's own `OpStatus` form.
+struct BluetoothMessage: Decodable {
+    let state: PiState
+    let ops: [OpStatus]?
+}
+
 /// Which route brought each match first, and by how much: the measured answer to "is Bluetooth faster here".
 struct RouteStats {
     enum Route { case bluetooth, server }
@@ -235,7 +332,10 @@ struct RouteStats {
 /// What came over Bluetooth, for the app: the key frames are checked with, the newest detector state and channel
 /// rows, and when they arrived. The app's Bluetooth service hands it the bytes; nothing here touches Bluetooth.
 struct BluetoothFeed {
-    enum Received: Equatable { case matches([String]), state, refused(String), reply(ok: Bool, text: String) }
+    /// `carState`: a whole state came in (1.6.0); `file`: a file asked for (its inflated JSON); `partial`: a piece.
+    enum Received: Equatable {
+        case matches([String]), state, refused(String), reply(ok: Bool, text: String), carState, file(Data), partial
+    }
 
     var key: Data? { didSet { reset() } }
     private var acceptor = FrameAcceptor()
@@ -249,6 +349,13 @@ struct BluetoothFeed {
     private(set) var refused = 0
     private var lastBoot: UInt32?
     private var lastCounter: UInt32 = 0
+    /// The car computer's whole state, as the server would have it, and when it came (1.6.0 car computers).
+    private(set) var carState: PiState?
+    private(set) var carStateAt = -Double.infinity
+    /// The car computer's answers to operations, from its newest state.
+    private(set) var answers: [OpStatus] = []
+    private var stateParts = PieceAssembler(keep: 2, limit: BluetoothFormat.stateLimit)
+    private var fileParts = PieceAssembler(keep: 1, limit: BluetoothFormat.fileLimit)
 
     init(key: Data? = nil) { self.key = key }
 
@@ -283,6 +390,22 @@ struct BluetoothFeed {
         case .matches(_, _, let rows):
             matches = rows
             return .matches(rows.compactMap(\.key))
+        case .piece(_, _, let kind, let message, let index, let count, let data):
+            let whole = kind == .state ? stateParts.add(message: message, index: index, count: count, data: data)
+                                       : fileParts.add(message: message, index: index, count: count, data: data)
+            guard let whole else { return .partial }
+            let limit = kind == .state ? BluetoothFormat.stateLimit : BluetoothFormat.fileLimit
+            guard let raw = BluetoothFormat.inflate(whole, limit: limit) else { return refuse("a message that does not inflate") }
+            guard kind == .state else { return .file(raw) }
+            guard let doc = try? JSONDecoder().decode(BluetoothMessage.self, from: raw) else { return refuse("a state that does not read") }
+            var state = doc.state
+            // A state too long for the car computer's pipe leaves these out: keep the last ones it had.
+            if state.drives == nil { state.drives = carState?.drives }
+            if state.doctor == nil { state.doctor = carState?.doctor }
+            carState = state
+            carStateAt = now
+            answers = doc.ops ?? []
+            return .carState
         }
     }
 
@@ -291,16 +414,39 @@ struct BluetoothFeed {
         return .refused(why)
     }
 
-    /// The car is live over Bluetooth: a fresh status that says the detector runs, by LinkTracker's rule.
-    func live(_ now: Double) -> Bool {
-        now - statusAt <= LinkTracker.carStale && (detector?.state == "running" || detector?.state == "degraded")
+    /// The whole state while it is fresh, by LinkTracker's rule for the server's.
+    func fullState(_ now: Double) -> PiState? { now - carStateAt <= LinkTracker.carStale ? carState : nil }
+
+    /// The detector as Bluetooth last told it: from the whole state (it has the reasons, such as why it stopped),
+    /// else from the status frames of a car computer before 1.6.0.
+    func currentDetector(_ now: Double) -> DetectorState? {
+        if let state = fullState(now) { return state.detector }
+        return now - statusAt <= LinkTracker.carStale ? detector : nil
     }
 
-    /// Any checked frame lately, whatever the detector says.
+    /// The car is live over Bluetooth: a fresh state that says the detector runs, by LinkTracker's rule.
+    func live(_ now: Double) -> Bool {
+        let state = currentDetector(now)?.state
+        return state == "running" || state == "degraded"
+    }
+
+    /// Any checked frame lately, whatever the detector says: the car computer is there.
     func heard(_ now: Double) -> Bool { now - lastFrameAt <= LinkTracker.carStale }
 
-    /// What the screens show when only Bluetooth brings data: the last server state with Bluetooth's detector and channels.
+    /// What the screens show when only Bluetooth brings data. From a 1.6.0 car computer its whole state, aged since
+    /// it came; from an older one the last server state with Bluetooth's detector and channels on top.
     func piState(base: PiState?, now: Double) -> PiState? {
+        if var state = fullState(now) {
+            let age = max(0, now - carStateAt)
+            state.snapshotAge = age
+            state.channels = state.channels.map { row in
+                var aged = row
+                aged.age += age
+                return aged
+            }
+            state.matches = []
+            return state
+        }
         guard let detector else { return nil }
         var state = base ?? PiState(snapshotAge: 0, detector: detector, channels: [], matches: [])
         state.snapshotAge = max(0, now - statusAt)
@@ -312,6 +458,12 @@ struct BluetoothFeed {
         }
         state.matches = []
         return state
+    }
+
+    /// Control frames for an operation (1.6.0), or nil before any frame came from the car computer.
+    func opFrames(_ json: Data, message: UInt16 = UInt16.random(in: 0...UInt16.max)) -> [Data]? {
+        guard let key, let lastBoot else { return nil }
+        return BluetoothFormat.opFrames(key: key, boot: lastBoot, counter: lastCounter, message: message, json: json)
     }
 
     /// A signed control frame for the car computer, or nil before any frame came from it.
@@ -327,7 +479,19 @@ struct BluetoothFeed {
         channels = []
         statusAt = -.infinity
         channelsAt = -.infinity
+        carState = nil
+        carStateAt = -.infinity
+        answers = []
+        stateParts.reset()
+        fileParts.reset()
     }
+}
+
+/// A file the car computer sent over Bluetooth (1.6.0): for now its log, `{"v": 1, "op", "kind": "pi-log", "text"}`.
+struct BluetoothFile: Decodable {
+    let op: String
+    let kind: String
+    let text: String
 }
 
 /// The name phones show for a car computer: the rule p0/bluetooth_config.py and the server use.

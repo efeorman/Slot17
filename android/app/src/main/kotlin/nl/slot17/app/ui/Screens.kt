@@ -346,6 +346,12 @@ fun LogsScreen(model: AppModel) {
                 ActionButton("Collect the Pi's logs", model::requestPiLogs, icon = Icons.Filled.Download,
                     enabled = model.unavailable("logs") == null && !model.piLogs.busy)
                 ActionNote(model.piLogs)
+                if (model.phonePiLogs.isNotEmpty()) Hint("From the Pi over Bluetooth, kept on this phone.")
+                for (log in model.phonePiLogs) Row(Modifier.fillMaxWidth().background(C.panel, RoundedCornerShape(12.dp))
+                    .clickableNoRipple { reading = "From the Pi, over Bluetooth" to model.readPhonePiLog(log) }.padding(12.dp)) {
+                    Text("From the Pi, over Bluetooth", color = C.text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Text("${log.size / 1024 + 1} KB · ${Format.ago((System.currentTimeMillis() - log.atMs) / 1000.0)}", color = C.dim, fontSize = 12.sp)
+                }
                 ActionButton("Refresh the list", model::refreshServerLogs, icon = Icons.Filled.Refresh, enabled = model.hasLink)
                 if (model.serverLogsNote.isNotEmpty()) Hint(model.serverLogsNote)
                 for (entry in model.serverLogs) Row(Modifier.fillMaxWidth().background(C.panel, RoundedCornerShape(12.dp))

@@ -9,7 +9,7 @@ struct BluetoothCard: View {
 
     var body: some View {
         Card(title: "Bluetooth to the car computer") {
-            Text("Alerts also come straight from the car computer over Bluetooth: faster, and where there is no internet. With this phone connected, switching off and renaming go over Bluetooth too; switching on goes through the server.")
+            Text("Everything also comes straight from the car computer over Bluetooth: alerts, its state, the Pi screen. With this phone connected, sightings, stop, power off, the Pi log and the other actions go over Bluetooth too, so it all works without internet. Switching Bluetooth on and support packages go through the server.")
                 .font(.caption2).foregroundColor(Theme.dim)
             Toggle("Bluetooth on the car computer", isOn: Binding(
                 get: { bluetooth.shownOn },
@@ -18,8 +18,11 @@ struct BluetoothCard: View {
                 .disabled((bluetooth.unavailable != nil && !bluetooth.overBluetooth) || bluetooth.carAction.busy)
                 .accessibilityIdentifier("setting-bluetooth-car")
             LabelledRow(name: "On the car computer", value: BluetoothWords.car(bluetooth.onCar))
+            if let old = bluetooth.onCarIsOld {
+                Text(old).font(.caption2).foregroundColor(Theme.dim)
+            }
             if bluetooth.onCar?.phonesPair == true {
-                Text("This car computer makes phones confirm a pairing code at every connection. Run the installer once more on it (bash setup.sh car --bluetooth) and it stops; then forget \"\(bluetooth.onCar?.name ?? "Slot17")\" under the iPhone's Settings, Bluetooth.")
+                Text("This car computer makes phones confirm a pairing code at every connection. Run the installer once more on it (bash setup.sh car --bluetooth) and it stops; then forget \"\(bluetooth.onCar?.name ?? "Slot17")\" under the iPhone's Settings, Bluetooth, and tap Set up again here: forgetting it there takes it out of this app as well.")
                     .font(.footnote).foregroundColor(Theme.red)
             }
             if let shown = bluetooth.onCar?.name { LabelledRow(name: "Name phones show", value: shown) }
@@ -52,7 +55,7 @@ struct BluetoothCard: View {
             }
             Button(bluetooth.paired ? "Set up again" : "Set up") { bluetooth.startPairing() }
                 .buttonStyle(ActionButtonStyle())
-                .disabled(bluetooth.unavailable != nil || bluetooth.phoneUnavailable != nil || bluetooth.pairing.busy)
+                .disabled(bluetooth.setUpUnavailable != nil || bluetooth.pairing.busy)
                 .accessibilityIdentifier("bluetooth-set-up")
             if bluetooth.paired {
                 Button("Remove from this phone", role: .destructive) { bluetooth.remove() }
@@ -68,7 +71,7 @@ struct BluetoothCard: View {
                 }
                 LabelledRow(name: "Only over Bluetooth", value: "\(bluetooth.stats.bluetoothOnly)")
             }
-            Text("Setting up needs iOS 18, and the car computer on and nearby. The car computer's key comes through the server, never over Bluetooth. If you swipe the app away, open it again before driving.")
+            Text("Setting up needs iOS 18, and the car computer on and nearby. The car computer's key comes through the server once, never over Bluetooth; after that, setting up again needs no internet. If you swipe the app away, open it again before driving.")
                 .font(.caption2).foregroundColor(Theme.dim)
         }
     }

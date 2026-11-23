@@ -141,11 +141,21 @@ enum Format {
     }
 }
 
+/// What Bluetooth says of the car computer (1.6.0), for when the server has nothing fresh from it: its detector
+/// as the car computer sent it a moment ago.
+struct BluetoothView {
+    var detector: DetectorState
+}
+
 /// Plain-language state, the same decisions as the web page's status line.
 enum StatusBuilder {
     static let quietAlarmWindows = 40
 
-    static func headline(_ t: LinkTracker, now: Double, lastDelay: Double?, hasCredentials: Bool) -> HeadlineStatus {
+    /// `bluetooth` only when the server has nothing fresh from the car: then Bluetooth's word counts. Before 1.6.0
+    /// the lights and the line read only the server, so on 23 November they said Pi silent while Bluetooth was live.
+    static func headline(_ t: LinkTracker, now: Double, lastDelay: Double?, hasCredentials: Bool,
+                         bluetooth: BluetoothView? = nil) -> HeadlineStatus {
+        if let b = bluetooth { return detectorLine(b.detector, lastDelay: lastDelay, demo: false, overBluetooth: true) }
         if !hasCredentials { return .init(level: .idle, title: "Not set up", detail: "Add your private link in Settings") }
         if t.authFailed { return .init(level: .bad, title: "Link not accepted", detail: "Check your private link in Settings") }
         guard let f = t.frame else { return .init(level: .idle, title: "Connecting…", detail: "Looking for the server") }
@@ -161,27 +171,44 @@ enum StatusBuilder {
         if carAge > LinkTracker.carStale {
             return .init(level: .idle, title: "No data from the car", detail: "Last update \(Format.ago(carAge)). Hotspot or Pi offline")
         }
-        let d = st.detector
+        return detectorLine(st.detector, lastDelay: lastDelay, demo: t.demo, overBluetooth: false)
+    }
+
+    /// The line for the detector's own state, whichever route told it.
+    static func detectorLine(_ d: DetectorState, lastDelay: Double?, demo: Bool, overBluetooth: Bool) -> HeadlineStatus {
+        let via = overBluetooth ? " (over Bluetooth: no link to the server)" : ""
         switch d.state {
         case "running":
+            if overBluetooth {
+                return .init(level: .ok, title: "Live over Bluetooth", detail: "No link to the server: everything comes straight from the car computer")
+            }
             let detail = lastDelay.map { String(format: "Delay up to %.1f s after the burst", ($0 * 10).rounded(.up) / 10) }
                 ?? "\(d.windows ?? 0) windows analysed"
-            return .init(level: .ok, title: t.demo ? "Demo running" : "Detector running", detail: t.demo ? "Fake data, nothing is being detected" : detail)
+            return .init(level: .ok, title: demo ? "Demo running" : "Detector running", detail: demo ? "Fake data, nothing is being detected" : detail)
         case "starting":
-            return .init(level: .idle, title: "Detector starting", detail: "Waiting for the first analysis")
+            return .init(level: .idle, title: "Detector starting", detail: "Waiting for the first analysis" + via)
         case "degraded":
-            return .init(level: .warn, title: "Detector degraded", detail: (d.reasons ?? []).joined(separator: ", ").ifEmpty("See status on the Pi"))
+            return .init(level: .warn, title: "Detector degraded", detail: (d.reasons ?? []).joined(separator: ", ").ifEmpty("See status on the Pi") + via)
         case "stale":
-            return .init(level: .bad, title: "Detector not responding", detail: "Heartbeat unchanged for \(Int(d.heartbeatUnchanged ?? 0)) s")
+            return .init(level: .bad, title: "Detector not responding", detail: "Heartbeat unchanged for \(Int(d.heartbeatUnchanged ?? 0)) s" + via)
         case "stopped":
-            return .init(level: .idle, title: "Detector stopped", detail: "It starts again when the Pi next powers up")
+            // Stopped by itself (1.6.0 says why, from the session's summary): a fault, not a quiet road.
+            if let reason = d.reasons?.first, !reason.isEmpty {
+                return .init(level: .bad, title: "Detector stopped by itself", detail: "\(reason). It starts again when the Pi next powers up" + via)
+            }
+            return .init(level: .idle, title: "Detector stopped", detail: "It starts again when the Pi next powers up" + via)
         default:
-            return .init(level: .idle, title: "Unknown state", detail: d.state)
+            return .init(level: .idle, title: "Unknown state", detail: d.state + via)
         }
     }
 
-    static func receiverQuiet(_ t: LinkTracker, settings: AlertSettings, now: Double) -> Bool {
-        guard t.detectorActive, !t.demo, settings.antennaWarning else { return false }
+    static func receiverQuiet(_ t: LinkTracker, settings: AlertSettings, now: Double, bluetooth: BluetoothView? = nil) -> Bool {
+        guard !t.demo, settings.antennaWarning else { return false }
+        if let b = bluetooth {
+            guard b.detector.state == "running" || b.detector.state == "degraded" else { return false }
+            return (b.detector.quietWindows ?? 0) >= quietLimit(b.detector, settings)
+        }
+        guard t.detectorActive else { return false }
         // Old data says nothing about the receiver now; losing the link has its own warning.
         guard t.carAge(now) <= LinkTracker.carStale else { return false }
         guard let detector = t.frame?.message.state?.detector else { return false }
@@ -195,7 +222,44 @@ enum StatusBuilder {
     }
 
     static func chain(_ t: LinkTracker, now: Double, hasCredentials: Bool,
-                      quietWindows: Int = quietAlarmWindows) -> [ChainItem] {
+                      quietWindows: Int = quietAlarmWindows, bluetooth: BluetoothView? = nil) -> [ChainItem] {
+        var items = serverChain(t, now: now, hasCredentials: hasCredentials, quietWindows: quietWindows)
+        guard let b = bluetooth, items[1].level != .ok else { return items }
+        // The server has nothing fresh from the car, Bluetooth has: the car computer is there, over Bluetooth.
+        if items[0].level != .ok {
+            items[0].level = .idle
+            items[0].detail = hasCredentials ? "Not reachable; Bluetooth instead" : "Not set up; Bluetooth instead"
+        }
+        items[1] = ChainItem(id: "pi", name: "Pi", level: .ok, detail: "Over Bluetooth")
+        items[2] = detectorItem(b.detector)
+        let active = b.detector.state == "running" || b.detector.state == "degraded"
+        if !active {
+            items[3] = ChainItem(id: "receiver", name: "Receiver", level: .idle, detail: "Closed")
+        } else if (b.detector.quietWindows ?? 0) >= quietWindows {
+            items[3] = ChainItem(id: "receiver", name: "Receiver", level: .bad, detail: "Hears nothing")
+        } else {
+            items[3] = ChainItem(id: "receiver", name: "Receiver", level: .ok, detail: "No fault")
+        }
+        return items
+    }
+
+    static func detectorItem(_ d: DetectorState) -> ChainItem {
+        var item = ChainItem(id: "detector", name: "Detector", level: .idle, detail: "Unknown")
+        switch d.state {
+        case "running": item.level = .ok; item.detail = "Running"
+        case "degraded": item.level = .warn; item.detail = "Degraded"
+        case "starting": item.detail = "Starting"
+        case "stale": item.level = .bad; item.detail = "Not responding"
+        case "stopped":
+            let stoppedByItself = !(d.reasons ?? []).isEmpty
+            item.level = stoppedByItself ? .bad : .idle
+            item.detail = stoppedByItself ? "Stopped by itself" : "Stopped"
+        default: item.detail = d.state
+        }
+        return item
+    }
+
+    private static func serverChain(_ t: LinkTracker, now: Double, hasCredentials: Bool, quietWindows: Int) -> [ChainItem] {
         var server = ChainItem(id: "server", name: "Server", level: .bad, detail: "Not reachable")
         var pi = ChainItem(id: "pi", name: "Pi", level: .idle, detail: "Unknown")
         var detector = ChainItem(id: "detector", name: "Detector", level: .idle, detail: "Unknown")
@@ -214,14 +278,7 @@ enum StatusBuilder {
                 pi.level = .bad; pi.detail = "Silent \(Format.ago(carAge))"
             } else if let d = f.message.state?.detector {
                 pi.level = .ok; pi.detail = "Connected"
-                switch d.state {
-                case "running": detector.level = .ok; detector.detail = "Running"
-                case "degraded": detector.level = .warn; detector.detail = "Degraded"
-                case "starting": detector.detail = "Starting"
-                case "stale": detector.level = .bad; detector.detail = "Not responding"
-                case "stopped": detector.detail = "Stopped"
-                default: detector.detail = d.state
-                }
+                detector = detectorItem(d)
                 if t.detectorActive {
                     if (d.quietWindows ?? 0) >= quietWindows {
                         receiver.level = .bad

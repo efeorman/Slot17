@@ -103,6 +103,26 @@ struct LogsView: View {
     }
 
     @ViewBuilder private var server: some View {
+        if !model.phonePiLogs.isEmpty {
+            Text("From the Pi over Bluetooth, kept on this phone.").font(.footnote).foregroundColor(Theme.dim)
+            ForEach(model.phonePiLogs) { log in
+                NavigationLink { PhonePiLogText(log: log) } label: {
+                    HStack {
+                        Image(systemName: "antenna.radiowaves.left.and.right").foregroundColor(Theme.blue).frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("From the Pi, over Bluetooth").font(.subheadline.weight(.semibold)).foregroundColor(Theme.text)
+                            Text("\(Format.ago(Date().timeIntervalSince(log.at))) · \(log.size / 1024 + 1) KB").font(.caption).foregroundColor(Theme.dim)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundColor(Theme.dim)
+                    }
+                    .padding(10)
+                    .background(Theme.panel)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .accessibilityIdentifier("phone-pi-log-row")
+            }
+        }
         Text("Logs sent from this app and collected from the Pi, kept on the display server.")
             .font(.footnote).foregroundColor(Theme.dim)
         Button { model.refreshServerLogs() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
@@ -128,6 +148,26 @@ struct LogsView: View {
             }
             .accessibilityIdentifier("server-log-row")
         }
+    }
+}
+
+/// A Pi log that came over Bluetooth (1.6.0), from the file on this phone.
+private struct PhonePiLogText: View {
+    let log: AppModel.PhoneLog
+    @EnvironmentObject private var model: AppModel
+    @State private var text = "Loading…"
+
+    var body: some View {
+        ScrollView {
+            Text(text).font(.system(.caption2, design: .monospaced)).foregroundColor(Theme.text)
+                .textSelection(.enabled).padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(Theme.background)
+        .navigationTitle("From the Pi, over Bluetooth")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ShareLink(item: log.url) }
+        .onAppear { text = String(model.readPhonePiLog(log).prefix(200_000)) }
     }
 }
 

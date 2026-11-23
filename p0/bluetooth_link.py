@@ -9,19 +9,28 @@ its standard input stays open. It reads one JSON object per line:
 
     {"status": {...}, "channels": [...]}    the detector's state and channel rows, every 2 s
     {"matches": [...]}                      new matches, the moment the publisher sees them
+    {"state": "<base64>"}                   everything the server gets, packed (1.6.0), every 2 s
+    {"file": {"path": "..."}}               a packed file to send in pieces, then delete (1.6.0)
     {"reload": true}                        the settings changed: switched off, or renamed
 
 and writes one JSON line about itself to standard output when that changes, and every STATUS_EVERY_S.
 A phone can also switch the link off or rename it over the link itself (a signed control frame, see
 bluetooth_frames.py); the line then says `"settings_changed": true`, so the publisher reads them again.
-It never touches the receiver, runs at the lowest priority, and stops by itself when the publisher
-does. A fault here can never hold up the publisher's pushes to the display server.
+From 1.6.0 a phone can send any operation it would send the server; the link checks and puts it
+together, and hands it to the publisher as `{"op": {...}}`, which carries it out and answers in the
+next state. It never touches the receiver, runs at the lowest priority, and stops by itself when the
+publisher does. A fault here can never hold up the publisher's pushes to the display server.
 """
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+from collections import deque
 import json
 import os
+from pathlib import Path
+import re
 import secrets
 import sys
 import time
@@ -35,6 +44,13 @@ FAST_MS = (20, 20)
 NORMAL_MS = (152, 153)          # Apple's 152.5 ms, in whole milliseconds
 CONNECTED_MS = (1022, 1023)     # Apple's 1022.5 ms while a phone is connected: a second phone can still join
 RETRY_S = 30.0                  # after BlueZ refused a registration
+# A file goes out a few pieces at a time, so a match never waits behind a whole Pi log: 4 every 50 ms is
+# about 14 KB a second, well under what a phone takes, and a 15 KB log is there in about a second.
+PUMP_MS = 50
+PUMP_FRAMES = 4
+FILE_LIMIT = 2 << 20            # a packed file the publisher hands over; a real Pi log packs to 20 to 60 KB
+FILE_NAME = re.compile(r"slot17-bt-[0-9a-f]{8,32}\.z")
+OP_ID = re.compile(r"[0-9a-f]{32}")
 
 
 class Link:
@@ -57,12 +73,16 @@ class Link:
         self.advertising_ms, self.fast_until = None, now() + FAST_ADVERTISING_S
         self.retry = None                       # ("gatt" or "advertising", when it failed)
         self.reported, self.last_report = None, -1e9
+        self.outbox = deque()                   # file pieces still to send, a few at a time (pump)
+        self.wake = lambda: None                # serve() makes this start the pump
+        self.op_parts = frames.Assembler(keep=4, limit=frames.OP_MAX_BYTES)
+        self.cache = Path.home() / ".cache"     # where the publisher leaves files to send
 
     def info(self) -> bytes:
-        """What the phone reads first: which car computer this is, and the software it runs."""
+        """What the phone reads first: which car computer this is, the software it runs, and what it can do."""
         return json.dumps({"v": frames.VERSION, "name": self.settings["name"],
                            "key_id": frames.key_id(self.settings["key"]), "software": self.software,
-                           "boot": f"{self.encoder.boot:08x}"}, separators=(",", ":")).encode()
+                           "boot": f"{self.encoder.boot:08x}", "can": frames.CAN}, separators=(",", ":")).encode()
 
     # --- events from BlueZ -------------------------------------------------------------------------
     def event(self, kind, value):
@@ -81,6 +101,7 @@ class Link:
             self.subscribed = bool(value)
             if not self.subscribed:
                 self.fast_until = self.now() + FAST_ADVERTISING_S
+                self.outbox.clear()             # the phone asks again; half a file is no use to it
             if self.state != "error":
                 self._set("connected" if self.subscribed else "advertising")
                 self._advertise()
@@ -96,9 +117,11 @@ class Link:
             c = frames.decode_control(data, self.settings["key"])
         except frames.FrameError as exc:
             return self._reply(0, False, f"refused: {exc}")
-        action = frames.RENAME if c["action"] == "rename" else frames.OFF
+        action = {"rename": frames.RENAME, "off": frames.OFF, "op": frames.OP}[c["action"]]
         if c["boot"] != self.encoder.boot or not 0 <= self.encoder.counter - c["counter"] <= frames.CONTROL_WINDOW:
             return self._reply(action, False, "refused: too old, or from before a restart")
+        if action == frames.OP:
+            return self._operation(c)
         if c["counter"] in self.used:
             return self._reply(action, False, "refused: already used")
         self.used = {n for n in self.used if self.encoder.counter - n <= frames.CONTROL_WINDOW} | {c["counter"]}
@@ -116,6 +139,27 @@ class Link:
             self.reload()
             self._reply(action, True, f"Bluetooth name: {c['name']}")
         self.out(dict(self.status(), settings_changed=True))
+
+    def _operation(self, c):
+        """A piece of a phone's operation. Once it is whole and looks like one, it goes to the publisher.
+
+        Its pieces may name the same counter, so the counter is not used up here: the publisher carries an
+        operation out once by its id, and the boot and counter window still stop one played back later.
+        """
+        try:
+            whole = self.op_parts.add(c["message"], c["index"], c["count"], c["data"])
+        except frames.FrameError as exc:
+            return self._reply(frames.OP, False, f"refused: {exc}")
+        if whole is None:
+            return None
+        try:
+            op = json.loads(whole.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return self._reply(frames.OP, False, "refused: not JSON")
+        if not isinstance(op, dict) or not isinstance(op.get("kind"), str) or not OP_ID.fullmatch(str(op.get("id"))):
+            return self._reply(frames.OP, False, "refused: not an operation")
+        self.out({"op": op})
+        return None
 
     def _reply(self, action, ok, text):
         if self.subscribed:
@@ -150,7 +194,50 @@ class Link:
             if isinstance(obj.get("channels"), list):
                 sent.append(self.encoder.channels(obj["channels"]))
             self._send(sent, 0)
+        if isinstance(obj.get("state"), str) and self.subscribed:
+            try:
+                packed = base64.b64decode(obj["state"], validate=True)
+            except (binascii.Error, ValueError):
+                packed = None
+            if packed:
+                self._send(self.encoder.pieces(frames.STATE, packed), 0)
+        if isinstance(obj.get("file"), dict):
+            self._file(obj["file"].get("path"))
         return True
+
+    def _file(self, path):
+        """A packed file from the publisher, sent in pieces by the pump. Only its own files in its cache."""
+        if not isinstance(path, str):
+            return
+        p = Path(path)
+        if p.parent != self.cache or not FILE_NAME.fullmatch(p.name):
+            return
+        try:
+            data = p.read_bytes()[:FILE_LIMIT + 1]
+        except OSError:
+            return
+        finally:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        if not self.subscribed or not data or len(data) > FILE_LIMIT:
+            return
+        message, slices = self.encoder.slices(data)
+        self.outbox.extend((message, i, len(slices), s) for i, s in enumerate(slices))
+        self.wake()
+
+    def pump(self, n=PUMP_FRAMES) -> bool:
+        """Send up to `n` waiting file pieces, each signed as it goes. True while more are waiting."""
+        for _ in range(n):
+            if not self.outbox:
+                break
+            if not self.subscribed:
+                self.outbox.clear()
+                break
+            message, index, count, data = self.outbox.popleft()
+            self._send([self.encoder.piece(frames.FILE, message, index, count, data)], 0)
+        return bool(self.outbox)
 
     def reload(self) -> bool:
         """Read the settings again. Returns False when the link was switched off."""
@@ -311,6 +398,19 @@ def serve() -> int:
                 loop.quit()
                 return False
         return True
+
+    pumping = {"on": False}
+
+    def pump():
+        more = link.pump(PUMP_FRAMES)
+        pumping["on"] = more
+        return more                             # False ends this timer until the next file
+
+    def wake():
+        if not pumping["on"]:
+            pumping["on"] = True
+            GLib.timeout_add(PUMP_MS, pump)
+    link.wake = wake
 
     GLib.io_add_watch(sys.stdin.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, on_input)
     GLib.timeout_add(1000, lambda: (link.tick(), True)[1])
