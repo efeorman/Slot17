@@ -73,6 +73,70 @@ def save(path: str | None = None, *, on: bool | None = None, name: str | None = 
     return load(path)
 
 
+MAIN_CONF = "/etc/bluetooth/main.conf"
+GATT_CLIENT_NOTE = "# Slot17: the car computer is only a GATT server; as a client it made phones ask to pair."
+
+
+def gatt_client(text: str) -> bool:
+    """Whether BlueZ acts as a GATT client towards a phone that connects, from main.conf's text.
+
+    It does unless [GATT] says Client = false. As a client it reads the phone's own services (an iPhone with
+    iOS 18 has Device Information and LE Audio call and media control), the phone protects them with
+    encryption, BlueZ raises the link's security and the phone asks to pair; with no agent here the pairing
+    is not kept, so it asks again on every connection (found on 23 November 2026). Slot17 needs BlueZ only as
+    a server.
+    """
+    section = None
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("["):
+            section = s
+        elif section == "[GATT]" and re.match(r"Client\s*=", s):
+            return s.split("=", 1)[1].strip().lower() != "false"
+    return True
+
+
+def gatt_client_off(text: str) -> tuple[str, bool]:
+    """main.conf's text with [GATT] Client = false, and whether anything changed."""
+    if not gatt_client(text):
+        return text, False
+    lines = text.splitlines(keepends=True)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    start = next((i for i, line in enumerate(lines) if line.strip() == "[GATT]"), None)
+    if start is None:
+        return "".join(lines) + f"\n[GATT]\n{GATT_CLIENT_NOTE}\nClient = false\n", True
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("[")), len(lines))
+    active = [i for i in range(start + 1, end) if re.match(r"\s*Client\s*=", lines[i])]
+    if active:
+        lines[active[0]] = "Client = false\n"
+    else:
+        commented = [i for i in range(start + 1, end) if re.match(r"\s*#\s*Client\s*=", lines[i])]
+        at = commented[0] + 1 if commented else start + 1
+        lines[at:at] = [GATT_CLIENT_NOTE + "\n", "Client = false\n"]
+    return "".join(lines), True
+
+
+def set_gatt_client_off(path: str = MAIN_CONF) -> str:
+    """Write Client = false into main.conf (as root), keeping a dated copy. Says what it did."""
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    new, changed = gatt_client_off(text)
+    if not changed:
+        return "already off"
+    import shutil
+    import time
+    backup = path + time.strftime(".slot17-backup-%Y%m%d-%H%M%S")
+    shutil.copy2(path, backup)
+    with open(path + ".tmp", "w", encoding="utf-8") as fh:
+        fh.write(new)
+        fh.flush()
+        os.fsync(fh.fileno())
+    shutil.copymode(path, path + ".tmp")
+    os.replace(path + ".tmp", path)
+    return f"switched off (copy of the old file: {backup})"
+
+
 def public(settings: dict) -> dict:
     """What may be shown or sent anywhere: everything but the key, which is named by its key id."""
     return {"on": settings["on"], "name": settings["name"],
@@ -87,7 +151,17 @@ def main(argv=None) -> int:
     ap.add_argument("--name", help=f"the name phones show, 1 to {NAME_MAX} characters (default {DEFAULT_NAME})")
     ap.add_argument("--show", action="store_true", help="print the settings as JSON, without the key")
     ap.add_argument("--path", default=PATH, help=argparse.SUPPRESS)
+    ap.add_argument("--gatt-client-off", action="store_true",
+                    help=f"as root: [GATT] Client = false in {MAIN_CONF}, so phones are not asked to pair")
+    ap.add_argument("--conf", default=MAIN_CONF, help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
+    if args.gatt_client_off:
+        try:
+            print(set_gatt_client_off(args.conf))
+        except OSError as exc:
+            print(f"cannot change {args.conf}: {exc}", file=sys.stderr)
+            return 1
+        return 0
     try:
         if args.on or args.off or args.name is not None:
             settings = save(args.path, on=True if args.on else False if args.off else None, name=args.name)

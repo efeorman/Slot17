@@ -22,6 +22,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 HOME = Path.home()
 HEARTBEAT = Path("/run/tetra/watch.heartbeat")
+BLUEZ_MAIN_CONF = Path("/etc/bluetooth/main.conf")
 DISPLAY_CONFIG = HOME / ".config/slot17-display.json"
 PUSHOVER_CONFIG = HOME / ".config/tetra-pushover.json"
 PUSHOVER_SWITCH = HOME / ".config/slot17-notify.json"
@@ -202,7 +203,23 @@ def check_bluetooth(p):
         return [("Bluetooth", PROBLEM, "on, but this computer has no Bluetooth adapter that can advertise")]
     if not adapter.get("powered"):
         return [("Bluetooth", PROBLEM, "on, but the adapter is switched off (bluetoothctl power on)")]
+    if phones_asked_to_pair(p):
+        return [("Bluetooth", NOTE, f"on, shown as {name}, but phones are asked to pair at every connection: "
+                                    "run bash setup.sh car --bluetooth once (it switches BlueZ's GATT client off)")]
     return [("Bluetooth", OK, f"on, shown as {name}")]
+
+
+def phones_asked_to_pair(p):
+    """BlueZ still acts as a GATT client (p0/bluetooth_config.py gatt_client). False when it cannot tell."""
+    text = p.read(BLUEZ_MAIN_CONF)
+    if text is None:
+        return False
+    sys.path.insert(0, str(ROOT / "p0"))
+    try:
+        from bluetooth_config import gatt_client
+    except Exception:                       # noqa: BLE001 - an older p0: say nothing rather than guess
+        return False
+    return gatt_client(text)
 
 
 def check_power(p):
@@ -222,15 +239,38 @@ def check_power(p):
     return [("Power", OK, "no undervoltage or throttling since power-up")]
 
 
+def storage_kind(p):
+    """What the captures are written to, from the device under the project folder: SD card, SSD or USB drive."""
+    status, out = p.run("findmnt", "-n", "-o", "SOURCE", "--target", str(ROOT))
+    source = out.strip() if status == 0 else ""
+    if "mmcblk" in source:
+        return "SD card"
+    if "nvme" in source:
+        return "NVMe SSD"
+    if source.startswith("/dev/sd"):
+        return "USB drive"
+    return None
+
+
 def check_disk(p):
     free = p.free_gb(ROOT)
     if free is None:
         return []
+    kind = storage_kind(p)
+    on = f" on the {kind}" if kind else ""
     if free < 5:
-        return [("Storage", PROBLEM, f"{free:.1f} GB free: recording has paused. Delete old folders in captures/")]
+        return [("Storage", PROBLEM, f"{free:.1f} GB free{on}: recording has paused. Delete old folders in captures/")]
+    # Recordings the storage could not write in time this session (1.5.1 writes them in batches, one sync each).
+    recorder = (_json(p.read(HEARTBEAT)) or {}).get("recorder") or {}
+    skipped = recorder.get("skipped_data") if isinstance(recorder.get("skipped_data"), int) else 0
+    if skipped:
+        written = recorder.get("written_data") if isinstance(recorder.get("written_data"), int) else 0
+        return [("Storage", NOTE, f"{free:.0f} GB free{on}; {skipped} of {skipped + written} recordings this session "
+                                  "were skipped because it could not keep up. Detection is not affected; only those "
+                                  "snippets for later study are missing. A faster card (A2, U3) or an SSD keeps them all")]
     if free < 32:
-        return [("Storage", NOTE, f"{free:.0f} GB free; recordings grow by several GB per hour of driving")]
-    return [("Storage", OK, f"{free:.0f} GB free")]
+        return [("Storage", NOTE, f"{free:.0f} GB free{on}; recordings grow by several GB per hour of driving")]
+    return [("Storage", OK, f"{free:.0f} GB free{on}")]
 
 
 def check_settings(p):

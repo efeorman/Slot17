@@ -140,10 +140,11 @@ class DoctorTests(unittest.TestCase):
         m.files[str(doctor.PUSHOVER_SWITCH)] = json.dumps({"pushover": False})
         self.assertIn("switched off in the app", verdicts(m)[2])
 
-    def bluetooth(self, adapter, on=True):
+    def bluetooth(self, adapter, on=True, main_conf="[General]\n[GATT]\nClient = false\n"):
         """A car computer with Bluetooth switched on, whose adapter check answers `adapter`."""
         m = Machine()
         m.files[str(doctor.BLUETOOTH_SETTINGS)] = json.dumps({"on": on, "name": "Car 2", "key": "ab" * 32})
+        m.files[str(doctor.BLUEZ_MAIN_CONF)] = main_conf
         plain = m.run
 
         def run(*cmd, timeout=5):
@@ -172,8 +173,34 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(rows["Bluetooth"], doctor.PROBLEM)
         self.assertIn("missing dbus", text)
 
+    def test_phones_asked_to_pair_until_the_gatt_client_is_off(self):
+        working = {"present": True, "powered": True, "alias": "Car 2"}
+        status, rows, text = self.bluetooth(working, main_conf="[General]\n[GATT]\n#Client = true\n")
+        self.assertEqual(rows["Bluetooth"], doctor.NOTE)
+        self.assertIn("bash setup.sh car --bluetooth", text)
+        self.assertEqual(self.bluetooth(working)[1]["Bluetooth"], doctor.OK)
+        self.assertEqual(self.bluetooth(working, main_conf=None)[1]["Bluetooth"], doctor.OK)   # unreadable: no guess
+
     def test_bluetooth_switched_off_needs_no_adapter_check(self):
         self.assertEqual(self.bluetooth({"present": False}, on=False)[1]["Bluetooth"], doctor.NOTE)
+
+    def test_storage_says_what_it_is_and_whether_it_kept_up(self):
+        m = Machine()
+        m.answers["findmnt"] = (0, "/dev/mmcblk0p2")
+        rows, text = verdicts(m)[1:]
+        self.assertEqual(rows["Storage"], doctor.OK)
+        self.assertIn("on the SD card", text)
+        m = Machine()
+        m.answers["findmnt"] = (0, "/dev/mmcblk0p2")
+        beat = {"windows": 1, "ready": True, "recorder": {"skipped_data": 161, "written_data": 16652}}
+        m.files[str(doctor.HEARTBEAT)] = json.dumps(beat)
+        rows, text = verdicts(m)[1:]
+        self.assertEqual(rows["Storage"], doctor.NOTE)
+        self.assertIn("161 of 16813 recordings", text)
+        self.assertIn("Detection is not affected", text)
+        m = Machine()
+        m.answers["findmnt"] = (0, "/dev/nvme0n1p2")
+        self.assertIn("on the NVMe SSD", verdicts(m)[2])
 
     def test_no_keys_in_the_output(self):
         text = verdicts(Machine())[2]

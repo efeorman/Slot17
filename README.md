@@ -83,7 +83,7 @@ These are the parts we use. Equivalent parts should work too. **Where to buy the
 | Part | What we use | Alternatives and advice |
 |---|---|---|
 | **Car computer** | [Raspberry Pi 5](https://www.raspberrypi.com/products/raspberry-pi-5/), 8 GB | Any memory size from 2 GB up should do: the detector uses about 0.6 GB. We have only tested the Raspberry Pi 5; slower computers may not keep up |
-| **Storage** | 512 GB NVMe SSD | A good microSD card of 128 GB or more works too. Recordings grow with every drive: ours collected about 155 GB in two months. Recording pauses when less than 5 GB is free |
+| **Storage** | 512 GB NVMe SSD | A good microSD card of 128 GB or more works too: since 1.5.1 the recordings are written in batches, so even a slow card keeps up with a busy band, and detection never waits for the storage. Recordings grow with every drive: ours collected about 155 GB in two months. Recording pauses when less than 5 GB is free |
 | **Case** | Argon case with NVMe slot | Any case with cooling. A car gets hot in summer |
 | **Power in the car** | [UGREEN Nexode 60 W car charger, EC602](https://www.amazon.nl/dp/B0DSBSBSGW), Pi on its built-in USB-C cable | It gives 3 A at 5 V. That was enough for our Pi 5 with the Airspy, an NVMe SSD and a 4G stick: no undervoltage during a whole drive (19 November 2026). Bigger car chargers don't help: almost all give 3 A at 5 V, and their extra watts are at 9 to 20 V, which the Pi doesn't use. A car charger that offers the Pi 5's own 5 V 5 A profile is very rare. If `setup.sh doctor` reports undervoltage, your setup draws more: use a 12 V to 5 V converter rated for 5 A with a fused lighter plug or a fused connection, and tell the Pi it can draw 5 A with `sudo rpi-eeprom-config --edit`, adding `PSU_MAX_CURRENT=5000` (only with a supply that really gives 5 A) |
 | **Receiver** | [Airspy Mini](https://itead.cc/product/airspy-mini/) | Its antenna socket is SMA. Other receivers aren't supported |
@@ -363,6 +363,7 @@ Environment=SLOT17_CHECK_THREADS=2
 | Calibration found no carriers | Your country may not use 390–395 MHz for the base stations, or the antenna isn't connected. Slot17 still runs, using an example calibration |
 | The storage is full | Old recordings are never deleted automatically. Delete old folders in `~/Slot17/captures/` |
 | Bluetooth: **A different car computer answered**, or it never connects | Settings, Bluetooth to the car computer, **Set up again**, with the car computer on and nearby. On the car computer, `bash ~/Slot17/setup.sh doctor` has a Bluetooth line. On Android, allow **Nearby devices** for Slot17, and switch Location on while setting up |
+| Bluetooth: the phone asks to **pair**, or to confirm a code, at every connection | On the car computer run `bash ~/Slot17/setup.sh car --bluetooth` once (since 1.5.1 it stops the car computer from asking phones to pair), then forget the car computer in the phone's own Bluetooth settings. The app's Bluetooth card says when this is still needed |
 
 ## Reading a session
 
@@ -441,7 +442,7 @@ You should see `OK` and `"offline_preflight_pass": true`.
 
 | Command | What it covers |
 |---|---|
-| `python -B p0/preflight.py --offline --tests` | The detector: 215 tests. Before every detector start the car computer runs them only if its code changed since they last passed, and in any case every 20th start; otherwise a smoke test of a few seconds (`--tests-if-changed`) |
+| `python -B p0/preflight.py --offline --tests` | The detector: 225 tests. Before every detector start the car computer runs them only if its code changed since they last passed, and in any case every 20th start; otherwise a smoke test of a few seconds (`--tests-if-changed`) |
 | `python -m unittest display/test_hardening.py` | Server and car computer limits |
 | `python -m unittest display/test_app_backend.py` | What the app uses on the server |
 | `python -m unittest display/test_display.py` | Display logic |
@@ -452,6 +453,7 @@ You should see `OK` and `"offline_preflight_pass": true`.
 | `python -m unittest display/test_drive_report.py` | The drive report |
 | `python -m unittest display/test_display_browser.py` | The web page in a headless browser; needs `pip install playwright` and `playwright install chromium` |
 | `python display/stress_server.py` | Attacks and load on a local copy of the server |
+| `python scripts/bench_recorder.py --sync-ms 50` | The recorder under a busy band on slow storage, against 1.5.0's |
 | `bash scripts/test_setup.sh full` | The whole installation, on a **throwaway** Linux machine, because it installs real services |
 | `ruff check p0 display deploy tests scripts` | Code style and common mistakes |
 

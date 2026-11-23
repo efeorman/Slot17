@@ -12,9 +12,9 @@ for measurement design.
 
 | Evidence | Durability | Worst case lost |
 |---|---|---|
-| `events.jsonl` | Written and flushed per line, `fsync` at most 1 s later | ~1 s of events |
-| `recordings.jsonl` | Same path as events | ~1 s of outcome lines |
-| `.c64` / `.power` / `.iq` recordings | Written to `.tmp`, `fsync`, atomic rename, directory `fsync` within 1 s | the one recording still in flight |
+| `events.jsonl` | Written and flushed per line on its own thread; made durable at most 1 s later (since 1.5.1 by the recordings thread's `syncfs` on Linux, so the events thread never waits for a disk) | ~1 s of events |
+| `recordings.jsonl` | Written by the recordings thread after each batch, durable within 1 s | ~1 s of outcome lines |
+| `.c64` / `.power` / `.iq` recordings | Since 1.5.1 in batches: everything queued is written to `.tmp`, made durable together (one `syncfs` on Linux, one `fsync` per file elsewhere), then renamed; the new names are durable within 1 s | the batch still in flight, at most about 1 s of recordings |
 | `summary.json` | Rebuilt and written durably every 30 s | 30 s of counters |
 | `session.json` | Written once at start, durably | nothing |
 | `watch.heartbeat` | On `/run` (tmpfs) | all of it, by design |
@@ -90,6 +90,17 @@ add-on (`argonone-upsconfig.sh` is present); nothing is attached.
 lost. This is a design choice: fsyncing every event would put a disk flush in the
 path of every candidate, and this rig produced 7178 candidates in 17 minutes on
 8 September.
+
+**Slow storage (1.5.1).** Until 1.5.0 every recording cost two `fsync` calls, its
+file and its sidecar, and ext4 commits its journal on each. A user's drive at 42
+candidates a second on an SD card skipped 161 of 16,652 snippets, and a match could
+wait behind a recording before the publisher saw it. Now one `syncfs` makes a whole
+batch durable, and events have their own thread. `scripts/bench_recorder.py` runs
+both recorders with each sync made as slow as a card's: at 50 ms per sync the old
+one skipped 126 of 461 recordings and delivered matches up to 241 ms late; the new
+one skipped none, with matches at most 8 ms late. Skipped recordings no longer mark
+the detector degraded (only research snippets are missing); `setup.sh doctor` names
+them under Storage.
 
 **A cut during the very first second** can leave a session directory containing
 `session.json` and little else. That is a real session that recorded nothing, not

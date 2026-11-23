@@ -590,6 +590,8 @@ def clean_bluetooth(b):
             pass
     if isinstance(b.get("error"), str) and b["error"]:
         out["error"] = b["error"][:120]
+    if b.get("phones_pair") is True:
+        out["phones_pair"] = True           # 1.5.1: phones are asked to pair; the setup once more fixes it
     return out
 
 

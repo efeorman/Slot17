@@ -185,9 +185,11 @@ class BluetoothTest {
         assertEquals("A phone is connected", BluetoothWords.car(BluetoothState(on = true, state = "connected")))
         val decoded = ServerMessage.decode("""{"boot":"b","seq":1,"server_mono_s":1,"state":{"snapshot_age_s":0,
             "detector":{"state":"running"},"channels":[],"matches":[],"bluetooth":{"on":true,"state":"advertising",
-            "name":"Car 2","key_id":"630dcd29","subscribed":false,"frames":3,"mtu":185}}}""")
+            "name":"Car 2","key_id":"630dcd29","subscribed":false,"frames":3,"mtu":185,"phones_pair":true}}}""")
         assertEquals("Car 2", decoded?.state?.bluetooth?.name)
         assertEquals(185, decoded?.state?.bluetooth?.mtu)
+        assertEquals(true, decoded?.state?.bluetooth?.phonesPair)
+        assertEquals(null, BluetoothState(on = true).phonesPair)        // an older car computer says nothing
     }
 
     private fun kotlinx.serialization.json.JsonPrimitive.contentOrNullSafe(): String? = if (isString) content else null

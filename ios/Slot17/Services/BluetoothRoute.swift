@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// The Bluetooth route as the app sees it (1.4.0): the car computer's switch and name (requests through the server,
 /// like the Pushover switch), this phone's link to it, the frames it brings and how they compare with the server's.
@@ -15,6 +16,7 @@ final class BluetoothRoute: ObservableObject {
     private var keyID = UserDefaults.standard.string(forKey: "slot17.bluetooth.keyID")
     private var lastRefusalNote = -Double.infinity
     private var link: AnyObject?
+    private var pickerWaiting: NSObjectProtocol?
 
     var sendOp: (String, [String: Any], @escaping (ActionState) -> Void) -> Void = { _, _, _ in }
     var carState: () -> PiState? = { nil }
@@ -133,9 +135,32 @@ final class BluetoothRoute: ObservableObject {
         feed.key = key
         guard #available(iOS 18.0, *), let link = link as? BluetoothLink else { return }
         link.expectedKeyID = keyID
+        setUse(true)
+        // Already chosen in the picker: the new key is all it needed (1.5.1). The picker again only for a new car.
+        if link.isSetUp && link.state != .wrongCar {
+            pairing = .init(id: id, text: "Set up: connecting to the car computer", level: .ok)
+            link.reconnect()
+            return
+        }
+        showPickerInForeground(id, link)
+    }
+
+    /// iOS shows the picker only to the app on screen: asked while the app was in the background, or while a
+    /// system alert covered it, it failed with "Application is not in the foreground". Now it waits for the app.
+    @available(iOS 18.0, *)
+    private func showPickerInForeground(_ id: String, _ link: BluetoothLink) {
+        if let pickerWaiting { NotificationCenter.default.removeObserver(pickerWaiting) }
+        pickerWaiting = nil
+        guard UIApplication.shared.applicationState == .active else {
+            pairing = .init(id: id, text: "Open Slot17 to choose the car computer", level: .idle, busy: true)
+            pickerWaiting = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification,
+                                                                   object: nil, queue: .main) { [weak self] _ in
+                self?.showPickerInForeground(id, link)
+            }
+            return
+        }
         pairing = .init(id: id, text: "Choose the car computer in the list iOS shows…", level: .idle, busy: true)
         link.showPicker { [weak self] why in self?.pairing = .init(id: id, text: why, level: .bad) }
-        setUse(true)
     }
 
     func setUse(_ on: Bool) {

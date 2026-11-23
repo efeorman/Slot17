@@ -224,6 +224,8 @@ data class BluetoothState(
     val mtu: Int? = null,
     @SerialName("since_s") val since: Double? = null,
     val error: String? = null,
+    /** The car computer still makes phones pair at every connection (1.5.1): its setup needs running once more. */
+    @SerialName("phones_pair") val phonesPair: Boolean? = null,
 )
 
 @Serializable

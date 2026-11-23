@@ -984,6 +984,20 @@ class BluetoothLinkTests(unittest.TestCase):
         link.poll(1.0)
         self.assertIsNone(link.state(1.0))
 
+    def test_the_app_hears_when_phones_are_asked_to_pair(self):
+        """1.5.1: until the setup switches BlueZ's GATT client off, the app says to run it once more."""
+        conf = self.dir / "main.conf"
+        self.addCleanup(setattr, self.config, "MAIN_CONF", self.config.MAIN_CONF)
+        self.config.MAIN_CONF = str(conf)
+        conf.write_text("[GATT]\n#Client = true\n", encoding="utf-8")
+        link = self.link(FakeLinkProcess())
+        self.assertTrue(link.state(10.0)["phones_pair"])
+        self.assertTrue(srv.clean_bluetooth(link.state(10.0))["phones_pair"])     # the server lets it through
+        conf.write_text("[GATT]\nClient = false\n", encoding="utf-8")
+        self.assertTrue(link.state(30.0)["phones_pair"])                          # read once a minute
+        self.assertNotIn("phones_pair", link.state(80.0))
+        self.assertNotIn("phones_pair", self.link(FakeLinkProcess(), on=False).state(10.0))
+
 
 class BluetoothPublisherTests(unittest.TestCase):
     """The link gets new matches at once, with the server's fields, and the state at the server's rhythm."""

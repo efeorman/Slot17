@@ -1025,7 +1025,22 @@ class BluetoothLink:
             out["mtu"] = line["mtu"]
         if line.get("error") and on:
             out["error"] = str(line["error"])[:120]
+        if on and self._phones_pair(now):
+            out["phones_pair"] = True        # the app says: run the setup once more (1.5.1)
         return out
+
+    def _phones_pair(self, now):
+        """BlueZ still acts as a GATT client here, so phones are asked to pair at every connection. Read once
+        a minute; only the setup (as root) can change it."""
+        if now - getattr(self, "_pair_checked", -1e9) >= 60.0:
+            self._pair_checked, self._pair_said = now, False
+            config = self.config
+            try:
+                with open(getattr(config, "MAIN_CONF", "/etc/bluetooth/main.conf"), encoding="utf-8") as fh:
+                    self._pair_said = bool(config and config.gatt_client(fh.read()))
+            except (OSError, AttributeError, UnicodeDecodeError):
+                pass
+        return self._pair_said
 
 
 SUPPORT_PIECE_BYTES = 768 * 1024   # under the server's 1 MB per upload

@@ -503,10 +503,13 @@ def _recorded_faults(st, recorder, host=None):
         if value:
             reasons.append({"fault": label, "total": int(value)})
     if recorder:
+        # Recordings skipped because the storage was slower than a busy band, or full, are not on this list
+        # (1.5.1): detection, matches and events are untouched, only research snippets are missing. They are
+        # still counted in the heartbeat and summary (recorder.skipped_data), and the doctor names them. Events
+        # dropped or a recording that failed to write still are faults.
         for label, key in (("recording events dropped", "dropped_events"),
                            ("recording data errors", "data_errors"),
-                           ("recording event errors", "event_errors"),
-                           ("recordings skipped", "skipped_data")):
+                           ("recording event errors", "event_errors")):
             if recorder[key]:
                 reasons.append({"fault": label, "total": int(recorder[key])})
         if st.worker_alive and not recorder["alive"]:
@@ -811,6 +814,9 @@ def main():
     ap.add_argument("--threshold-db", type=float)
     ap.add_argument("--save-power", action="store_true")
     ap.add_argument("--no-snippets", action="store_true")
+    ap.add_argument("--log-candidates", action="store_true",
+                    help="also print every unconfirmed candidate to the log (they are all in events.jsonl); "
+                         "matches are always printed")
     ap.add_argument("--no-confirm", action="store_true", help="candidate logging only; no RF alerts")
     ap.add_argument("--check-threads", type=int, default=0, metavar="N",
                     help="threads that check candidates at once; 0 (default) chooses from the number of cores, "
@@ -856,6 +862,7 @@ def main():
     ctx = Ctx(fs=fs, centre=centre, dl=load_downlink_channels(), threshold_db=threshold,
               want_samples=int(WINDOW_S * fs), hop_s=WINDOW_S, overlap_s=WINDOW_OVERLAP_S, outdir=outdir,
               save_snippets=not args.no_snippets, save_power=args.save_power,
+              log_candidates=args.log_candidates,
               recorder=recorder, trend=TrendTracker(), history=BurstHistory(),
               gain=(args.lna, args.mixer, args.vga), stats=stats,
               events=deque(maxlen=256), verbose=True, confirm=not args.no_confirm,

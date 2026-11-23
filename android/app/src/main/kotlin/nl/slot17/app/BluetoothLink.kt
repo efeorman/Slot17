@@ -24,6 +24,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
+import android.os.SystemClock
 import java.util.UUID
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -172,6 +173,27 @@ class BluetoothLink(
         next()
     }
 
+    private var lastProblemAt = -RETRY_MS * 100
+
+    /**
+     * Something went wrong between connecting and the first frame: say so (once a minute at most) and connect
+     * again a moment later. Before 1.5.1 the link stayed connected and silent, or worse, see [infoRead].
+     */
+    private fun retry(g: BluetoothGatt, why: String) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastProblemAt >= 60_000) {
+            lastProblemAt = now
+            note("PROBLEM Bluetooth: $why; connecting again")
+        }
+        val address = g.device?.address ?: return
+        main.postDelayed({
+            if (g === gatt && state != State.WRONG_CAR) {
+                close()
+                connect(address, expectedKeyId)
+            }
+        }, RETRY_MS)
+    }
+
     /** Writes a control frame (switch off, rename) to the car computer. False when there is no link to write on. */
     fun write(data: ByteArray): Boolean {
         if (state != State.CONNECTED || !permitted()) return false
@@ -202,8 +224,14 @@ class BluetoothLink(
             g.writeDescriptor(cccd)
         }
 
-    private fun infoRead(g: BluetoothGatt, value: ByteArray) {
+    private fun infoRead(g: BluetoothGatt, value: ByteArray, status: Int) {
         done()
+        // A read that failed (while a pairing was pending, for one) has no key id. Before 1.5.1 that was taken
+        // for a different car computer, which only "Set up again" undid.
+        if (status != BluetoothGatt.GATT_SUCCESS) {
+            retry(g, "reading the car computer failed (status $status)")
+            return
+        }
         val info = runCatching { ProtocolJson.parseToJsonElement(value.decodeToString()).jsonObject }.getOrNull()
         val keyId = info?.get("key_id")?.jsonPrimitive?.content
         if (expectedKeyId != null && keyId != expectedKeyId) {
@@ -245,7 +273,8 @@ class BluetoothLink(
             main.post {
                 done()
                 val info = g.getService(SERVICE)?.getCharacteristic(INFO)
-                if (info == null) note("PROBLEM Bluetooth: the car computer has no Slot17 service")
+                // Also while the car computer's own Bluetooth link starts again: its service is back moments later.
+                if (info == null) retry(g, "the car computer has no Slot17 service yet (status $status)")
                 else queue { it.readCharacteristic(info) }
             }
         }
@@ -253,12 +282,12 @@ class BluetoothLink(
         @Deprecated("Android 12L and lower")
         override fun onCharacteristicRead(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {
             @Suppress("DEPRECATION") val value = c.value?.copyOf() ?: ByteArray(0)
-            main.post { infoRead(g, value) }
+            main.post { infoRead(g, value, status) }
         }
 
         override fun onCharacteristicRead(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
             val copy = value.copyOf()
-            main.post { infoRead(g, copy) }
+            main.post { infoRead(g, copy, status) }
         }
 
         override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {
@@ -274,6 +303,8 @@ class BluetoothLink(
                 if (status == BluetoothGatt.GATT_SUCCESS) {
                     set(State.CONNECTED)
                     note("Bluetooth connected to the car computer (MTU ${mtu ?: "default"})")
+                } else {
+                    retry(g, "no notifications (status $status)")
                 }
             }
         }
@@ -296,5 +327,7 @@ class BluetoothLink(
         val INFO: UUID = UUID.fromString(BluetoothFormat.INFO_UUID)
         val CONTROL: UUID = UUID.fromString(BluetoothFormat.CONTROL_UUID)
         val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        /** Milliseconds before a link that went wrong is tried again. */
+        const val RETRY_MS = 4_000L
     }
 }

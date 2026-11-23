@@ -30,6 +30,9 @@ final class BluetoothLink: NSObject, CBCentralManagerDelegate, CBPeripheralDeleg
     private static let info = CBUUID(string: BluetoothFormat.infoUUID)
     private static let control = CBUUID(string: BluetoothFormat.controlUUID)
     private var controlCharacteristic: CBCharacteristic?
+    private var lastProblemNote = -Double.infinity
+    /// Seconds before a link that went wrong is tried again: long enough not to hammer, short enough to feel live.
+    static let retryAfter: TimeInterval = 4
 
     override init() {
         super.init()
@@ -60,6 +63,32 @@ final class BluetoothLink: NSObject, CBCentralManagerDelegate, CBPeripheralDeleg
         wanted = false
         if let peripheral { central?.cancelPeripheralConnection(peripheral) }
         state = accessory == nil ? .notSetUp : .off
+    }
+
+    /// Connects again from the start, for a new key or after "Set up again", without the picker.
+    func reconnect() {
+        wanted = true
+        state = accessory == nil ? .notSetUp : .connecting
+        if let peripheral, peripheral.state != .disconnected {
+            central?.cancelPeripheralConnection(peripheral)      // didDisconnect connects again
+        } else {
+            connectIfReady()
+        }
+    }
+
+    /// Something went wrong between connecting and the first frame: say so (once a minute at most), drop the
+    /// connection and let didDisconnect connect again a moment later. Before 1.5.1 the link stayed connected and
+    /// silent, which the app showed as no data from Bluetooth.
+    private func retry(_ peripheral: CBPeripheral, _ why: String) {
+        let now = Mono.now()
+        if now - lastProblemNote >= 60 {
+            lastProblemNote = now
+            note("PROBLEM Bluetooth: \(why); connecting again")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.retryAfter) { [weak self] in
+            guard let self, self.wanted, self.state != .wrongCar, peripheral.state != .disconnected else { return }
+            self.central?.cancelPeripheralConnection(peripheral)
+        }
     }
 
     /// Writes a control frame (switch off, rename) to the car computer. False when there is no link to write on.
@@ -145,14 +174,18 @@ final class BluetoothLink: NSObject, CBCentralManagerDelegate, CBPeripheralDeleg
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         guard wanted, state != .wrongCar else { return }
-        central.connect(peripheral)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.retryAfter) { [weak self] in
+            guard let self, self.wanted, self.state != .wrongCar else { return }
+            central.connect(peripheral)
+        }
     }
 
     // MARK: CBPeripheralDelegate
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard let service = peripheral.services?.first(where: { $0.uuid == Self.service }) else {
-            note("PROBLEM Bluetooth: the car computer has no Slot17 service")
+            // Also while the car computer's own Bluetooth link starts again: its service is back moments later.
+            retry(peripheral, error.map { "services: \($0.localizedDescription)" } ?? "the car computer has no Slot17 service yet")
             return
         }
         peripheral.discoverCharacteristics([Self.frames, Self.info, Self.control], for: service)
@@ -160,11 +193,19 @@ final class BluetoothLink: NSObject, CBCentralManagerDelegate, CBPeripheralDeleg
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         controlCharacteristic = service.characteristics?.first { $0.uuid == Self.control }
-        if let info = service.characteristics?.first(where: { $0.uuid == Self.info }) { peripheral.readValue(for: info) }
+        guard let info = service.characteristics?.first(where: { $0.uuid == Self.info }) else {
+            retry(peripheral, error.map { "characteristics: \($0.localizedDescription)" } ?? "the Slot17 service is incomplete")
+            return
+        }
+        peripheral.readValue(for: info)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        guard error == nil, let value = characteristic.value else { return }
+        if let error {
+            if characteristic.uuid == Self.info { retry(peripheral, "reading the car computer: \(error.localizedDescription)") }
+            return
+        }
+        guard let value = characteristic.value else { return }
         if characteristic.uuid == Self.frames {
             onFrame(value)
         } else if characteristic.uuid == Self.info {
@@ -192,7 +233,7 @@ final class BluetoothLink: NSObject, CBCentralManagerDelegate, CBPeripheralDeleg
             state = .connected
             note("Bluetooth connected to the car computer (MTU \(mtu.map(String.init) ?? "default"))")
         } else if let error {
-            note("PROBLEM Bluetooth: no notifications: \(error.localizedDescription)")
+            retry(peripheral, "no notifications: \(error.localizedDescription)")
         }
     }
 }

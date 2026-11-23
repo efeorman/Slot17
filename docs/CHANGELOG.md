@@ -2,6 +2,42 @@
 
 What changed, why, and what was tried and left out. Newest first. Figures come from our own car, receiver and drives; yours will differ.
 
+## 1.5.1, iPhone app 1.8.1 and Android app 1.10.1: Bluetooth without pairing, and storage that keeps up (23 November 2026)
+
+Two problems from the field, one from the operator's iPhone and one from a user's SD card. The detector's recognition is unchanged.
+
+- **Bluetooth asked to pair at every connection.** On the operator's iPhone a pairing code came up at every connection and after every restart of the app; without confirming it the app had no data from Bluetooth, and setting up said "Application is not in the foreground".
+  - **Cause, on the car computer:** BlueZ acts as a GATT client towards a phone that connects. It found the iPhone's own services: Device Information and iOS 18's LE Audio media and call control, cached in `/var/lib/bluetooth`. They are protected, so BlueZ raised the link's security and the phone asked to pair. With no agent on the car computer the pairing was never kept (`bluetoothctl devices Paired` was empty).
+  - **Fix:** the setup writes `[GATT] Client = false` into `/etc/bluetooth/main.conf`, with a dated copy, and restarts Bluetooth: Slot17 needs BlueZ only as a server. Signed updates cannot change system files, so the doctor and the app's Bluetooth card say when the setup is still needed. Applied on our car computer on 23 November.
+  - **Not tested before 1.4.0:** the earlier tests used a PC, which exposes none of these services. That was the wrong test for a phone feature.
+  - **The apps:**
+    - The iPhone picker waits until the app is on screen instead of failing.
+    - "Set up again" with a car computer already chosen only refreshes the key.
+    - Both apps connect again 4 s after a failed read, a missing service or refused notifications, instead of staying connected and silent.
+    - Android took a failed read for a different car computer; it no longer does.
+- **An SD card could not keep up with a busy band.** A user's drive had 42 candidates a second: 161 of 16,652 snippets were skipped, with 12.5 % iowait, and the detector reported itself degraded for it.
+  - **Cause:** every recording (a candidate's snippet, each window's power table) cost two `fsync` calls, its file and its sidecar. ext4 commits its journal on each, which is slow on flash. `events.jsonl`, which the publisher reads for matches, was written by the same thread, so a match could wait behind a recording.
+  - **Fix:** events have their own thread and never wait for a sync. Recordings go in batches: everything queued is written to `.tmp`, made durable with one `syncfs` on Linux (one `fsync` per file elsewhere), then renamed. The queue holds 4096 recordings instead of 256, within the same 256 MB.
+  - The power-loss promise is unchanged: nothing is renamed before its data is on storage, and about one second is at risk.
+  - **Measured** with `scripts/bench_recorder.py` (each sync made as slow as a card's, on a PC):
+
+    | Sync time | Old recorder | New recorder |
+    |---|---|---|
+    | 15 ms | matches up to 89 ms late | matches at most 12 ms late |
+    | 50 ms | 126 of 461 recordings skipped; matches up to 241 ms late | none skipped; matches at most 8 ms late |
+    | 150 ms, at 80 candidates a second | 558 of 841 skipped | none skipped; matches at most 18 ms late |
+
+  - **Real `syncfs`** tested on our car computer's ext4.
+  - **Skipped recordings** no longer mark the detector degraded: detection, matches and events are untouched. They are still counted, and the doctor's Storage line says what the storage is (SD card, NVMe SSD, USB drive) and how many recordings it could not keep up with.
+  - **Candidates** are no longer printed one line each to the system log, at dozens a second; matches still are, and every candidate is in `events.jsonl` (`--log-candidates` brings the lines back).
+  - **Sources:**
+    - Raspberry Pi Ltd, *Making a more resilient file system* (2026): write to a temporary file, `fsync`, rename; fewer and larger writes on flash.
+    - The ext4 and JBD2 notes behind it: a journal commit on every `fsync`; batching small syncs.
+- **Tests:**
+  - Detector: 225 (10 new: 7 in `tests/test_recorder.py`, 3 for the BlueZ setting).
+  - Doctor: 2 new; publisher and server: 1.
+  - Android and iPhone: the new state field.
+
 ## 1.5.0, iPhone app 1.8.0 and Android app 1.10.0: support packages from the app (22 November 2026)
 
 The support package of 1.4.0 (`setup.sh logs`) can now be made from the app, shared from the phone, and sent to the Slot17 team. The detector's recognition is unchanged. [SUPPORT.md](operations/SUPPORT.md) describes it.

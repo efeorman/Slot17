@@ -223,11 +223,14 @@ struct BluetoothState: Decodable, Equatable {
     var mtu: Int?
     var since: Double?
     var error: String?
+    /// The car computer still makes phones pair at every connection (1.5.1): its setup needs running once more.
+    var phonesPair: Bool?
 
     enum CodingKeys: String, CodingKey {
         case on, state, name, subscribed, frames, matches, mtu, error
         case keyID = "key_id"
         case since = "since_s"
+        case phonesPair = "phones_pair"
     }
 
     init(from decoder: Decoder) throws {
@@ -242,6 +245,7 @@ struct BluetoothState: Decodable, Equatable {
         mtu = try c.decodeIfPresent(Int.self, forKey: .mtu)
         since = try c.decodeIfPresent(Double.self, forKey: .since)
         error = try c.decodeIfPresent(String.self, forKey: .error)
+        phonesPair = try c.decodeIfPresent(Bool.self, forKey: .phonesPair)
     }
 }
 

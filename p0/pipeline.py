@@ -486,7 +486,9 @@ def _finish_event(h, recording, ch, floors, ctx, writer, window_id, sample_start
             st.snippets_skipped += 1
             emit(ctx, {"schema_version": 2, "event_type": "recording_unavailable",
                        "event_id": h["event_id"], "state": state})
-    if ctx.verbose:
+    # A busy band has dozens of candidates a second; one log line each was a steady small write on an SD
+    # card and most of a support package's journal (1.5.1). Every candidate is in events.jsonl.
+    if ctx.verbose and (h.get("confirmed") or getattr(ctx, "log_candidates", False)):
         label = "ALERT" if h.get("confirmed") else "candidate"
         strength = (f"{h['peak_snr_db']:.1f} dB" if h.get('strength_reliable', True)
                     else 'matched strength unavailable')

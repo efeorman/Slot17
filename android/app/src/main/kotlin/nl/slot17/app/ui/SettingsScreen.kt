@@ -278,6 +278,10 @@ private fun BluetoothCard(bt: BluetoothRoute, @Suppress("UNUSED_PARAMETER") nowM
         ToggleRow("Bluetooth on the car computer", bt.shownOn,
             enabled = (bt.unavailable == null || bt.overBluetooth) && !bt.carAction.busy) { bt.setOnCar(it) }
         LabelledRow("On the car computer", BluetoothWords.car(bt.onCar))
+        if (bt.onCar?.phonesPair == true) {
+            Hint("This car computer makes phones confirm a pairing at every connection. Run the installer once more on it " +
+                "(bash setup.sh car --bluetooth) and it stops; then unpair \"${bt.onCar?.name ?: "Slot17"}\" in Android's Bluetooth settings.", C.red)
+        }
         bt.onCar?.name?.let { LabelledRow("Name phones show", it) }
         OutlinedTextField(value = name, onValueChange = { name = it.take(BluetoothName.MAX); nameProblem = null },
             label = { Text("New name") }, singleLine = true, modifier = Modifier.fillMaxWidth())

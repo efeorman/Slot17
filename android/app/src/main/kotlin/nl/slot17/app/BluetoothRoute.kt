@@ -144,6 +144,13 @@ class BluetoothRoute(
         }
         save(phone.copy(key = key.toHex(), keyId = BluetoothFormat.keyId(key)))
         feed.key = key
+        // Already chosen: the new key is all it needed (1.5.1). The chooser again only for a new car computer.
+        if (phone.address != null && link.state != BluetoothLink.State.WRONG_CAR) {
+            save(phone.copy(use = true))
+            pairing = ActionState(id, "Set up: connecting to the car computer", Level.OK)
+            start()
+            return
+        }
         pairing = ActionState(id, "Choose the car computer in the list Android shows…", Level.IDLE, true)
         link.choose(show = { chooser = it }, chosen = ::chosen, failed = { pairing = ActionState(id, it, Level.BAD) })
     }

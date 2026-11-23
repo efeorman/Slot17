@@ -71,7 +71,7 @@ A link that keeps ending is started again after 5, 30 and 120 s, then every 10 m
 | Advertising | The service UUID and the name, which ends up in the scan response. No TX power: with a 128-bit UUID it would leave no room for the name in 31 bytes |
 | Intervals | Apple's Accessory Design Guidelines (R32, chapter 57): 20 ms for 30 s after a start or a disconnect, then 152.5 ms. While a phone is connected, 1022.5 ms, so a second phone can still join |
 | Name | The adapter's alias, `Slot17` unless changed: up to 20 letters, digits, spaces, `.`, `-` or `_` (Apple advises against `:` and `;`). BlueZ keeps it across restarts |
-| Pairing | None. Apple advises not to require it to discover services; the signature below proves where a frame comes from, and the contents are no secret: anyone with an SDR hears the same band |
+| Pairing | None. Apple advises not to require it to discover services; the signature below proves where a frame comes from, and the contents are no secret: anyone with an SDR hears the same band. **But BlueZ must not act as a GATT client** (1.5.1, below) |
 
 ## Frames (version 1)
 
@@ -194,3 +194,27 @@ So a recording of the link, replayed later, cannot raise an alert.
   rules, companion device pairing, `BluetoothGatt`.
 - **BlueZ:** the D-Bus API documents for GattManager, GattCharacteristic, LEAdvertisingManager and
   LEAdvertisement.
+
+## Phones asked to pair at every connection (1.5.1)
+
+**What the operator saw** with 1.4.0 and 1.5.0 on an iPhone: a pairing code to confirm at every connection,
+again after every restart of the app; without confirming, "no data from Bluetooth"; and "Application is not in
+the foreground" when setting up.
+
+**Why.** BlueZ acts as a GATT client towards every device that connects, in this case the phone. It found the
+phone's own services (an iPhone with iOS 18: Device Information and the LE Audio Media Control, Telephone Bearer
+and Telephony and Media Audio services, cached in `/var/lib/bluetooth/<adapter>/cache/`). The phone protects them
+with encryption, so BlueZ raised the link's security and the phone asked to pair. The car computer had no agent to
+keep a pairing (`bluetoothctl devices Paired` was empty), so the next connection asked again. Tests with a PC never
+showed it: a PC exposes none of these services.
+
+**The fix.** Slot17 needs BlueZ only as a server, so `setup.sh car` writes `Client = false` under `[GATT]` in
+`/etc/bluetooth/main.conf` (`p0/bluetooth_config.py --gatt-client-off`, with a dated copy of the old file) and
+restarts Bluetooth. Signed updates cannot change system files, so a car computer that updates itself needs the
+setup once more: the doctor says so, and the app's Bluetooth card shows it (`phones_pair` in the state). After
+that, forget the car computer once in the phone's Bluetooth settings.
+
+**The apps, too.** The iPhone app opens the picker only when the app is on screen (it waits for it, instead of
+failing), and "Set up again" with a car computer already chosen only refreshes the key and reconnects. Both apps
+connect again a few seconds after a failed read, a missing service or refused notifications, instead of staying
+connected and silent; Android no longer takes a failed read for a different car computer.

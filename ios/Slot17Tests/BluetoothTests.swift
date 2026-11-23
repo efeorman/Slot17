@@ -162,11 +162,12 @@ final class BluetoothTests: XCTestCase {
         let json = """
         {"boot":"b","seq":1,"server_mono_s":1,"state":{"snapshot_age_s":0,"detector":{"state":"running"},"channels":[],
         "matches":[],"bluetooth":{"on":true,"state":"advertising","name":"Car 2","key_id":"630dcd29","subscribed":false,
-        "frames":3,"mtu":185}}}
+        "frames":3,"mtu":185,"phones_pair":true}}}
         """
         let message = try JSONDecoder().decode(ServerMessage.self, from: Data(json.utf8))
         XCTAssertEqual(message.state?.bluetooth?.name, "Car 2")
         XCTAssertEqual(message.state?.bluetooth?.mtu, 185)
+        XCTAssertEqual(message.state?.bluetooth?.phonesPair, true)
         XCTAssertEqual(BluetoothWords.car(message.state?.bluetooth), "On, waiting for a phone")
     }
 }

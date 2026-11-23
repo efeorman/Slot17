@@ -355,5 +355,49 @@ class LinkTests(unittest.TestCase):
         self.assertEqual(self.p.notified, [])
 
 
+class GattClient(unittest.TestCase):
+    """1.5.1: BlueZ as a GATT client made iPhones ask to pair at every connection; the setup switches it off."""
+
+    DEBIAN = ("[General]\n#Name = BlueZ\n\n[GATT]\n# GATT attribute cache.\n#Cache = always\n\n"
+              "# Possible values: true, false\n#Client = true\n\n#ExportClaimedServices = read-only\n\n"
+              "[CSIS]\n#SIRK = x\n#Client = true\n")
+
+    def test_read(self):
+        from bluetooth_config import gatt_client
+        self.assertTrue(gatt_client(self.DEBIAN))                      # commented out: BlueZ's default, on
+        self.assertTrue(gatt_client(""))
+        self.assertTrue(gatt_client("[GATT]\nClient = true\n"))
+        self.assertFalse(gatt_client("[GATT]\nClient = false\n"))
+        self.assertFalse(gatt_client("[GATT]\n  Client=FALSE\n"))
+        self.assertTrue(gatt_client("[CSIS]\nClient = false\n"))      # another section's Client is not it
+
+    def test_switched_off_once_everything_else_kept(self):
+        from bluetooth_config import gatt_client, gatt_client_off
+        new, changed = gatt_client_off(self.DEBIAN)
+        self.assertTrue(changed)
+        self.assertFalse(gatt_client(new))
+        self.assertEqual(new.replace("Client = false\n", "").replace(
+            "# Slot17: the car computer is only a GATT server; as a client it made phones ask to pair.\n", ""), self.DEBIAN)
+        self.assertLess(new.index("Client = false"), new.index("[CSIS]"))
+        self.assertEqual(gatt_client_off(new), (new, False))
+        for text in ("[GATT]\nClient = true\n", "[General]\nName = x", ""):
+            out, changed = gatt_client_off(text)
+            self.assertTrue(changed, text)
+            self.assertFalse(gatt_client(out), text)
+
+    def test_the_file_with_a_copy_of_the_old_one(self):
+        from bluetooth_config import set_gatt_client_off
+        with tempfile.TemporaryDirectory() as folder:
+            conf = os.path.join(folder, "main.conf")
+            with open(conf, "w", encoding="utf-8") as fh:
+                fh.write(self.DEBIAN)
+            self.assertTrue(set_gatt_client_off(conf).startswith("switched off"))
+            self.assertEqual(set_gatt_client_off(conf), "already off")
+            copies = [f for f in os.listdir(folder) if ".slot17-backup-" in f]
+            self.assertEqual(len(copies), 1)
+            with open(os.path.join(folder, copies[0]), encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), self.DEBIAN)
+
+
 if __name__ == "__main__":
     unittest.main()

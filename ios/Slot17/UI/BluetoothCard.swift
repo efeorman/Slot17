@@ -18,6 +18,10 @@ struct BluetoothCard: View {
                 .disabled((bluetooth.unavailable != nil && !bluetooth.overBluetooth) || bluetooth.carAction.busy)
                 .accessibilityIdentifier("setting-bluetooth-car")
             LabelledRow(name: "On the car computer", value: BluetoothWords.car(bluetooth.onCar))
+            if bluetooth.onCar?.phonesPair == true {
+                Text("This car computer makes phones confirm a pairing code at every connection. Run the installer once more on it (bash setup.sh car --bluetooth) and it stops; then forget \"\(bluetooth.onCar?.name ?? "Slot17")\" under the iPhone's Settings, Bluetooth.")
+                    .font(.footnote).foregroundColor(Theme.red)
+            }
             if let shown = bluetooth.onCar?.name { LabelledRow(name: "Name phones show", value: shown) }
             HStack {
                 TextField("New name", text: $name)

@@ -291,6 +291,17 @@ if [ "$BLUETOOTH" = yes ]; then
         BT_NAME="$current"
         python3 -B "$BT_SETTINGS" --on --name "$BT_NAME" >/dev/null
     fi
+    # BlueZ as a GATT client made phones ask to pair on every connection; Slot17 needs it only as a server.
+    if [ -f /etc/bluetooth/main.conf ]; then
+        if said="$(sudo python3 -B "$BT_SETTINGS" --gatt-client-off)"; then
+            case "$said" in
+                already*) ;;
+                *) sudo systemctl restart bluetooth.service && ok "phones connect without being asked to pair: BlueZ's GATT client $said" ;;
+            esac
+        else
+            note "could not change /etc/bluetooth/main.conf, so phones may be asked to pair at every connection"
+        fi
+    fi
     python3 -B "$PROJECT/p0/bluetooth_link.py" adapter --name "$BT_NAME" >/dev/null 2>&1 \
         || note "the adapter keeps its old name until the detector starts; then it takes \"$BT_NAME\"."
     ok "on, shown as \"$BT_NAME\". In the app: Settings, Bluetooth to the car computer, Set up."
