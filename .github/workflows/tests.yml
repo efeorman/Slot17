@@ -1,0 +1,85 @@
+name: Tests
+# The detector, server, publisher and script tests on Linux, on every push to main, on every pull request, and
+# before every release (release.yml waits for them). Until 25 November 2026 no workflow ran them: the release's
+# installer test passes whether the detector's own checks pass or not.
+#
+# It runs by itself only in the public repository, where GitHub's standard runners cost nothing. In any other
+# copy it runs only when started by hand (Actions > Tests > Run workflow), so it never uses a private allowance.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  detector:
+    name: Detector (car computer's Python and libraries)
+    if: github.repository == 'efeorman/Slot17' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # The car computer's numpy and scipy (requirements-pi.txt), and what the tests need besides.
+      - run: pip install -r requirements-pi.txt psutil cryptography ruff==0.17.4
+      - name: Every detector test
+        shell: bash
+        env:
+          # Without the cryptography package the updater's tests would only be skipped.
+          SLOT17_REQUIRE_CRYPTOGRAPHY: "1"
+        run: |
+          python -B p0/preflight.py --offline --tests 2>&1 | tee preflight.out
+          grep -q '"offline_preflight_pass": true' preflight.out
+      - name: Code style and common mistakes
+        run: ruff check p0 display deploy tests scripts
+
+  display:
+    name: Server and publisher (Python ${{ matrix.python }})
+    if: github.repository == 'efeorman/Slot17' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10: the display host's. 3.13: the car computer's, which runs the publisher.
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -r requirements-dev.txt
+      # One suite per process, as the README runs them: each starts its own servers.
+      - shell: bash
+        run: |
+          status=0
+          for t in display/test_hardening.py display/test_app_backend.py display/test_display.py \
+                   display/test_doctor_check.py display/test_drive_report.py; do
+            echo "::group::$t"; python -B -m unittest "$t" || status=1; echo "::endgroup::"
+          done
+          exit $status
+
+  scripts:
+    name: Setup, first start, modem, doctor, scorecard
+    if: github.repository == 'efeorman/Slot17' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements-dev.txt
+      - shell: bash
+        run: |
+          status=0
+          for t in scripts/test_*.py $(ls hosting/test_*.py 2>/dev/null); do
+            echo "::group::$t"; python -B -m unittest "$t" || status=1; echo "::endgroup::"
+          done
+          exit $status

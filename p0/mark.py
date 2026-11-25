@@ -27,12 +27,18 @@ def main():
     session = args.session
     if session is None:
         hb = json.loads(args.heartbeat.read_text(encoding="utf-8"))
-        if not hb.get("ready") or not 0 <= time.time() - hb.get("t", 0) < 5:
+        age = (time.monotonic() - hb["t_mono"]) if hb.get("t_mono") is not None else time.time() - hb.get("t", 0)
+        if not hb.get("ready") or not 0 <= age < 5:
             ap.error("no fresh ready heartbeat; use --session for retrospective annotation")
         session = Path(hb["session"])
     if not session.is_dir() or not (session / "session.json").is_file():
         ap.error("session must be an existing v2 capture directory")
     mark = {"utc": stamp, "label": args.label, "note": args.note[:2000], "entered_utc": time.time()}
+    if not args.utc:                 # now: the detector measures its age on the clock a UTC step can't move
+        try:
+            mark.update(mono=time.monotonic(), boot=Path("/proc/sys/kernel/random/boot_id").read_text().strip())
+        except OSError:
+            pass
     inbox = session / "marks"
     inbox.mkdir(exist_ok=True)
     name = uuid.uuid4().hex + ".request.json"

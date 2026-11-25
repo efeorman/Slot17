@@ -153,6 +153,19 @@ class ConfigTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(config.main(["--path", self.path, "--name", "a;b"]), 2)
 
+    def test_a_new_key_keeps_the_rest(self):
+        """After 1.6.0 sent the key over Bluetooth (CHANGELOG), a car computer can be given a new one."""
+        import contextlib
+        import io
+        first = config.save(self.path, on=True, name="Car 2")
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(config.main(["--path", self.path, "--new-key"]), 0)
+        now = config.load(self.path)
+        self.assertNotEqual(now["key"], first["key"])
+        self.assertEqual((now["on"], now["name"], len(now["key"])), (True, "Car 2", 32))
+        self.assertEqual(json.loads(out.getvalue())["key_id"], frames.key_id(now["key"]))
+        self.assertNotIn(now["key"].hex(), out.getvalue())
+
 
 class FakePeripheral:
     """Records what the link asks of BlueZ."""

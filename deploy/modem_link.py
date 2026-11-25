@@ -31,6 +31,7 @@ Settings (environment):
   SLOT17_MODEM_PING_HOST    host for the round-trip measurement (the display server)
 NetworkManager's defaults are 100 for wired and 600 for Wi-Fi.
 """
+import argparse
 import glob
 import http.client
 import json
@@ -314,7 +315,10 @@ def check(device, gateway, address, state, now):
     return True
 
 
-def main():
+def main(argv=()):
+    # No options: the settings come from the environment. Anything else, --help included, only prints the
+    # description above or refuses, so a probe by hand never touches the stick or the routes (25 November 2026).
+    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args(list(argv))
     device = active_device()
     state = load_state()
     now = time.monotonic()
@@ -336,4 +340,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

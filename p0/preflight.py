@@ -80,6 +80,16 @@ def write_record(record):
         return False
 
 
+def skipped(result):
+    """{reason: count} of the tests a run skipped. Printed with the verdict, so a pass with skips says so: on
+    25 November 2026 a development computer without the cryptography package passed with all 27 updater tests
+    skipped, and only the runner's long output showed it."""
+    counts = {}
+    for _test, reason in result.skipped:
+        counts[reason] = counts.get(reason, 0) + 1
+    return counts
+
+
 def choose_run(record, tree):
     """'smoke' when this exact tree passed the full suite and fewer than FULL_EVERY - 1 smoke starts followed."""
     if record.get("fingerprint") == tree and int(record.get("smoke_starts", 0)) < FULL_EVERY - 1:
@@ -129,10 +139,15 @@ def main():
         free = shutil.disk_usage(root).free
         if free < 5 * (1 << 30):
             notes.append("less than 5 GiB free: binary recordings will be skipped")
+        try:
+            import cryptography  # noqa: F401
+        except ImportError:
+            notes.append("the cryptography package is missing: signed updates are off here and their tests are skipped")
     except Exception as exc:
         errors.append(f"{type(exc).__name__}: {exc}")
         version = None
     run = None
+    skips = {}
     if testing:
         tree = None
         record = {}
@@ -145,7 +160,9 @@ def main():
         if run == "smoke":
             sys.path.insert(0, str(root / "tests"))
             suite = unittest.defaultTestLoader.loadTestsFromNames(SMOKE_TESTS)
-            if not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful():
+            result = unittest.TextTestRunner(verbosity=2).run(suite)
+            skips = skipped(result)
+            if not result.wasSuccessful():
                 errors.append("smoke tests failed")
             elif not errors:
                 write_record(dict(record, smoke_starts=int(record.get("smoke_starts", 0)) + 1))
@@ -155,12 +172,16 @@ def main():
             missing = sorted(set(REQUIRED_TESTS) - have)
             if missing or suite.countTestCases() < MIN_TESTS:
                 errors.append(f"regression suite is incomplete: {suite.countTestCases()} tests; missing {missing or 'none'}")
-            elif not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful():
-                errors.append("regression tests failed")
-            elif not errors and tree is not None:
-                write_record({"fingerprint": tree, "smoke_starts": 0, "tests": suite.countTestCases()})
+            else:
+                result = unittest.TextTestRunner(verbosity=2).run(suite)
+                skips = skipped(result)
+                if not result.wasSuccessful():
+                    errors.append("regression tests failed")
+                elif not errors and tree is not None:
+                    write_record({"fingerprint": tree, "smoke_starts": 0, "tests": suite.countTestCases()})
     print(json.dumps({"offline_preflight_pass": not errors, "errors": errors, "notes": notes, "tests_run": run,
-                      "software": version, "hardware_tested": False, "field_range_tested": False}, indent=2))
+                      "tests_skipped": skips, "software": version, "hardware_tested": False,
+                      "field_range_tested": False}, indent=2))
     if owner:
         owner.close()
     return 1 if errors else 0

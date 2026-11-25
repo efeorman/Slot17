@@ -18,10 +18,17 @@ Safety, in the order things can go wrong:
     installed one, so neither the server nor anyone on the network can supply or replay code.
   * Only p0/, tests/ and display/display_publisher.py are replaced. This machine's own
     calibration and channel files, and anything named *.local.json, are never replaced.
+  * A release older than the installed software (by p0/version.py) is refused, also on a car
+    computer that has no record of a release yet (a fresh install from the tarball or the image).
+  * The files are kept with their signed checksums, and checked against them again before they
+    are tested and as each one is installed: a file damaged on the card is fetched again.
   * Before anything is replaced, the complete new tree is tested in a copy. A release that fails
-    is rejected and remembered; the installed software stays as it was.
+    is rejected and remembered; the installed software stays as it was. Checks that ran out of
+    time, or couldn't run, are tried again at the next start (three times), not held against it.
   * The power can be cut at any moment (the ignition does). The replacement is written down
-    first and finished at the next start, so a half-replaced tree is never left in use.
+    first and finished at the next start, so a half-replaced tree is never left in use; an
+    install that can't be finished puts the old files back. Every rename is made durable
+    (the folder too) before the next step relies on it.
   * `start` always exits 0 and has a time limit, so a broken update can never stop the detector.
 """
 import argparse
@@ -30,6 +37,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -47,6 +55,68 @@ NEVER = {"p0/calibration.json", "p0/downlink_channels.json"}
 TEST_LIMIT_S = 70.0
 START_LIMIT_S = 80.0        # of the whole `start`, which runs before the detector does
 FETCH_AT_START_S = 6.0      # the phone's hotspot is rarely up this early; the publisher fetches later
+TRIES = 3                   # starts at which checks that ran out of time are tried again
+# Problems that say nothing against the release itself: a slow card or a busy start. Until 24 November 2026
+# they rejected the release for good, like a failing test (found in review).
+NOT_ITS_FAULT = ("checks took longer than", "could not test:")
+SOFTWARE_LINE = re.compile(rb'^SOFTWARE\s*=\s*"(\d+)\.(\d+)\.(\d+)"', re.M)
+
+
+def software(path):
+    """The version in a p0/version.py, as a tuple to compare, or None."""
+    try:
+        found = SOFTWARE_LINE.search(Path(path).read_bytes())
+    except OSError:
+        return None
+    return tuple(int(x) for x in found.groups()) if found else None
+
+
+def sha256_of(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def sync_dir(path):
+    """Make the names in a folder durable (a rename is in the folder, not the file). Not on Windows."""
+    if not hasattr(os, "O_DIRECTORY"):
+        return
+    fd = os.open(str(path), os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def make_dirs(folder):
+    """Create `folder` and any missing parents one at a time, each made durable in its own parent. A folder made
+    with mkdir alone can vanish in a power cut while files renamed into place later survive (found in review,
+    F34: a backup folder lost that way made the backup look like the new release)."""
+    folder = Path(folder)
+    missing = []
+    while not folder.exists():
+        missing.append(folder)
+        folder = folder.parent
+    for new in reversed(missing):
+        new.mkdir(exist_ok=True)
+        sync_dir(new.parent)
+
+
+def write_durably(source, target, keep_times=False):
+    """Copy a file to `target` through a temporary name: after a power cut there is the old file or the whole new
+    one, never part of it. keep_times: also its mode and times, for a backup."""
+    make_dirs(target.parent)
+    tmp = target.with_name(target.name + ".updating")
+    with open(source, "rb") as src, open(tmp, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+        dst.flush()
+        os.fsync(dst.fileno())
+    if keep_times:
+        shutil.copystat(source, tmp)
+    os.replace(tmp, target)
+    sync_dir(target.parent)
 
 
 def allowed(path):
@@ -57,6 +127,14 @@ def allowed(path):
     if path in NEVER or path.endswith(".local.json") or "__pycache__" in parts:
         return False
     return parts[0] in ("p0", "tests") and len(parts) > 1 or path == "display/display_publisher.py"
+
+
+class PutBackFailed(Exception):
+    """An install could not be undone: these paths hold neither their original nor a backup of it."""
+
+    def __init__(self, paths):
+        super().__init__(", ".join(paths))
+        self.paths = paths
 
 
 class Updater:
@@ -83,6 +161,7 @@ class Updater:
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp, self.work / name)
+        sync_dir(self.work)
 
     def boot_id(self):
         if self._boot_id is None:
@@ -166,7 +245,8 @@ class Updater:
                 raise ValueError(f"path not allowed: {path}")
             if hashlib.sha256(data).hexdigest() != listed[path]:
                 raise ValueError(f"checksum differs: {path}")
-        return {"seq": seq, "commit": commit, "files": sorted(files)}, files
+        # The signed checksums stay with the files: they are checked again before testing and installing.
+        return {"seq": seq, "commit": commit, "files": sorted(files), "sha256": {p: listed[p] for p in files}}, files
 
     def fetch(self, timeout=20.0):
         """Download a newer release and keep it for the next start. Returns a short word for the log."""
@@ -192,52 +272,146 @@ class Updater:
             return "not accepted"
         target = self.work / "staged" / str(seq)
         shutil.rmtree(target, ignore_errors=True)
+        make_dirs(target)
+        folders = set()
         for path, data in files.items():
             out = target / path
-            out.parent.mkdir(parents=True, exist_ok=True)
+            make_dirs(out.parent)
             with open(out, "wb") as fh:
                 fh.write(data)
                 fh.flush()
                 os.fsync(fh.fileno())
+            folders.add(out.parent)
+        for folder in sorted(folders, key=lambda p: -len(p.parts)):     # the files' names, then the folders'
+            sync_dir(folder)
+        sync_dir(self.work / "staged")
         self._write(f"{seq}.ready", manifest)       # only now does it count as waiting
         self.note("staged", f"{manifest['commit'][:7]} installs at the next start")
         return "staged"
 
     # ---------------------------------------------------------------- installing
-    def _copy_into_place(self, journal):
-        """Idempotent: run again after a power cut, it ends in the same state."""
+    def _staged_problem(self, seq, manifest):
+        """'' when every file of a waiting release is on the card as it was signed, else what isn't."""
+        sums = manifest.get("sha256")
+        if not isinstance(sums, dict):
+            return "kept without its checksums"       # staged by an updater from before 24 November 2026
+        for path in manifest["files"]:
+            staged = self.work / "staged" / str(seq) / path
+            if not allowed(path) or not staged.is_file():
+                return f"missing {path}"
+            if sha256_of(staged) != sums.get(path):
+                return f"changed on the card: {path}"
+        return ""
+
+    def _replace(self, journal):
+        """Put the release's files in place. Idempotent: run again after a power cut, it ends in the same state.
+        Raises if it can't finish; then _put_back undoes it."""
         source = self.work / "staged" / str(journal["seq"])
         backup = self.work / f"backup-{journal['seq']}"
+        sums = journal.get("sha256")
+        existed = journal.get("existed")
         for path in journal["files"]:
             target = self.root / path
-            if target.exists() and not (backup / path).exists():
-                (backup / path).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(target, backup / path)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            tmp = target.with_name(target.name + ".updating")
-            with open(source / path, "rb") as src, open(tmp, "wb") as dst:
-                shutil.copyfileobj(src, dst)
-                dst.flush()
-                os.fsync(dst.fileno())
-            os.replace(tmp, target)
+            # A backup is written through a temporary name, so one that exists is whole (until 24 November 2026
+            # it was copied straight to its name, and a cut during that copy left a short one that counted).
+            # Only of a file that was there before this install: after a cut, a file the release added is already
+            # in place, and backing it up made it look like the old release's (found in review, F32).
+            if target.exists() and not (backup / path).exists() and (existed is None or path in existed) \
+                    and self._holds_original(journal, path, target):
+                write_durably(target, backup / path, keep_times=True)
+            if isinstance(sums, dict) and sha256_of(source / path) != sums.get(path):
+                raise ValueError(f"changed on the card: {path}")
+            write_durably(source / path, target)
         for path in journal.get("remove", []):       # files an earlier release installed and this one dropped
             target = self.root / path
             if target.exists():
-                (backup / path).parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(target), str(backup / path))
+                if not (backup / path).exists():
+                    write_durably(target, backup / path, keep_times=True)
+                target.unlink()
+                sync_dir(target.parent)
+
+    def _put_back(self, journal):
+        """Undo an install that can't be finished: every file it replaced or removed back from its backup, and the
+        files it added (journal["existed"] says which those are) removed. Leaves the old release whole."""
+        backup = self.work / f"backup-{journal['seq']}"
+        existed = journal.get("existed")
+        lost = []
+        for path in list(journal["files"]) + list(journal.get("remove", [])):
+            target = self.root / path
+            if existed is not None and path in journal["files"] and path not in existed:
+                if target.exists():                  # added by this release: it goes, backup or not
+                    target.unlink()
+                    sync_dir(target.parent)
+            elif (backup / path).exists() and self._holds_original(journal, path, backup / path):
+                write_durably(backup / path, target, keep_times=True)
+            elif not (target.exists() and self._holds_original(journal, path, target)):
+                lost.append(path)                    # neither the backup nor the file holds the original
+        if lost:
+            raise PutBackFailed(lost)
+        (self.work / "applying.json").unlink(missing_ok=True)
+        sync_dir(self.work)
+
+    def _holds_original(self, journal, path, f):
+        """Whether file `f` holds what `path` held before this install: its checksum when the journal kept it, else
+        anything but the release's new file (a journal from before the originals were kept)."""
+        originals = journal.get("originals") or {}
+        if originals.get(path) is not None:
+            return sha256_of(f) == originals[path]
+        new = (journal.get("sha256") or {}).get(path)
+        return new is None or sha256_of(f) != new
+
+    def _finish(self, journal):
         self._write("installed.json", {"seq": journal["seq"], "commit": journal["commit"], "files": journal["files"],
                                        "boot": self.boot_id()})
-        try:
-            (self.work / "applying.json").unlink()
-        except OSError:
-            pass
-        shutil.rmtree(source, ignore_errors=True)
+        (self.work / "applying.json").unlink(missing_ok=True)
+        sync_dir(self.work)
+        shutil.rmtree(self.work / "staged" / str(journal["seq"]), ignore_errors=True)
         for marker in self.work.glob("*.ready"):
             if marker.stem.isdigit() and int(marker.stem) <= journal["seq"]:
                 marker.unlink(missing_ok=True)
+        (self.work / "tries.json").unlink(missing_ok=True)
         for old in sorted(self.work.glob("backup-*"), key=lambda p: p.stat().st_mtime)[:-3]:
             shutil.rmtree(old, ignore_errors=True)
         self.note("installed", journal["commit"][:7])
+
+    def _install(self, journal, resumed=False):
+        # The install record is written only once every file is in place, so a resume that finds it already naming
+        # this release only has the cleanup left. Replacing again there, and failing, put the old files back under
+        # the new release's record (found in review, 24 November 2026).
+        if resumed and int(self.installed().get("seq", 0)) == int(journal["seq"]):
+            self._finish(journal)
+            return "finished an interrupted install"
+        try:
+            self._replace(journal)
+        except Exception as exc:        # noqa: BLE001 - whatever it was, the old release goes back
+            try:
+                self._put_back(journal)
+            except PutBackFailed as lost:
+                # Not "put back": say so, and keep the journal, so the next start tries to finish the install.
+                self.note("error", f"release {journal['seq']} could not be installed ({type(exc).__name__}), and "
+                                   f"the old copy of {lost.paths[0]} could not be put back; tried again at the "
+                                   "next start"[:120])
+                return "not put back"
+            self._drop(journal["seq"])
+            self.note("error", f"release {journal['seq']} could not be installed ({type(exc).__name__}: {exc}); "
+                               "the installed software was put back"[:120])
+            return "put back"
+        self._finish(journal)
+        return "finished an interrupted install" if resumed else "installed"
+
+    def _drop(self, seq):
+        """Forget a waiting release, so that it is fetched again (not rejected)."""
+        (self.work / f"{seq}.ready").unlink(missing_ok=True)
+        shutil.rmtree(self.work / "staged" / str(seq), ignore_errors=True)
+
+    def _reject(self, seq, manifest, problem):
+        rejected = self._read("rejected.json", {"seqs": []})
+        rejected["seqs"] = sorted(set(rejected["seqs"]) | {seq})[-50:]
+        self._write("rejected.json", rejected)
+        self._drop(seq)
+        (self.work / "tries.json").unlink(missing_ok=True)
+        self.note("rejected", f"{manifest['commit'][:7]}: {problem}")
+        return "rejected"
 
     def _test(self, seq, manifest, limit):
         """Run the offline checks on a complete copy with the new files. Returns '' or the reason."""
@@ -275,30 +449,42 @@ class Updater:
         """Finish an interrupted install, or test and install the newest waiting release."""
         journal = self._read("applying.json", None)
         if journal:
-            self._copy_into_place(journal)
-            return "finished an interrupted install"
+            return self._install(journal, resumed=True)
         seq = self.staged()
         if not seq:
             return "nothing waiting"
         manifest = self._read(f"{seq}.ready", None)
-        if not manifest or not all((self.work / "staged" / str(seq) / p).is_file() and allowed(p) for p in manifest["files"]):
-            (self.work / f"{seq}.ready").unlink(missing_ok=True)
-            self.note("error", f"release {seq} was incomplete on disk; it will be fetched again")
+        problem = self._staged_problem(seq, manifest) if manifest else "no record of it"
+        if problem:
+            self._drop(seq)
+            self.note("error", f"release {seq} was incomplete on disk ({problem}); it will be fetched again"[:120])
             return "incomplete"
+        # A car computer that has never installed a release (a fresh install from the tarball or the image) has
+        # no record of its number, so the number alone let an older signed release in (found in review).
+        mine, theirs = software(self.root / "p0/version.py"), software(self.work / "staged" / str(seq) / "p0/version.py")
+        if mine and theirs and theirs < mine:
+            return self._reject(seq, manifest, "older than the installed software "
+                                               f"({'.'.join(map(str, theirs))} < {'.'.join(map(str, mine))})")
         previous = self.installed().get("files", [])
         manifest["remove"] = sorted(p for p in previous if p not in manifest["files"] and allowed(p))
         problem = self._test(seq, manifest, limit)
+        if problem.startswith(NOT_ITS_FAULT):
+            tries = self._read("tries.json", {})
+            count = int(tries.get(str(seq), 0)) + 1 if isinstance(tries, dict) else 1
+            if count < TRIES:
+                self._write("tries.json", {str(seq): count})
+                self.note("staged", f"{manifest['commit'][:7]}: {problem}; tried again at the next start "
+                                    f"({count} of {TRIES})")
+                return "postponed"
+            problem += f" ({TRIES} starts running)"
         if problem:
-            rejected = self._read("rejected.json", {"seqs": []})
-            rejected["seqs"] = sorted(set(rejected["seqs"]) | {seq})[-50:]
-            self._write("rejected.json", rejected)
-            (self.work / f"{seq}.ready").unlink(missing_ok=True)
-            shutil.rmtree(self.work / "staged" / str(seq), ignore_errors=True)
-            self.note("rejected", f"{manifest['commit'][:7]}: {problem}")
-            return "rejected"
+            return self._reject(seq, manifest, problem)
+        manifest["existed"] = sorted(p for p in manifest["files"] if (self.root / p).exists())
+        # What each file held before, so that only the original is backed up and put back (F34).
+        manifest["originals"] = {p: sha256_of(self.root / p) for p in manifest["existed"] + manifest["remove"]
+                                 if (self.root / p).is_file()}
         self._write("applying.json", manifest)      # from here a power cut is finished at the next start
-        self._copy_into_place(manifest)
-        return "installed"
+        return self._install(manifest)
 
     def start(self, has_route=None):
         began = time.monotonic()

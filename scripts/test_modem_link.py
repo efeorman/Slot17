@@ -269,6 +269,17 @@ class RouteTests(unittest.TestCase):
                 self.assertEqual(modem_link.main(), 0)
             self.assertIn("interface is gone", out.getvalue())
 
+    def test_an_argument_by_hand_never_touches_the_stick(self):
+        """--help prints and stops; anything else is refused. Neither looks for the stick (25 November 2026)."""
+        def untouched(*_a):
+            raise AssertionError("the stick was looked for")
+        with patch.object(modem_link, "active_device", untouched), patch.object(modem_link, "nmcli", untouched),                 contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
+            for args, code in ((["--help"], 0), (["--bogus"], 2), (["now"], 2)):
+                with self.assertRaises(SystemExit) as stop:
+                    modem_link.main(args)
+                self.assertEqual(stop.exception.code, code, args)
+        self.assertIn("4G USB stick", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

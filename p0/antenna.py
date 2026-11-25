@@ -242,7 +242,7 @@ def main():
     signal.signal(signal.SIGTERM, lambda *_: _stop.set())
 
     lock_hz = args.lock_hz
-    t0 = time.time()
+    t0 = time.monotonic()
     try:
         A.check(A.lib.airspy_set_sample_type(dev, A.SAMPLE_INT16_IQ), "sample_type")
         A.check(A.lib.airspy_set_samplerate(dev, fs), "samplerate")
@@ -253,8 +253,8 @@ def main():
         A.check(A.lib.airspy_set_freq(dev, int(centre)), "set_freq")
 
         # settle, then pick the reference carrier
-        deadline = time.time() + LOCK_SECONDS
-        while time.time() < deadline and latest.buf is None and not _stop.is_set():
+        deadline = time.monotonic() + LOCK_SECONDS
+        while time.monotonic() < deadline and latest.buf is None and not _stop.is_set():
             time.sleep(0.1)
         if latest.buf is None:
             print("no samples arrived - stream did not start", file=sys.stderr)
@@ -264,12 +264,12 @@ def main():
             best = -999.0
             last = 0.0
             while not _stop.is_set():
-                if args.seconds and time.time() - t0 > args.seconds:
+                if args.seconds and time.monotonic() - t0 > args.seconds:
                     break
                 time.sleep(0.05)
-                if time.time() - last < args.interval:
+                if time.monotonic() - last < args.interval:
                     continue
-                last = time.time()
+                last = time.monotonic()
                 raw = latest.buf
                 if raw is None:
                     continue
@@ -281,7 +281,7 @@ def main():
                 best = max(best, snr)
                 rec = {"t": round(time.time(), 2),
                        "local_time": dt.datetime.now().strftime("%H:%M:%S"),
-                       "elapsed_s": round(time.time() - t0, 1),
+                       "elapsed_s": round(time.monotonic() - t0, 1),
                        "lock_hz": round(lock_hz, 1),
                        "snr_db": round(snr, 2),
                        "carrier_db": round(pk, 2),

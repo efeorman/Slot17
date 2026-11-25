@@ -53,13 +53,15 @@ def load(path: str | None = None) -> dict:
             "name": data["name"] if valid_name(data.get("name")) else DEFAULT_NAME, "key": key}
 
 
-def save(path: str | None = None, *, on: bool | None = None, name: str | None = None) -> dict:
-    """Change what is given, keep the rest, and make a key the first time. Returns the new settings."""
+def save(path: str | None = None, *, on: bool | None = None, name: str | None = None,
+         new_key: bool = False) -> dict:
+    """Change what is given, keep the rest, and make a key the first time (or a new one when asked: every phone
+    then needs setting up again). Returns the new settings."""
     path = path or PATH
     current = load(path)
     if name is not None and not valid_name(name):
         raise ValueError(f"not a usable name: 1 to {NAME_MAX} letters, digits, spaces, '.', '-' or '_'")
-    key = current["key"] or secrets.token_bytes(KEY_BYTES)
+    key = secrets.token_bytes(KEY_BYTES) if new_key or not current["key"] else current["key"]
     data = {"on": current["on"] if on is None else bool(on), "name": current["name"] if name is None else name,
             "key": key.hex()}
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -150,6 +152,9 @@ def main(argv=None) -> int:
     group.add_argument("--off", action="store_true", help="switch the link off")
     ap.add_argument("--name", help=f"the name phones show, 1 to {NAME_MAX} characters (default {DEFAULT_NAME})")
     ap.add_argument("--show", action="store_true", help="print the settings as JSON, without the key")
+    ap.add_argument("--new-key", action="store_true",
+                    help="replace the key: every phone needs setting up again; the link uses it once the publisher "
+                         "restarts (the next power-up, or: sudo systemctl restart tetra-display-publisher)")
     ap.add_argument("--path", default=PATH, help=argparse.SUPPRESS)
     ap.add_argument("--gatt-client-off", action="store_true",
                     help=f"as root: [GATT] Client = false in {MAIN_CONF}, so phones are not asked to pair")
@@ -163,8 +168,9 @@ def main(argv=None) -> int:
             return 1
         return 0
     try:
-        if args.on or args.off or args.name is not None:
-            settings = save(args.path, on=True if args.on else False if args.off else None, name=args.name)
+        if args.on or args.off or args.name is not None or args.new_key:
+            settings = save(args.path, on=True if args.on else False if args.off else None, name=args.name,
+                            new_key=args.new_key)
         else:
             settings = load(args.path)
     except ValueError as exc:

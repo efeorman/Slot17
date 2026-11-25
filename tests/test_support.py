@@ -114,6 +114,45 @@ class SupportTests(unittest.TestCase):
         self.assertEqual(sum(1 for e in events if e["event_type"] == "rf_health"), 121)   # minute 0 to 2 only
         self.assertNotIn(START + 40 * 60, [e["utc"] for e in events])
 
+    def test_a_window_holds_only_the_recordings_made_in_it(self):
+        """Found in review, 24 November 2026: the window chose the events, and every recording went in anyway."""
+        d = support.CAPTURES / self.session
+        (d / "w00000400.iq").write_bytes(b"\1" * 1000)
+        with open(d / "events.jsonl", "a", encoding="utf-8") as fh:      # after the cut-short line, like a new boot
+            fh.write("\n" + json.dumps({"event_type": "rf_health", "utc": START + 61}) + "\n")
+            fh.write(json.dumps({"event_type": "window_recording", "name": "w00000001.iq", "state": "written"}) + "\n")
+            fh.write(json.dumps({"event_type": "rf_health", "utc": START + 30 * 60}) + "\n")
+            fh.write(json.dumps({"event_type": "window_recording", "name": "w00000400.iq", "state": "written"}) + "\n")
+        manifest, z, files = self.make(session=self.session, window=(0, 2), everything=True, recordings=True)
+        self.assertIn(f"drives/{self.session}/w00000001.iq", z.namelist())
+        self.assertNotIn(f"drives/{self.session}/w00000400.iq", z.namelist(), "made at minute 30")
+        manifest, z, files = self.make(session=self.session, everything=True, recordings=True)
+        self.assertIn(f"drives/{self.session}/w00000400.iq", z.namelist(), "no window: all of them")
+        self.assertEqual(z.read(f"drives/{self.session}/w00000400.iq"), b"\1" * 1000)
+
+    def test_a_window_without_a_corrected_start_holds_no_recordings_and_says_so(self):
+        """Fourth review round, 24 November 2026: with no session-time.json the window was ignored, and every
+        recording of the drive went in."""
+        d = support.CAPTURES / self.session
+        (d / "session-time.json").unlink()
+        with open(d / "events.jsonl", "a", encoding="utf-8") as fh:      # the drive's events name the recording
+            fh.write("\n" + json.dumps({"event_type": "window_recording", "name": "w00000001.iq", "state": "written"}) + "\n")
+        manifest, z, files = self.make(session=self.session, window=(0, 2), everything=True, recordings=True)
+        self.assertNotIn(f"drives/{self.session}/w00000001.iq", z.namelist())
+        self.assertEqual(manifest["left_out_recordings"][0]["drive"], self.session)
+        manifest, z, files = self.make(session=self.session, everything=True, recordings=True)
+        self.assertIn(f"drives/{self.session}/w00000001.iq", z.namelist(), "without a window: all of them")
+
+    def test_a_recording_is_copied_in_paced_pieces(self):
+        from unittest.mock import patch
+        (support.CAPTURES / self.session / "w00000001.iq").write_bytes(b"\0" * 100_000)
+        pauses = {}
+        for asked in (False, True):
+            with patch.object(support, "PACE_BYTES", 4096), patch.object(support.time, "sleep") as sleep:
+                self.make(session=self.session, everything=True, recordings=asked)
+            pauses[asked] = sleep.call_count
+        self.assertGreaterEqual(pauses[True] - pauses[False], 100_000 // 4096 - 1)
+
     def test_an_unknown_drive_and_bad_options_are_refused(self):
         with self.assertRaises(ValueError):
             support.make(self.out, session="nope", run=answer, doctor={})

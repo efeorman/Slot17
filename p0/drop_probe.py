@@ -131,13 +131,13 @@ def probe(centre_mhz, fs, minutes, gains, do_copy, tag):
         A.check(A.lib.airspy_start_rx(dev, cb, None), "start_rx")
         A.check(A.lib.airspy_set_freq(dev, int(centre_mhz * 1e6)), "set_freq")
 
-        t0 = time.time()
+        t0 = time.monotonic()
         prev = (0, 0)
         prev_t = t0
         deadline = t0 + minutes * 60
-        while not _stop.is_set() and time.time() < deadline:
+        while not _stop.is_set() and time.monotonic() < deadline:
             time.sleep(1.0)
-            t = time.time()
+            t = time.monotonic()
             with c.lock:
                 now = (c.recv, c.dropped)
             r = row(prev, now, t - t0, t - prev_t, fs)
@@ -160,8 +160,8 @@ def probe(centre_mhz, fs, minutes, gains, do_copy, tag):
             A.lib.airspy_stop_rx(dev)
         except OSError:
             pass
-        end = time.time() + 3
-        while time.time() < end:
+        end = time.monotonic() + 3
+        while time.monotonic() < end:
             try:
                 if A.lib.airspy_is_streaming(dev) != 1:
                     break

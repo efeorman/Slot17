@@ -150,7 +150,7 @@ So a recording of the link, replayed later, cannot raise an alert.
 | Ready-made image | `bluetooth=yes` or `no`, and `bluetooth_name=`, in `slot17.txt` |
 | App, the car computer | Settings, Bluetooth to the car computer: the switch and Rename. With this phone connected, off and Rename go over Bluetooth at once; otherwise, and for on, through the server like the Pushover switch, where a change made while the car is off waits up to a day |
 | App, this phone | Set up (the key through the server, then the system's chooser), Use Bluetooth on this phone, Remove |
-| By hand | `python3 -B p0/bluetooth_config.py --show`, `--on [--name N]`, `--off`; `python3 -B p0/bluetooth_link.py adapter [--name N]` |
+| By hand | `python3 -B p0/bluetooth_config.py --show`, `--on [--name N]`, `--off`, `--new-key` (every phone sets up again; the link takes it when the publisher restarts); `python3 -B p0/bluetooth_link.py adapter [--name N]` |
 | Doctor | A Bluetooth line: off (a note), on with a working adapter, or what is missing |
 
 **What the app shows:**

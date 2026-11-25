@@ -34,6 +34,16 @@ FULL_SCALE = 32767.0
 NEAR_RAIL = 32000
 
 
+def levels(x):
+    """Peak, RMS, headroom (dB) and the share near the digital output's rails, of interleaved int16 samples.
+    Widened first: in int16, abs(-32768) is -32768 again, so a capture clipped on the negative rail read as
+    having no peak and no clipping (found in review, 24 November 2026)."""
+    a = np.abs(x.astype(np.int32))
+    peak = float(a.max()) if a.size else 0.0
+    rms = float(np.sqrt(np.mean(x.astype(np.float64) ** 2))) if a.size else 0.0
+    return peak, rms, 20 * np.log10(FULL_SCALE / max(peak, 1.0)), float(np.mean(a >= NEAR_RAIL)) if a.size else 0.0
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -88,10 +98,7 @@ def main():
     probe = min(n_have, 2_000_000)
     off = ((n_have - probe) // 2) * BYTES_PER_SAMPLE
     x = np.fromfile(raw, dtype=np.int16, count=probe * 2, offset=off)
-    peak = float(np.max(np.abs(x)))
-    rms = float(np.sqrt(np.mean(x.astype(np.float64) ** 2)))
-    headroom_db = 20 * np.log10(FULL_SCALE / max(peak, 1.0))
-    clip_frac = float(np.mean(np.abs(x) >= NEAR_RAIL))
+    peak, rms, headroom_db, clip_frac = levels(x)
 
     meta = {
         "file": os.path.basename(raw),

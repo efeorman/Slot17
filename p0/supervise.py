@@ -260,6 +260,15 @@ def service_notify(message):
         return False
 
 
+def fresh(snap, now_mono):
+    """The heartbeat was written, and analysis last succeeded, within 10 s. On the monotonic clock when the
+    heartbeat has it (the Pi boots on a stale clock that steps later; a step between two UTC readings made a
+    working child look stale), else on UTC as before."""
+    if snap.get('t_mono') is not None and snap.get('last_success_mono') is not None:
+        return (0 <= now_mono - snap['t_mono'] <= 10) and (0 <= now_mono - snap['last_success_mono'] <= 10)
+    return (0 <= time.time() - snap.get('t', 0) <= 10) and (0 <= time.time() - snap.get('last_success_utc', 0) <= 10)
+
+
 def monitor(child, opts, stop, log, hardware=None):
     """Watch one child until it ends. Returns clean / stall / crash.
 
@@ -283,7 +292,7 @@ def monitor(child, opts, stop, log, hardware=None):
     last_windows = None
     last_window_change = time.monotonic()
     start = time.monotonic()
-    ready_announced = False
+    ready_announced = ready_unsent = False
     while True:
         rc = child.poll()
         if rc is not None:
@@ -296,12 +305,16 @@ def monitor(child, opts, stop, log, hardware=None):
             snap = None
         now = time.monotonic()
         if (not ready_announced and snap is not None and snap.get('pid') == child.pid
-                and snap.get('ready') and snap.get('windows', 0) > 0
-                and 0 <= time.time()-snap.get('t', 0) <= 10
-                and 0 <= time.time()-snap.get('last_success_utc', 0) <= 10):
-            service_notify('READY=1\nSTATUS=Receiving; first analysis window completed')
-            log('READY: checked current child and completed analysis window')
-            ready_announced = True
+                and snap.get('ready') and snap.get('windows', 0) > 0 and fresh(snap, now)):
+            sent = service_notify('READY=1\nSTATUS=Receiving; first analysis window completed')
+            # Until 24 November 2026 a READY that couldn't be sent counted as sent, and systemd, never told,
+            # stopped a working detector at its start limit (found in review). Sent again while it stays ready.
+            if sent or not os.environ.get('NOTIFY_SOCKET'):
+                log('READY: checked current child and completed analysis window')
+                ready_announced = True
+            elif not ready_unsent:
+                log('READY could not be sent to systemd; sending it again while the detector stays ready')
+                ready_unsent = True
         if snap is not None and "samples_in" in snap:
             if snap["samples_in"] != last_samples:
                 # Proof of recovery is samples ADVANCING between two

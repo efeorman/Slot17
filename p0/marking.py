@@ -7,6 +7,27 @@ import time
 from pipeline import emit
 
 
+def boot_id():
+    try:
+        return Path("/proc/sys/kernel/random/boot_id").read_text().strip() or None
+    except OSError:
+        return None
+
+
+BOOT_ID = boot_id()
+
+
+def age_of(mark, utc):
+    """How long ago the sighting was. On the monotonic clock when the writer put its reading there on this same
+    boot: a UTC step between writing and reading (the Pi boots on a stale clock) made a fresh sighting look old
+    and lose its recording (found in review, 24 November 2026). Else from UTC, as before."""
+    mono = mark.get("mono")
+    if (BOOT_ID is not None and mark.get("boot") == BOOT_ID and isinstance(mono, (int, float))
+            and math.isfinite(mono)):
+        return time.monotonic() - float(mono)
+    return time.time() - utc
+
+
 class Marks:
     def __init__(self, ctx, ring):
         self.ctx, self.ring = ctx, ring
@@ -30,7 +51,7 @@ class Marks:
                 utc = float(mark["utc"])
                 if not math.isfinite(utc):
                     raise ValueError("mark time is not a finite number")
-                age = time.time() - utc
+                age = age_of(mark, utc)
                 event = {"schema_version": 2, "event_type": "human_observation", "mark_id": path.stem,
                          "utc": utc, "label": str(mark.get("label", "unknown"))[:80],
                          "note": str(mark.get("note", ""))[:2000], "source": "human; not inferred from RF"}

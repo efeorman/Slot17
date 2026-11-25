@@ -313,6 +313,48 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(supervise.monitor(child, opts, stop, lambda _: None), 'clean')
             self.assertEqual(announce.call_count, int(snap == good))
 
+    def test_a_utc_step_does_not_hold_back_ready(self):
+        """Found in review, 24 November 2026: freshness compared two UTC readings, so a clock step (the Pi boots on
+        a stale clock) between the child's heartbeat and the supervisor's reading made a working child look old."""
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        import supervise
+        now = time.monotonic()
+        snap = {'pid': 9000, 'ready': True, 'windows': 1, 'samples_in': 18000000,
+                't': 1000, 'last_success_utc': 1000,                    # written before a 12-hour step
+                't_mono': now - 1, 'last_success_mono': now - 1}
+        opts = SimpleNamespace(stall_timeout=20, grace=10, startup_grace=20, heartbeat='unused')
+        stop = SimpleNamespace(is_set=lambda: False, wait=lambda _: None)
+        child = Mock(pid=9000)
+        child.poll.side_effect = [None, 0]
+        with patch.object(supervise, 'read_heartbeat', return_value=snap), \
+             patch.object(supervise.time, 'time', return_value=1000 + 12 * 3600), \
+             patch.object(supervise, 'service_notify') as announce:
+            supervise.monitor(child, opts, stop, lambda _: None)
+        self.assertEqual(announce.call_count, 1)
+
+    def test_a_ready_that_could_not_be_sent_is_sent_again(self):
+        """Found in review, 24 November 2026: a READY that failed to send counted as sent, and systemd stopped a
+        working detector at its start limit, with Restart=no."""
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        import os
+        import supervise
+        good = {'pid': 9000, 'ready': True, 'windows': 1, 't': 1000, 'last_success_utc': 1000, 'samples_in': 1}
+        opts = SimpleNamespace(stall_timeout=20, grace=10, startup_grace=20, heartbeat='unused')
+        stop = SimpleNamespace(is_set=lambda: False, wait=lambda _: None)
+        child = Mock(pid=9000)
+        child.poll.side_effect = [None, None, None, 0]
+        logs = []
+        with patch.dict(os.environ, {'NOTIFY_SOCKET': '/run/systemd/notify'}), \
+             patch.object(supervise, 'read_heartbeat', return_value=good), \
+             patch.object(supervise.time, 'time', return_value=1000), \
+             patch.object(supervise, 'service_notify', side_effect=[False, True]) as announce:
+            supervise.monitor(child, opts, stop, logs.append)
+        self.assertEqual(announce.call_count, 2, "sent again, then not a third time")
+        self.assertTrue(any("could not be sent" in line for line in logs))
+        self.assertTrue(any(line.startswith("READY: checked") for line in logs))
+
     def test_preflight_refuses_busy_receiver_before_discovering_tests(self):
         import contextlib
         import io
@@ -326,6 +368,13 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(preflight.main(), 1)
         discover.assert_not_called()
         self.assertFalse(json.loads(output.getvalue())['tests_started'])
+
+    def test_preflight_counts_skipped_tests_by_reason(self):
+        """A pass with skips says so in the verdict (25 November 2026: 27 updater tests skipped unseen)."""
+        import preflight
+        result = types.SimpleNamespace(skipped=[(None, "needs the cryptography package")] * 3 + [(None, "Linux only")])
+        self.assertEqual(preflight.skipped(result), {"needs the cryptography package": 3, "Linux only": 1})
+        self.assertEqual(preflight.skipped(types.SimpleNamespace(skipped=[])), {})
 
     def test_idle_guard_holds_detector_lock_and_checks_legacy_tools(self):
         import instance
@@ -522,6 +571,29 @@ class RuntimeTests(unittest.TestCase):
             ctx.stats.worker_alive = False
             watch.write_heartbeat(path, ctx, ring, time.time())
             self.assertFalse(json.loads(Path(path).read_text())["ready"])
+
+    def test_the_heartbeat_is_ready_across_a_utc_step(self):
+        """The last success 1 s ago on the monotonic clock is fresh, whatever UTC did since (found in review)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = watch.Ctx(stats=watch.Stats(), t_start=time.time(), centre=382.5)
+            ring = watch.Ring(10)
+            ring.push(np.ones(20, np.int16))
+            path = str(Path(tmp) / "heartbeat")
+            ctx.stats.last_success_utc = time.time()
+            ctx.stats.last_success_mono = time.monotonic() - 1
+            watch.write_heartbeat(path, ctx, ring, time.time() + 12 * 3600)      # the clock stepped 12 h
+            beat = json.loads(Path(path).read_text())
+            self.assertTrue(beat["ready"])
+            self.assertAlmostEqual(beat["t_mono"], time.monotonic(), delta=5)
+
+    def test_a_fresh_sighting_keeps_its_recording_across_a_utc_step(self):
+        import marking
+        now = time.monotonic()
+        mark = {"utc": 1000.0, "mono": now - 2, "boot": "this-boot"}         # written 2 s ago, before a step
+        with patch.object(marking, "BOOT_ID", "this-boot"), patch.object(marking.time, "time", return_value=1000 + 43200):
+            self.assertAlmostEqual(marking.age_of(mark, 1000.0), 2, delta=1)
+            self.assertAlmostEqual(marking.age_of(dict(mark, boot="another-boot"), 1000.0), 43200, delta=1)
+            self.assertAlmostEqual(marking.age_of({"utc": 1000.0}, 1000.0), 43200, delta=1, msg="older writers")
 
     def test_pipeline_failure_does_not_advance_completed_windows(self):
         ctx = watch.Ctx(stats=watch.Stats(), fs=1000, t_start=time.time(), centre=382.5)

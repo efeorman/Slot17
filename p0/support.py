@@ -153,16 +153,21 @@ def _clock_steps(path):
     return steps
 
 
-def events(path, start_utc=None, window=None, everything=False, pace=None):
+def events(path, start_utc=None, window=None, everything=False, pace=None, recorded=None):
     """The lines of a drive's events.jsonl worth reading, as text.
 
     Without `everything`: no per-candidate lines (confirmed matches stay), and the 200-channel table only every
     CHANNEL_TABLE_EVERY windows. `window` = (first, last) minute after the drive's start; it needs `start_utc`.
+    `recorded`, a set: the names of the recordings made in the window (all of them without one) are added to it.
+    A recording's event has no time of its own, so it counts at the last time before it (found in review,
+    24 November 2026: until then a window left the recordings out of account, and every one went in).
     """
     steps = _clock_steps(path) if window else []
     later = sum(d for _, d in steps)                  # what lines before the first step still need added
     step_at = dict(steps)
     health = 0
+    at = None                                         # minutes since the start, of the last line with a time
+    inside = (lambda m: m is not None and window[0] <= m <= window[1]) if window and start_utc is not None else None
     with open(path, "rb") as fh:
         for n, raw in enumerate(fh):
             if pace:
@@ -176,12 +181,17 @@ def events(path, start_utc=None, window=None, everything=False, pace=None):
             if not isinstance(event, dict):
                 continue
             kind = event.get("event_type")
+            if inside is not None:
+                t = _event_time(event)
+                if t is not None:
+                    at = (t + later - start_utc) / 60
+            if (recorded is not None and kind in ("window_recording", "mark_recording")
+                    and isinstance(event.get("name"), str) and (inside is None or inside(at))):
+                recorded.add(event["name"])
             if not everything and kind == "candidate" and event.get("classification") != "tetra_training_match":
                 continue
-            if window and start_utc is not None:
-                t = _event_time(event)
-                if t is not None and not window[0] * 60 <= t + later - start_utc <= window[1] * 60:
-                    continue
+            if inside is not None and t is not None and not inside(at):
+                continue
             if kind == "rf_health" and not everything:
                 health += 1
                 if health % CHANNEL_TABLE_EVERY:
@@ -206,6 +216,17 @@ class Pacer:
         if self.count >= PACE_BYTES:
             self.count = 0
             time.sleep(PACE_S)
+
+
+def store(z, path, name, pace):
+    """A recording into the package uncompressed, in paced pieces like everything else (until 24 November 2026
+    it was copied in one go, which a capture running beside it felt; found in review)."""
+    info = zipfile.ZipInfo.from_file(path, name)
+    info.compress_type = zipfile.ZIP_STORED
+    with open(path, "rb") as src, z.open(info, "w", force_zip64=True) as dst:
+        for block in iter(lambda: src.read(PACE_BYTES), b""):
+            dst.write(block)
+            pace(len(block))
 
 
 def dropped_now():
@@ -315,10 +336,11 @@ def make(out, session=None, window=None, everything=False, recordings=False, run
                 continue
             if progress:
                 progress("the drive's events")
+            recorded = set()
             if (folder / "events.jsonl").exists():
                 with z.open(f"drives/{r['session']}/events.jsonl", "w", force_zip64=True) as fh:
                     size = 0
-                    for line in events(folder / "events.jsonl", r["start_utc"], window, everything, pace):
+                    for line in events(folder / "events.jsonl", r["start_utc"], window, everything, pace, recorded):
                         data = line.encode("utf-8")
                         fh.write(data)
                         size += len(data)
@@ -326,11 +348,18 @@ def make(out, session=None, window=None, everything=False, recordings=False, run
             for mark in sorted((folder / "marks").glob("*")) if (folder / "marks").is_dir() else []:
                 if mark.is_file() and mark.stat().st_size < 1 << 20:
                     add(f"drives/{r['session']}/marks/{mark.name}", redact(mark.read_text(encoding="utf-8", errors="replace")))
-            if recordings:
+            if recordings and window and r["start_utc"] is None:
+                # Without the drive's corrected start the minutes can't be found, so no recording is known to
+                # be in them: none goes in, and the manifest says why (fourth review round, 24 November 2026).
+                manifest.setdefault("left_out_recordings", []).append(
+                    {"drive": r["session"], "why": "the drive has no corrected start time, so the window can't be applied"})
+            elif recordings:
                 for rec in sorted(folder.glob("w*.iq")):
+                    if window and rec.name not in recorded:
+                        continue                      # made outside the chosen minutes
                     if progress:
                         progress(f"recording {rec.name}")
-                    z.write(rec, f"drives/{r['session']}/{rec.name}", compress_type=zipfile.ZIP_STORED)
+                    store(z, rec, f"drives/{r['session']}/{rec.name}", pace)
                     manifest["files"][f"drives/{r['session']}/{rec.name}"] = rec.stat().st_size
         manifest.update(seconds=round(time.monotonic() - started, 1), dropped_samples_before=before,
                         dropped_samples_after=dropped_now())

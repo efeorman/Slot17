@@ -340,7 +340,9 @@ if [ "$CALIBRATE" = ask ]; then
     echo "  (390-395 MHz) for a few seconds to measure it. The antenna must be connected."
     ask_yes "Calibrate now?" y && CALIBRATE=yes || CALIBRATE=no
 fi
+RECEIVER_OPENED=0
 if [ "$CALIBRATE" = yes ]; then
+    RECEIVER_OPENED=1       # whether the capture worked or not, the receiver has been opened once this power-up
     if python3 -B "$PROJECT/p0/capture.py" --freq 392.5 --secs 4 --rate 3 --lna 12 --mixer 12 --vga 12 \
             --tag downlink-calibration >/dev/null 2>&1 \
        && (cd "$PROJECT/p0" && python3 -B calibrate.py 2>&1 | tail -4); then
@@ -352,6 +354,13 @@ fi
 
 # --- 12. start ----------------------------------------------------------------
 step "Starting the detector"
+# One opening of the receiver per power-up: an Airspy can stop responding when it is started a second time
+# (README, Limits). Until 24 November 2026 the two default answers calibrated and then started it (found in
+# review); now a calibration leaves the start to the next power-up, even when --start was given.
+if [ "$RECEIVER_OPENED" = 1 ] && [ "$START" != no ]; then
+    START=no
+    note "not started now: the calibration has just used the receiver, and a second start in the same power-up can make it stop responding. $([ "$AUTOSTART" = 1 ] && echo "It starts by itself at the next power-up." || echo "After the next power-up, start it with: sudo systemctl start $SERVICE")"
+fi
 if [ "$START" = ask ]; then
     if airspy_present; then
         ask_yes "Start it now?" y && START=yes || START=no

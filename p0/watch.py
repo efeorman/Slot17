@@ -588,7 +588,11 @@ def write_heartbeat(path, ctx, ring, now_t):
     and renamed so a reader never sees a half-written line.
     """
     st = ctx.stats
+    mono = time.monotonic()
     data = {"schema_version": 2, "t": round(now_t, 2), "pid": os.getpid(),
+            # The same moments on the clock a UTC step can't move (24 November 2026, found in review): for the
+            # supervisor's freshness check, on the same boot.
+            "t_mono": round(mono, 3), "last_success_mono": st.last_success_mono,
             "elapsed_s": round(_elapsed(ctx, now_t), 1),
             "clock_steps": st.clock_steps, "clock_offset_s": round(st.clock_offset, 3),
             "samples_in": int(ring.write), "windows": st.windows,
@@ -634,8 +638,11 @@ def write_heartbeat(path, ctx, ring, now_t):
     data['window_s'] = WINDOW_S
     data["degraded_reasons"] = degraded_reasons(st, data["recorder"], data["host_health"])
     data["degraded"] = bool(data["degraded_reasons"])
-    data["ready"] = bool(st.worker_alive and st.last_success_utc is not None
-                         and 0 <= now_t - st.last_success_utc < 10)
+    if st.last_success_mono is not None:
+        fresh = 0 <= mono - st.last_success_mono < 10
+    else:
+        fresh = st.last_success_utc is not None and 0 <= now_t - st.last_success_utc < 10
+    data["ready"] = bool(st.worker_alive and fresh)
     try:
         recording.atomic_json(path, data, durable=False)
         st.last_heartbeat_error = None

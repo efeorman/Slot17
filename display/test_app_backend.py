@@ -3,6 +3,7 @@
 These run the real server and the real publisher's Sender over a real socket. Nothing here can
 power anything off or touch a receiver: every command runner is replaced with a recorder.
 """
+import base64
 import http.client
 import json
 from pathlib import Path
@@ -14,6 +15,7 @@ from types import SimpleNamespace
 import unittest
 import unittest.mock
 import urllib.error
+import zlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import display_publisher as pub  # noqa: E402
@@ -968,6 +970,43 @@ class BluetoothSwitch(Base):
         paired = self.answer("d" * 32, pair=True)
         self.assertEqual(paired["detail"], "key:" + self.config.load()["key"].hex())
         self.assertNotIn(self.config.load()["key"].hex(), json.dumps(self.reported()))
+
+    def test_the_key_never_goes_out_over_bluetooth(self):
+        """1.6.0 put the pairing answer, key and all, in the Bluetooth state, which a phone nearby reads without
+        the key (SECURITY.md): the server's answer carries it, the Bluetooth state and the file on disk don't."""
+        self.cycle()
+        self.answer(ID_A, on=True)
+        key = self.config.load()["key"].hex()
+        self.assertEqual(self.answer("d" * 32, pair=True)["detail"], "key:" + key)
+        doc = self.pub.bluetooth_state(time.monotonic())
+        self.assertNotIn(key, json.dumps(doc))
+        self.assertNotIn("d" * 32, [a["id"] for a in doc["ops"]])
+        fed = []
+        self.pub.bluetooth.feed = fed.append
+        self.pub._feed_state(time.monotonic())
+        self.assertTrue(fed)
+        for line in fed:
+            self.assertNotIn(key, zlib.decompress(base64.b64decode(line["state"]), -15).decode("utf-8"))
+        # Asked again with the same id (the phone missed the answer), it runs again rather than "running".
+        self.assertIsNone(self.pub.ops_seen.seen("d" * 32))
+        self.assertEqual(self.answer("d" * 32, pair=True)["detail"], "key:" + key)
+
+    def test_answers_on_disk_never_hold_the_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ops-seen.json"
+            path.write_text(json.dumps([["e" * 32, "done", "Bluetooth on"], ["f" * 32, "done", "key:" + "ab" * 32]]),
+                            encoding="utf-8")
+            memory = pub.OpMemory(path)          # 1.6.0's file: the key in it goes, the rest stays
+            self.assertEqual(memory.seen("e" * 32), ("done", "Bluetooth on"))
+            self.assertIsNone(memory.seen("f" * 32))
+            self.assertNotIn("key:", path.read_text(encoding="utf-8"))
+            self.pub.ops_seen = memory
+            self.cycle()
+            self.answer(ID_A, on=True)
+            self.answer("c" * 32, pair=True)
+            saved = path.read_text(encoding="utf-8")
+            self.assertNotIn(self.config.load()["key"].hex(), saved)
+            self.assertIn(ID_A, saved)
 
     def test_only_one_well_formed_request_is_accepted(self):
         for wrong in ({"on": "yes"}, {"name": "a;b"}, {"name": " x"}, {"name": "x" * 21}, {"pair": False},

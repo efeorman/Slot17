@@ -1,0 +1,4 @@
+# Slot17 image: remove the first start's sudo grant at every boot, early (systemd-tmpfiles-setup.service),
+# before anyone can log in. firstboot.sh writes it again for the one run that needs it and removes it after;
+# this covers a power cut in between. Installed as /etc/tmpfiles.d/slot17-firstboot.conf.
+r /etc/sudoers.d/90-slot17-firstboot

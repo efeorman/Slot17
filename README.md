@@ -459,11 +459,13 @@ pip install -r requirements-dev.txt
 python -B p0/preflight.py --offline --tests
 ```
 
-You should see `OK` and `"offline_preflight_pass": true`.
+You should see `OK` and `"offline_preflight_pass": true`. Tests that couldn't run are listed under `tests_skipped`; without the `cryptography` package, for example, the 27 tests of signed updates skip. Set `SLOT17_REQUIRE_CRYPTOGRAPHY=1` to make that a failure instead.
+
+The public repository runs these tests by itself, on every push to `main` and every pull request (the **Tests** workflow), and a release is published only after they pass.
 
 | Command | What it covers |
 |---|---|
-| `python -B p0/preflight.py --offline --tests` | The detector: 235 tests. Before every detector start the car computer runs them only if its code changed since they last passed, and in any case every 20th start; otherwise a smoke test of a few seconds (`--tests-if-changed`) |
+| `python -B p0/preflight.py --offline --tests` | The detector: 258 tests. Before every detector start the car computer runs them only if its code changed since they last passed, and in any case every 20th start; otherwise a smoke test of a few seconds (`--tests-if-changed`) |
 | `python -m unittest display/test_hardening.py` | Server and car computer limits |
 | `python -m unittest display/test_app_backend.py` | What the app uses on the server |
 | `python -m unittest display/test_display.py` | Display logic |

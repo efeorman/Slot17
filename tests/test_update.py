@@ -6,9 +6,11 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import subprocess
 import tarfile
 import tempfile
 import unittest
+import unittest.mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "p0"))
 import update  # noqa: E402
@@ -18,6 +20,13 @@ try:
     from cryptography.hazmat.primitives import serialization
 except ImportError:                     # the updater is simply off on such a machine
     Ed25519PrivateKey = None
+
+# Where the updater must be tested (a release being signed, CI), SLOT17_REQUIRE_CRYPTOGRAPHY=1 turns a missing
+# package into an error instead of 27 quiet skips (found in review, 25 November 2026). A car computer never sets
+# it: without the package its updates are off, and its detector must still start.
+if Ed25519PrivateKey is None and os.environ.get("SLOT17_REQUIRE_CRYPTOGRAPHY") == "1":
+    raise ImportError("SLOT17_REQUIRE_CRYPTOGRAPHY=1 but the cryptography package is missing, so the updater "
+                      "can't be tested: pip install -r requirements-dev.txt")
 
 
 def bundle(key, seq, files, commit="abcdef1234567", manifest_files=None):
@@ -213,6 +222,189 @@ class Installing(Base):
         self.assertEqual((self.root / "p0/watch.py").read_text(), "OLD = 1\n")
 
 
+class AfterReview(Base):
+    """Found in review on 24 November 2026; each test fails on the updater before that day."""
+
+    def test_a_file_changed_on_the_card_after_fetching_is_fetched_again_not_installed(self):
+        self.publish(3, self.NEW)
+        self.updater.fetch()
+        (self.root / "releases/update/staged/3/p0/watch.py").write_bytes(b"BAD = 2\n")      # same length
+        self.assertEqual(self.updater.apply(), "incomplete")
+        self.assertEqual((self.root / "p0/watch.py").read_text(), "OLD = 1\n")
+        self.assertEqual(self.updater.staged(), 0)
+        self.assertEqual(self.updater.fetch(), "staged", "fetched again, not held against the release")
+
+    def test_a_file_changed_while_it_is_tested_puts_the_old_release_back(self):
+        self.publish(3, self.NEW)
+        self.updater.fetch()
+
+        def test_and_damage(seq, manifest, limit):
+            (self.root / "releases/update/staged/3/tests/test_new.py").write_bytes(b"X = 9\n")
+            return ""
+        self.updater._test = test_and_damage
+        self.assertEqual(self.updater.apply(), "put back")
+        self.assertEqual((self.root / "p0/watch.py").read_text(), "OLD = 1\n")
+        self.assertEqual((self.root / "display/display_publisher.py").read_text(), "OLD = 1\n")
+        self.assertFalse((self.root / "tests/test_new.py").exists(), "a file the release added goes too")
+        self.assertFalse((self.root / "releases/update/applying.json").exists())
+        self.assertEqual(self.updater.installed()["seq"], 0)
+        self.assertEqual(self.updater.status()["state"], "error")
+
+    def test_a_power_cut_while_a_backup_is_written_leaves_a_whole_backup(self):
+        class Cut(BaseException):
+            """The power going: no except clause sees it."""
+        calls = []
+
+        def cut_once(real):
+            def copy(src, dst, *a, **kw):
+                if calls:
+                    return real(src, dst, *a, **kw)
+                calls.append(1)
+                if isinstance(src, (str, Path)):                 # shutil.copy2(src, dst)
+                    Path(dst).write_bytes(Path(src).read_bytes()[:3])
+                else:                                             # shutil.copyfileobj(fsrc, fdst)
+                    dst.write(src.read()[:3])
+                    dst.flush()
+                raise Cut
+            return copy
+        self.publish(3, self.NEW)
+        self.updater.fetch()
+        with unittest.mock.patch.object(update.shutil, "copy2", cut_once(shutil.copy2)), \
+                unittest.mock.patch.object(update.shutil, "copyfileobj", cut_once(shutil.copyfileobj)):
+            with self.assertRaises(Cut):
+                self.updater.apply()
+        self.make(boot="boot-2").start(has_route=False)
+        self.assertEqual((self.root / "display/display_publisher.py").read_bytes(), b"NEW = 2\n")
+        # The files go in sorted order, so the cut was in the publisher's backup, the first one.
+        self.assertEqual((self.root / "releases/update/backup-3/display/display_publisher.py").read_text(), "OLD = 1\n")
+
+    def test_an_older_version_is_refused_where_no_release_was_installed_yet(self):
+        (self.root / "p0/version.py").write_text('SOFTWARE = "1.6.0"\n')
+        self.assertFalse((self.root / "releases/update/installed.json").exists())   # a fresh install
+        self.publish(2, dict(self.NEW, **{"p0/version.py": b'SOFTWARE = "1.5.1"\n'}))
+        self.assertEqual(self.updater.fetch(), "staged")
+        self.assertEqual(self.updater.apply(), "rejected")
+        self.assertIn("older than the installed software (1.5.1 < 1.6.0)", self.updater.status()["detail"])
+        self.assertEqual((self.root / "p0/watch.py").read_text(), "OLD = 1\n")
+        self.publish(3, dict(self.NEW, **{"p0/version.py": b'SOFTWARE = "1.6.0"\n'}))
+        self.updater.fetch()
+        self.assertEqual(self.updater.apply(), "installed", "the same version is no downgrade")
+
+    def test_checks_that_ran_out_of_time_are_tried_again_not_held_against_the_release(self):
+        self.publish(3, self.NEW)
+        self.updater.fetch()
+        self.verdict = "checks took longer than 70 s"
+        self.assertEqual(self.updater.apply(), "postponed")
+        self.assertEqual(self.updater.staged(), 3)
+        self.assertEqual(self.updater.status()["state"], "staged")
+        self.assertIn("tried again at the next start (1 of 3)", self.updater.status()["detail"])
+        self.assertEqual((self.root / "p0/watch.py").read_text(), "OLD = 1\n")
+        self.verdict = ""
+        self.assertEqual(self.make(boot="boot-2").apply(), "installed")
+
+    def staged_fails(self, path):
+        """The card can't give back one staged file as signed any more (its digest is wrong from now on)."""
+        real = update.sha256_of
+        bad = self.root / "releases/update/staged/3" / path
+        return unittest.mock.patch.object(update, "sha256_of", lambda p: "unreadable" if Path(p) == bad else real(p))
+
+    def test_a_file_the_release_added_goes_when_a_resumed_install_is_put_back(self):
+        """Third round, 24 November 2026 (F32): after a cut, the resumed install backed up the file the release had
+        just added, as if it were the old release's, and putting back kept it."""
+        class Cut(BaseException):
+            pass
+        self.publish(3, self.NEW)
+        self.updater.fetch()
+        with unittest.mock.patch.object(update.Updater, "_finish", side_effect=Cut):
+            with self.assertRaises(Cut):
+                self.updater.apply()                # every file in, then the power goes
+        self.assertTrue((self.root / "tests/test_new.py").exists())
+        with self.staged_fails("tests/test_new.py"):
+            self.assertEqual(self.make(boot="boot-2").apply(), "put back")
+        self.assertFalse((self.root / "tests/test_new.py").exists())
+        self.assertEqual((self.root / "p0/watch.py").read_text(), "OLD = 1\n")
+        self.assertEqual((self.root / "display/display_publisher.py").read_text(), "OLD = 1\n")
+
+    def test_a_cut_after_the_install_record_only_finishes_the_cleanup(self):
+        """Third round, 24 November 2026: a cut between the new install record and the journal's removal made the
+        next start replace everything again; a failure there put the old files back under the new record."""
+        class Cut(BaseException):
+            pass
+        self.publish(3, self.NEW)
+        self.updater.fetch()
+        real_write = update.Updater._write
+
+        def write_then_cut(updater, name, data):
+            real_write(updater, name, data)
+            if name == "installed.json":
+                raise Cut
+        with unittest.mock.patch.object(update.Updater, "_write", write_then_cut):
+            with self.assertRaises(Cut):
+                self.updater.apply()
+        later = self.make(boot="boot-2")
+        with self.staged_fails("p0/watch.py"):
+            self.assertEqual(later.apply(), "finished an interrupted install")
+        self.assertEqual((self.root / "p0/watch.py").read_bytes(), b"NEW = 2\n")
+        self.assertEqual(later.installed()["seq"], 3)
+        self.assertFalse((self.root / "releases/update/applying.json").exists())
+
+    def test_a_cut_while_putting_back_still_ends_with_the_old_release_whole(self):
+        class Cut(BaseException):
+            pass
+        self.publish(3, self.NEW)
+        self.updater.fetch()
+        real = update.write_durably
+        restores = []
+
+        def cut_at_the_first_restore(source, target, keep_times=False):
+            if "backup-3" in str(source) and not restores:
+                restores.append(target)
+                raise Cut
+            return real(source, target, keep_times)
+        def test_and_damage(seq, manifest, limit):  # after the checks before testing, so the install itself fails
+            (self.root / "releases/update/staged/3/tests/test_new.py").write_bytes(b"X = 9\n")
+            return ""
+        self.updater._test = test_and_damage
+        with unittest.mock.patch.object(update, "write_durably", cut_at_the_first_restore):
+            with self.assertRaises(Cut):
+                self.updater.apply()                # the install fails, and the power goes while putting back
+        self.assertEqual(len(restores), 1)
+        self.assertEqual(self.make(boot="boot-2").apply(), "put back")
+        self.assertEqual((self.root / "p0/watch.py").read_text(), "OLD = 1\n")
+        self.assertEqual((self.root / "display/display_publisher.py").read_text(), "OLD = 1\n")
+        self.assertFalse((self.root / "tests/test_new.py").exists())
+        self.assertEqual(self.updater.installed()["seq"], 0)
+
+    def test_a_lost_backup_folder_is_never_put_back_as_the_old_release(self):
+        """Fourth round, 24 November 2026 (F34): a power cut that loses the backup folder made the resumed install back
+        up the already-new file, and "put back" left new contents under the old release's number. Now the install
+        says it could not put the old release back, keeps its journal, and finishes at a later start."""
+        class Cut(BaseException):
+            pass
+        self.publish(3, self.NEW)
+        self.updater.fetch()
+        with unittest.mock.patch.object(update.Updater, "_finish", side_effect=Cut):
+            with self.assertRaises(Cut):
+                self.updater.apply()                # every file in, then the power goes
+        shutil.rmtree(self.root / "releases/update/backup-3")             # and the folder's name with it
+        with self.staged_fails("tests/test_new.py"):
+            later = self.make(boot="boot-2")
+            self.assertEqual(later.apply(), "not put back")
+        self.assertIn("could not be put back", later.status()["detail"])
+        self.assertTrue((self.root / "releases/update/applying.json").exists(), "kept for the next start")
+        self.assertEqual(later.installed()["seq"], 0)
+        self.assertEqual(self.make(boot="boot-3").apply(), "finished an interrupted install")
+        self.assertEqual((self.root / "p0/watch.py").read_bytes(), b"NEW = 2\n")
+        self.assertEqual(self.updater.installed()["seq"], 3)
+
+    def test_checks_that_never_finish_in_time_reject_it_at_the_third_start(self):
+        self.publish(3, self.NEW)
+        self.updater.fetch()
+        self.verdict = "could not test: OSError"
+        self.assertEqual([self.updater.apply() for _ in range(3)], ["postponed", "postponed", "rejected"])
+        self.assertIn("3 starts running", self.updater.status()["detail"])
+
+
 # Not inside the updater's own test run: that run includes this file, and would start itself again.
 @unittest.skipUnless(Ed25519PrivateKey and not os.environ.get("SLOT17_UPDATE_TEST"), "needs the cryptography package")
 class RealChecks(unittest.TestCase):
@@ -234,6 +426,53 @@ class RealChecks(unittest.TestCase):
             self.assertEqual(updater.apply(limit=120), "rejected")
             self.assertEqual((root / "p0/phy.py").read_bytes(), (repo / "p0/phy.py").read_bytes())
             self.assertIn("checks failed", updater.status()["detail"])
+            # Rejected for the broken file, not because a test module couldn't even load in the copy (a test that
+            # read deploy/ at import was rejected like this, on 24 November 2026, and so was every release with it).
+            self.assertNotIn("_FailedTest", updater.status()["detail"])
+
+    def test_every_test_module_loads_in_the_copy_the_updater_tests(self):
+        """The updater tests a release in a tree of p0/, tests/ and the publisher only (Updater._test): a test that
+        needs deploy/, scripts/ or anything else there can't load, and every release would be rejected."""
+        repo = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            for folder in ("p0", "tests"):
+                shutil.copytree(repo / folder, Path(tmp) / folder, ignore=shutil.ignore_patterns("__pycache__"))
+            (Path(tmp) / "display").mkdir()
+            shutil.copyfile(repo / "display/display_publisher.py", Path(tmp) / "display/display_publisher.py")
+            done = subprocess.run(
+                [sys.executable, "-B", "-c", "import unittest\n"
+                 "def walk(s):\n"
+                 "    for t in s:\n"
+                 "        yield from walk(t) if isinstance(t, unittest.TestSuite) else [t]\n"
+                 "bad = [t.id() for t in walk(unittest.defaultTestLoader.discover('tests')) if 'FailedTest' in t.id()]\n"
+                 "print(bad or 'all loaded')"],
+                cwd=tmp, capture_output=True, text=True, timeout=120, env=dict(os.environ, SLOT17_UPDATE_TEST="1"))
+            self.assertEqual(done.stdout.strip(), "all loaded", done.stdout + done.stderr[-2000:])
+
+
+class RequiredCryptographyTests(unittest.TestCase):
+    """Never skipped: these say whether a missing package is allowed to pass quietly."""
+
+    def load_without_the_package(self, require):
+        code = ("import sys\n"
+                "sys.modules['cryptography'] = None     # as if it were not installed\n"
+                f"sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})\n"
+                "import test_update\n"
+                "print('loaded', test_update.Ed25519PrivateKey)\n")
+        env = {k: v for k, v in os.environ.items() if k != "SLOT17_REQUIRE_CRYPTOGRAPHY"}
+        if require:
+            env["SLOT17_REQUIRE_CRYPTOGRAPHY"] = "1"
+        return subprocess.run([sys.executable, "-B", "-c", code], capture_output=True, text=True, timeout=60, env=env)
+
+    def test_without_the_package_a_car_computer_only_skips_them(self):
+        done = self.load_without_the_package(require=False)
+        self.assertEqual(done.returncode, 0, done.stderr[-1500:])
+        self.assertIn("loaded None", done.stdout)
+
+    def test_where_it_is_required_a_missing_package_fails(self):
+        done = self.load_without_the_package(require=True)
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertIn("SLOT17_REQUIRE_CRYPTOGRAPHY=1", done.stderr)
 
 
 if __name__ == "__main__":

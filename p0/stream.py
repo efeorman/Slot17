@@ -180,7 +180,7 @@ def main():
                 sess.bytes_written = 0
                 sess.bytes_target = target
                 sess.done.clear()
-            t0 = time.time()
+            t0 = time.monotonic()
             print(f"[{i}/{len(plan)}] {freq_mhz} MHz, {secs:g}s "
                   f"({target/1e6:.0f} MB) ...", end="", flush=True)
 
@@ -191,7 +191,7 @@ def main():
                 sess.fh = None
                 got = sess.bytes_written
             fh.close()
-            elapsed = time.time() - t0
+            elapsed = time.monotonic() - t0
 
             if sess.error:
                 raise sess.error
@@ -255,8 +255,8 @@ def main():
         except OSError as e:
             print(f"airspy_stop_rx raised: {e}")
 
-        deadline = time.time() + 3.0
-        while time.time() < deadline:
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
             try:
                 if A.lib.airspy_is_streaming(dev) != 1:
                     break

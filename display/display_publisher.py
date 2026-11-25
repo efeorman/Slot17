@@ -506,6 +506,11 @@ def write_mark(session, op, wall=None):
     if not finite(age) or age < 0:
         raise ValueError("invalid sighting age")
     mark = {"utc": wall - float(age), "label": op["label"], "note": note, "entered_utc": wall}
+    try:        # the detector measures the sighting's age on this clock, which a UTC step can't move
+        mark.update(mono=time.monotonic() - float(age),
+                    boot=Path("/proc/sys/kernel/random/boot_id").read_text().strip())
+    except OSError:
+        pass
     tmp = inbox / (name + ".tmp")
     tmp.write_text(json.dumps(mark), encoding="utf-8")
     tmp.replace(inbox / name)
@@ -884,6 +889,9 @@ BLUETOOTH_ANSWERS = 16
 BLUETOOTH_OPS = {"mark", "poweroff", "logs", "notify", "doctor", "bluetooth", "support", "stop"}
 OPS_SEEN = Path.home() / ".cache/slot17-ops-seen.json"
 OPS_SEEN_KEEP = 512
+# A pairing answer: "key:" and the Bluetooth key. It goes to the server only, which hands it to the phone that
+# asked: never into the Bluetooth state, which any phone nearby can read without the key, and never on disk.
+PAIRING_ANSWER = "key:"
 
 
 class OpMemory:
@@ -901,13 +909,20 @@ class OpMemory:
         self.lock = threading.Lock()        # answers also come from the log, doctor and support threads
         if self.path is None:
             return
+        dropped = 0
         try:
             rows = json.loads(self.path.read_text(encoding="utf-8"))
             for row in rows[-OPS_SEEN_KEEP:]:
                 if isinstance(row, list) and len(row) == 3 and all(isinstance(x, str) for x in row):
+                    if row[2].startswith(PAIRING_ANSWER):
+                        dropped += 1        # a pairing answer 1.6.0 kept, with the Bluetooth key in it
+                        continue
                     self.answers[row[0]] = (row[1], row[2])
         except (OSError, ValueError, TypeError):
             pass                            # none yet, or unreadable: nothing to remember
+        if dropped:
+            with self.lock:
+                self._save()
 
     def seen(self, op_id):
         """("state", "detail") of an answered one, "running", or None for a new one."""
@@ -920,6 +935,11 @@ class OpMemory:
         with self.lock:
             self.running.add(op_id)
 
+    def forget(self, op_id):
+        """An operation whose answer must not be kept (a pairing's carries the key): asked again, it runs again."""
+        with self.lock:
+            self.running.discard(op_id)
+
     def answer(self, op_id, state, detail):
         with self.lock:
             if op_id not in self.running and op_id not in self.answers:
@@ -929,16 +949,20 @@ class OpMemory:
             self.answers.move_to_end(op_id)
             while len(self.answers) > OPS_SEEN_KEEP:
                 self.answers.popitem(last=False)
-            if self.path is None:
-                return
-            rows = [[k, s, d] for k, (s, d) in self.answers.items()]
-            try:
-                self.path.parent.mkdir(parents=True, exist_ok=True)
-                tmp = self.path.with_suffix(".tmp")
-                tmp.write_text(json.dumps(rows), encoding="utf-8")
-                os.replace(tmp, self.path)
-            except OSError as exc:
-                print(f"operation answers not saved: {type(exc).__name__}: {exc}", flush=True)
+            self._save()
+
+    def _save(self):
+        """Called with the lock held."""
+        if self.path is None:
+            return
+        rows = [[k, s, d] for k, (s, d) in self.answers.items()]
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(rows), encoding="utf-8")
+            os.replace(tmp, self.path)
+        except OSError as exc:
+            print(f"operation answers not saved: {type(exc).__name__}: {exc}", flush=True)
 
 
 def bluetooth_module():
@@ -1407,13 +1431,20 @@ class Publisher:
         self.update_busy = threading.Lock()
 
     def ack(self, op_id, state, detail=""):
+        secret = str(detail).startswith(PAIRING_ANSWER)
         with self.acks_lock:
             self.acks.append({"id": op_id, "state": state, "detail": str(detail)[:160]})
             if op_id in self.answers:
-                self.answers[op_id].update(state=state, detail=str(detail)[:160], at=time.monotonic())
-                self.answers.move_to_end(op_id)
+                if secret:                  # to the server only: the Bluetooth state is readable without the key
+                    del self.answers[op_id]
+                else:
+                    self.answers[op_id].update(state=state, detail=str(detail)[:160], at=time.monotonic())
+                    self.answers.move_to_end(op_id)
                 self.state_due = True
-        self.ops_seen.answer(op_id, state, detail)
+        if secret:
+            self.ops_seen.forget(op_id)
+        else:
+            self.ops_seen.answer(op_id, state, detail)
 
     def taken(self, op):
         """An operation is being carried out: the phone sees "sent" over Bluetooth until its answer."""

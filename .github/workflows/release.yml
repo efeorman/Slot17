@@ -1,6 +1,7 @@
 name: Release
-# Push a tag such as v1.0.1 to test the setup on clean machines and publish a release with
-# slot17.tar.gz, install.sh and SHA256SUMS. Add Slot17.ipa by hand afterwards; it is built on a Mac.
+# Push a tag such as v1.0.1 to test the setup on clean machines, run every test (tests.yml), and only then
+# publish a release with slot17.tar.gz, install.sh and SHA256SUMS. Add Slot17.ipa by hand afterwards; it is
+# built on a Mac.
 on:
   push:
     tags: ["v*"]
@@ -12,8 +13,12 @@ jobs:
   test:
     uses: ./.github/workflows/linux-setup.yml
 
+  # The detector's, server's and scripts' own tests: the setup test above passes whether they do or not.
+  tests:
+    uses: ./.github/workflows/tests.yml
+
   publish:
-    needs: test
+    needs: [test, tests]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

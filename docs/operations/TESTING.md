@@ -76,6 +76,8 @@ bash scripts/test_setup.sh distro debian:12   # packages and checks in a Docker 
 
 The **Linux setup** workflow in GitHub Actions runs both, on Debian 12 and 13 and Ubuntu 22.04 and 24.04. It can't test the receiver, calibration or whether a server is reachable from the internet; those need real hardware.
 
+The **Tests** workflow in GitHub Actions runs the detector's, server's, publisher's and scripts' tests on every push to `main` and every pull request in the public repository, with `SLOT17_REQUIRE_CRYPTOGRAPHY=1`, so the tests of signed updates can't be skipped there; a release waits for it.
+
 ## 6. Security and load
 
 `display/stress_server.py` attacks a local copy of the server with slow connections, floods, malformed requests and wrong keys, while measuring whether real traffic still gets served. Only run it against a local copy.

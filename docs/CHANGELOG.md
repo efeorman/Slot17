@@ -2,6 +2,129 @@
 
 What changed, why, and what was tried and left out. Newest first. Figures come from our own car, receiver and drives; yours will differ.
 
+## 1.6.1: the Bluetooth key stays off the Bluetooth link, the second review's fixes, and tests on every change (25 November 2026)
+
+Detection is unchanged, and so are the apps (iPhone app 1.9.0, Android app 1.11.0). Signed updates bring the
+detector, the publisher and the updater's own fixes; the setup's and the image's fixes come with the installer or a
+new image.
+
+### Tests on every change
+
+- **A Tests workflow** (`.github/workflows/tests.yml`) runs the detector's tests on the car computer's Python and
+  libraries, the server's and publisher's on Python 3.10 (the display host's) and 3.13, the scripts' tests and the
+  code checks. It runs on every push to `main` and every pull request in the public repository, where it costs
+  nothing. Until now no workflow ran them.
+- **A release waits for it.** The release's installer test passes whether the detector's own checks pass or not,
+  since a detector without a receiver fails either way; now the release is published only after both.
+- **A skipped test is no longer silent.** The offline checks list skipped tests by reason (`tests_skipped`), and
+  note when the `cryptography` package is missing. Without it, all 27 of the updater's tests used to skip and the
+  checks still said "pass". With `SLOT17_REQUIRE_CRYPTOGRAPHY=1`, as the Tests workflow and the release signing
+  set it, a missing package fails instead. A car computer never sets it: without the package its updates are off,
+  and its detector still starts.
+- **Tools that act on a machine refuse arguments they don't know.** `deploy/modem_link.py`, which runs as root on
+  the car computer, used to act whatever it was given, `--help` included. Now `--help` only prints its description
+  and anything else is refused.
+- **`SHA256SUMS` lists the apps too**, from this release on, as CONTRIBUTING.md says.
+
+### Fixes from the second review of the released code (24 November 2026)
+
+A second engineer reviewed the whole repository on 24 November 2026. These are its findings about code
+that is already released (F18 to F30), each reproduced first and each fixed with a test that fails on 1.6.0.
+The record of the review and of every check is kept with the project's own records.
+
+- **Signed updates (`p0/update.py`):**
+  - The signed checksums now stay with a waiting release. The files are checked against them again before they
+    are tested, and as each one is installed. A file damaged on the card is fetched again; it isn't installed.
+    Until now only the file names were kept after the download.
+  - An install that can't be finished puts the old files back, and removes the files the release added. The
+    old release is then whole again, and the new one is fetched again.
+    - **After a power cut too** (the review's third round): a file the release had already added is no longer
+      backed up on resume as if it were the old release's, so putting back removes it.
+    - **A cut after the new install record** only finishes the cleanup at the next start. Before, it replaced
+      everything again, and a failure there put the old files back under the new release's record.
+    - **A backup folder lost in a power cut** (fourth round): new folders are now made durable in their parents.
+      The journal keeps each original's checksum, and only a file that still holds it is backed up or put
+      back. When an original can't be restored, the updater says so and keeps the journal for the next start,
+      instead of reporting "put back" with new contents under the old release's number.
+  - Backups are written through a temporary name. A power cut during a backup used to leave a short file that
+    counted as the backup.
+  - Every rename is made durable, the folder too, before the next step relies on it.
+  - A release older than the installed software, going by `p0/version.py`, is refused. This also holds on a
+    car computer with no record of a release yet (a fresh install from the tarball or the image). The number
+    alone let an older signed release in there.
+  - Checks that ran out of time, or couldn't run at all, are tried again at the next start, up to three starts.
+    Until now a slow card rejected a good release for good.
+  - A new test loads every test module in the copy the updater actually tests (`p0/`, `tests/` and the
+    publisher only). The test of a broken release now also checks why it was rejected: a release can be
+    rejected because a test module couldn't load at all, and that test would still have passed.
+- **One opening of the receiver per power-up (`deploy/setup-car.sh`):** accepting both default answers used to
+  calibrate (one start of the Airspy) and then start the detector (a second one), which the project's rules
+  forbid for this board. Now a calibration leaves the start to the next power-up, even when `--start` was
+  given. The test runs setup's own calibration and start steps in bash, with stand-ins, and counts the
+  openings.
+- **The image's first start (`deploy/image/`):**
+  - The installer's sudo grant for everything used to stay on the card after a power cut during the setup. It
+    now goes first thing at every first-start run, and a tmpfiles rule removes it early at every boot.
+  - A failed removal of the key and hotspot password from `slot17.txt` was still reported as done. Now the
+    file is read back, and the setup counts as finished only when no secret is left in it. That removal is
+    tried again at the next start without running the setup again.
+  - `slot17.txt` with old Mac line endings kept its secrets.
+- **Clocks:**
+  - The supervisor's READY check, the heartbeat's `ready` flag and a sighting's age (which decides whether it
+    keeps its recording) now use the monotonic clock. Before, a UTC step between two readings could hold back
+    READY or cost a fresh sighting its recording.
+  - `antenna.py`, `drop_probe.py` and `stream.py` measure durations on the monotonic clock, as the project's rules
+    require.
+- **READY is sent again** when it couldn't be sent. Before, it counted as sent, and systemd stopped a working
+  detector at its start limit (with `Restart=no`, for the rest of the drive).
+- **Support packages:**
+  - With a time window, only the recordings made in that window go in. Until now every recording went in.
+  - Recordings are copied in paced pieces, like everything else in a package.
+  - A window on a drive with no corrected start time (an interrupted first minute) can't be applied, so no
+    recording goes in, and the manifest says why. Before, every recording did.
+- **Capture metadata:** a capture clipped on the negative rail used to report no peak and no clipping. In
+  int16, abs(-32768) is -32768 again; the samples are now widened first.
+- **The Pi image workflow (CI):**
+  - A run started by hand now builds the tag's own scripts and first-start files, not the branch it was started
+    from.
+  - The image records what it was made from: the Slot17 commit, the tarball and the base image with its
+    SHA-256.
+- **Not changed here:** the `SHA256SUMS` of 1.6.0 and earlier list the tarball and the installer only, not
+  `Slot17.ipa` or `Slot17.apk`. Those published files stay as they are.
+
+### The Bluetooth key stays off the Bluetooth link (24 November 2026)
+
+Found in a code review (24 November 2026), and confirmed by running the publisher.
+
+- **The fault in 1.6.0:**
+  - When a phone set up Bluetooth, the car computer's answer, `key:` followed by the link key, also went into
+    the answers it sends in its Bluetooth state, for 5 minutes.
+  - That state is signed, not encrypted. SECURITY.md says so: a phone nearby can read it without pairing.
+  - So a phone listening nearby during those 5 minutes could have taken the key, and with it signed the
+    requests the link accepts: stop, power off, the Pi log, sightings and the Pushover switch.
+  - 1.6.0's own notes say the key goes "only through the server". It did go there, but not only there.
+  - The answer was also kept in `~/.cache/slot17-ops-seen.json`.
+- **Now:**
+  - A pairing answer goes only into the answers for the server, which hands it to the phone that asked. It
+    leaves the Bluetooth state's answers, and nothing remembers it on disk.
+  - A pairing asked again with the same id runs again, which gives the same key.
+  - 1.6.0's file is cleaned when it is read: rows with a key are dropped, and the file is written again
+    without them.
+  - The apps need no change. Both read the key from the server's answer (and they also apply the Bluetooth
+    state's answers, which is why the pairing answer is left out there rather than blanked).
+- **A new key:** `python3 -B p0/bluetooth_config.py --new-key` replaces the key, keeping on/off and the name.
+  - The link uses the new key once the publisher restarts: at the next power-up, or with
+    `sudo systemctl restart tetra-display-publisher`. That restart doesn't touch the receiver.
+  - Every phone then needs setting up again.
+  - There was no way to replace the key before.
+- **Tests:**
+  - Two new ones in `display/test_app_backend.py`, both of which fail on 1.6.0:
+    - the key is in neither the Bluetooth state nor the line handed to the link, decoded;
+    - the file on disk holds no key, and an old one is cleaned.
+  - One for `--new-key` in `tests/test_bluetooth.py`.
+- **What to do after installing it:** if a phone was set up on 1.6.0 where strangers could have been in
+  Bluetooth range, run `--new-key` and set the phone up again.
+
 ## 1.6.0, iPhone app 1.9.0 and Android app 1.11.0: everything over Bluetooth (23 November 2026)
 
 The operator's first drive with 1.5.1, with an iPhone and a car computer that had no internet. The detector's recognition is unchanged. [BLUETOOTH.md](design/BLUETOOTH.md) describes the link.

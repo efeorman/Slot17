@@ -51,10 +51,10 @@ A channel can carry several radios. Timing and signal trend can't establish iden
 
 ## Making a release
 
-1. Set the new version in `VERSION`, commit, and run the **Linux setup** workflow.
+1. Set the new version in `VERSION`, `versions.json` and `p0/version.py`, add its paragraph to `docs/RELEASE-NOTES.md`, commit, and push: the **Tests** workflow runs by itself in the public repository.
 2. Build the app with the `full` workflow on Codemagic or GitHub Actions.
-3. Tag the commit, for example `git tag v1.0.1 && git push origin v1.0.1`. The **Release** workflow tests the setup again and publishes `slot17.tar.gz`, `install.sh` and `SHA256SUMS`.
-4. Add the app to the release as **Slot17.ipa**, and add its checksum to `SHA256SUMS`.
+3. Tag the commit, for example `git tag v1.0.1 && git push origin v1.0.1`. The **Release** workflow tests the setup on clean machines and runs every test again, and only then publishes `slot17.tar.gz`, `install.sh` and `SHA256SUMS`.
+4. Add the apps to the release as **Slot17.ipa** and **Slot17.apk**, and add their checksums to `SHA256SUMS`.
 
 ## Deploying to a running system
 

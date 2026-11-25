@@ -31,6 +31,7 @@ want="$(curl -fsSL "$real.sha256" | awk '{print $1}')"
 got="$(sha256sum "$work/os.img.xz" | awk '{print $1}')"
 [ -n "$want" ] && [ "$want" = "$got" ] || { echo "checksum does not match ($got, expected $want)" >&2; exit 1; }
 echo "   checksum ok"
+BASE_SHA="$got"
 xz -d "$work/os.img.xz"
 img="$work/os.img"
 
@@ -62,6 +63,7 @@ install -m 755 "$INSTALLER" "$mnt/opt/slot17/install.sh"
 install -m 755 "$HERE/deploy/image/firstboot.sh" "$mnt/opt/slot17/firstboot.sh"
 install -m 755 "$HERE/deploy/image/firstboot_config.py" "$mnt/opt/slot17/firstboot_config.py"
 install -m 644 "$HERE/deploy/image/slot17-firstboot.service" "$mnt/etc/systemd/system/slot17-firstboot.service"
+install -D -m 644 "$HERE/deploy/image/slot17-firstboot.tmpfiles" "$mnt/etc/tmpfiles.d/slot17-firstboot.conf"
 echo "$VERSION" > "$mnt/opt/slot17/VERSION"
 install -m 644 "$HERE/deploy/image/slot17.txt" "$mnt/boot/firmware/slot17.txt"
 chroot "$mnt" systemctl enable slot17-firstboot.service ssh >/dev/null 2>&1
@@ -80,6 +82,7 @@ REALTIME = (
     "test_overlap.OverlappingWindows.test_every_burst_is_recognised_exactly_once_at_its_time",
     "test_overlap.OverlappingWindows.test_the_old_windows_lost_the_burst_on_their_edge",
     "test_update.RealChecks.test_the_real_offline_checks_refuse_a_release_that_breaks_the_detector",
+    "test_update.RealChecks.test_every_test_module_loads_in_the_copy_the_updater_tests",
 )
 pre = subprocess.run([sys.executable, "-B", "p0/preflight.py", "--offline"], capture_output=True, text=True)
 out = pre.stdout
@@ -118,4 +121,13 @@ name="slot17-$VERSION-raspios-lite-arm64.img"
 mv "$img" "$OUT/$name"
 xz -T0 -6 "$OUT/$name"
 (cd "$OUT" && sha256sum "$name.xz" > "$name.xz.sha256")
+# What it was made from, so an image can be made again the same way (the base URL moves to each new
+# Raspberry Pi OS release).
+{
+    echo "slot17 $VERSION"
+    echo "slot17 commit $(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo unknown)"
+    echo "tarball sha256 $(sha256sum "$TARBALL" | awk '{print $1}')"
+    echo "base image $real"
+    echo "base image sha256 $BASE_SHA"
+} > "$OUT/$name.xz.made-from.txt"
 ls -l "$OUT"

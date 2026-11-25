@@ -284,5 +284,17 @@ class ClockAndDataFindings(unittest.TestCase):
         self.assertTrue(np.isfinite(target["peak_snr_db"]), target["peak_snr_db"])
 
 
+class CaptureLevels(unittest.TestCase):
+    """Second review, 24 November 2026: a capture's sidecar must see the negative rail."""
+
+    def test_the_negative_rail_counts_as_a_peak_and_as_clipping(self):
+        import capture
+        peak, rms, headroom_db, clipped = capture.levels(np.array([-32768, 0], np.int16))
+        self.assertEqual(peak, 32768)
+        self.assertEqual(clipped, 0.5)
+        self.assertLess(headroom_db, 0.1)
+        self.assertEqual(capture.levels(np.array([100, -200], np.int16))[0], 200)
+
+
 if __name__ == "__main__":
     unittest.main()

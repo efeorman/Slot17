@@ -22,8 +22,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
+      # The tag's own scripts and first-start files, not the branch the run was started from: by hand, from
+      # main, an older tag's image got today's firstboot.sh (found in review, 24 November 2026).
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.tag }}
           fetch-depth: 0
       - name: Tools
         run: |
@@ -36,4 +39,7 @@ jobs:
       - name: Attach it to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ inputs.tag }}" out/*.img.xz out/*.img.xz.sha256 --clobber
+        # nullglob: an older tag's build_image.sh writes no made-from file
+        run: |
+          shopt -s nullglob
+          gh release upload "${{ inputs.tag }}" out/*.img.xz out/*.img.xz.sha256 out/*.img.xz.made-from.txt --clobber
