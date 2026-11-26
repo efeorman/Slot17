@@ -83,6 +83,10 @@ REALTIME = (
     "test_overlap.OverlappingWindows.test_the_old_windows_lost_the_burst_on_their_edge",
     "test_update.RealChecks.test_the_real_offline_checks_refuse_a_release_that_breaks_the_detector",
     "test_update.RealChecks.test_every_test_module_loads_in_the_copy_the_updater_tests",
+    # 1.7.0's receivers, through their stand-ins at the real sample rate (the v1.7.0 image failed on these three)
+    "test_receivers.WholeDetectorOnAnRsp1b.test_bursts_through_the_rsp1b_path_are_recognised",
+    "test_rtlsdr.Threads.test_a_stream_and_a_clean_end",
+    "test_rtlsdr.WholeDetectorOnAnRtlPair.test_bursts_across_both_halves_are_recognised",
 )
 pre = subprocess.run([sys.executable, "-B", "p0/preflight.py", "--offline"], capture_output=True, text=True)
 out = pre.stdout

@@ -1,5 +1,5 @@
 {
-  "software": "1.7.0",
+  "software": "1.7.1",
   "app": "1.9.0",
   "note": "The versions in each release. The display server reads this file at the newest release tag to tell the apps and web page about updates. Tests keep it equal to VERSION, ios/project.yml and android/app/build.gradle.kts.",
   "android": "1.11.0"

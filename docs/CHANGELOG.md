@@ -2,6 +2,13 @@
 
 What changed, why, and what was tried and left out. Newest first. Figures come from our own car, receiver and drives; yours will differ.
 
+## 1.7.1: the ready-made Raspberry Pi image again (26 November 2026)
+
+1.7.0's software, with its Raspberry Pi image. 1.7.0's image was not built: inside the image, under ARM emulation
+(about ten times slower than a Pi 5), three of 1.7.0's new checks failed. They send samples through the RSP1B and
+RTL-SDR stand-ins at the real sample rate. Like five earlier checks, they are now left out there by name, and the Pi
+runs them at its first start, before it opens the receiver. Detection and the apps are unchanged.
+
 ## 1.7.0: the cockpit web page, drive mode and the car computer's own screen; the SDRplay RSP1B and RSP1A, and a pair of RTL-SDRs (26 November 2026)
 
 Detection is unchanged for the Airspy Mini, and so are the apps (iPhone app 1.9.0, Android app 1.11.0). Signed updates
