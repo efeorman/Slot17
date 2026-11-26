@@ -8,7 +8,7 @@ All pictures use demo or test data, never a real drive. Signal strengths are in 
 <tr>
 <td align="center" width="33%"><img src="images/app-live.png" alt="The Live screen with three signal bars, the last alert and the I SAW buttons" width="240"><br><b>Live</b><br>Signal bars for the strongest channels, the last alert, and buttons to mark what you saw</td>
 <td align="center" width="33%"><img src="images/app-sightings.png" alt="The Sightings screen with a table comparing sounds and marks" width="240"><br><b>Sightings</b><br>What you marked, and how your marks compare with the sounds</td>
-<td align="center" width="33%"><img src="images/app-pi.png" alt="The Pi screen with health figures and actions" width="240"><br><b>Pi</b><br>The car computer's health, a recording button, its logs, stop and power off</td>
+<td align="center" width="33%"><img src="images/app-pi.png" alt="The Pi screen: the setup check, then the connection to the car computer" width="240"><br><b>Pi</b><br>The setup check first, then the connection, the car computer's health, a recording, its logs, a support package, stop and power off</td>
 </tr>
 <tr>
 <td align="center"><img src="images/app-logs.png" alt="The Logs screen listing alerts and why each was silent or sounded" width="240"><br><b>Logs</b><br>Every alert, and why it did or didn't make a sound</td>
@@ -31,6 +31,17 @@ There's no CarPlay app, because that needs Apple's permission. A Live Activity s
 <tr>
 <td align="center" width="50%"><img src="images/app-carplay.png" alt="The app's preview of the CarPlay widget and the CarPlay Live Activity" width="260"><br><b>CarPlay</b><br>The app's preview: the widget's two buttons, and how the Live Activity looks</td>
 <td align="center" width="50%"><img src="images/app-lock-screen.png" alt="Examples of the Live Activity on the lock screen" width="260"><br><b>Lock screen</b><br>The same information while the phone is locked</td>
+</tr>
+</table>
+
+## Android app
+
+The same functions as the iPhone app, built the Android way.
+
+<table>
+<tr>
+<td align="center" width="50%"><img src="images/app-android-pi.png" alt="The Android app's Pi screen: the setup check, with notifications and running in the background still to allow" width="240"><br><b>Pi</b><br>The setup check names what to do first</td>
+<td align="center" width="50%"><img src="images/app-android-settings.png" alt="The Android app's Settings screen" width="240"><br><b>Settings</b></td>
 </tr>
 </table>
 
