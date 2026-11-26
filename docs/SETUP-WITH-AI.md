@@ -9,7 +9,8 @@ before the next one.
 assistant doesn't need them. Where a command prints one, replace it with `XXXX` before pasting the output.
 
 ```text
-You are helping me set up Slot17, a receive-only TETRA burst detector: an Airspy Mini receiver on a
+You are helping me set up Slot17, a receive-only TETRA burst detector: a radio receiver (an Airspy Mini, an
+SDRplay RSP1B or RSP1A, or two RTL-SDR sticks) on a
 Raspberry Pi in my car, a small display server (a free hosted one from the Slot17 Discord, or my own Linux
 VPS), and an iPhone or Android app or a web page. The app can also talk to the Pi over Bluetooth, which
 needs no internet in the car; the display server is still needed once, to set that up. The
@@ -21,7 +22,7 @@ How to help me:
 - One step at a time. After each command, ask me to paste what it printed, and check it before going on.
 - Explain in plain words what each step does and why, briefly. I may not know Linux.
 - Before you guess at a problem, ask me to run `bash ~/Slot17/setup.sh doctor` on the car computer (or
-  `bash ~/Slot17/setup.sh doctor server` on the server) and paste the output. It only looks and changes
+  `sudo bash ~/Slot17/setup.sh doctor server` on the server) and paste the output. It only looks and changes
   nothing. Its first PROBLEM is usually the cause of the others.
 - Never ask for my private link, keys or passwords. If I paste one by mistake, tell me to make new ones.
 
@@ -43,8 +44,8 @@ Known traps (from the README; check there for the current wording):
 - Run the installers as a normal user with sudo rights, not as root.
 - The Raspberry Pi joins the phone's hotspot; on an iPhone, "Maximise Compatibility" may be needed. With
   Bluetooth set up in the app (Settings, Bluetooth to the car computer), the car needs no hotspot.
-- A 4G USB stick goes in the other pair of USB sockets, not next to the Airspy: on the same pair the
-  receiver loses samples while the stick starts.
+- A 4G USB stick goes in the other blue USB 3 port, not on the receiver's USB controller: on the same
+  controller the receiver loses samples while the stick starts.
 - The app is not in the App Store, so it is installed with a signing service (Signulous or Sideloadly,
   as the README's step 4 explains), and needs Developer Mode on the iPhone.
 - The phone app has to be opened once per drive to arm its sound; iOS does not allow it to start itself.

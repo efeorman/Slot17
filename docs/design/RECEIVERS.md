@@ -221,9 +221,9 @@ per receiver.
 
 **SDRplay RSP1B**
 
-1. `bash setup.sh car --receiver rsp1b`: shows SDRplay's licence and installs the API and its service.
-2. `bash setup.sh doctor`: "Receiver" and "SDRplay API" ok.
-3. `bash setup.sh car --calibrate --no-display --no-notify`, with the antenna connected.
+1. `bash ~/Slot17/setup.sh car --receiver rsp1b`: shows SDRplay's licence and installs the API and its service.
+2. `bash ~/Slot17/setup.sh doctor`: "Receiver" and "SDRplay API" ok.
+3. `bash ~/Slot17/setup.sh car --calibrate --no-display --no-notify`, with the antenna connected.
 4. Ten minutes parked, then read the heartbeat's `receiver` counters:
    - `gaps` should be 0, and `gap_detection` should still be `on`. If it switched itself off, `firstSampleNum`
      means something else on this receiver.
@@ -236,12 +236,12 @@ per receiver.
 **The RTL-SDR pair**
 
 1. If the sticks share a serial and are not TCXO sticks, give one of them another serial first.
-2. `bash setup.sh car --receiver rtlsdr2`, then `bash setup.sh doctor`: "Receiver" (both sticks) and
+2. `bash ~/Slot17/setup.sh car --receiver rtlsdr2`, then `bash ~/Slot17/setup.sh doctor`: "Receiver" (both sticks) and
    "librtlsdr" ok.
 3. Sample losses at the rate used, before the detector runs: `rtl_test -d 0 -s 2560000` for five minutes, then
    `-d 1`, then both at once in two terminals. Each should say nothing about lost bytes.
 4. Without a TCXO: `rtl_test -d 0 -p` for a few minutes per stick, and put the figures in `ppm_a` and `ppm_b`.
-5. `bash setup.sh car --calibrate --no-display --no-notify` saves `ppm_a` and `ppm_b`. **Calibrate a second
+5. `bash ~/Slot17/setup.sh car --calibrate --no-display --no-notify` saves `ppm_a` and `ppm_b`. **Calibrate a second
    time**: both halves should then read within about 1 ppm. That proves the sign of librtlsdr's correction on
    real sticks.
 6. Ten minutes parked, then read the heartbeat's `receiver` counters:

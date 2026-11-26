@@ -7,7 +7,7 @@ Jetpack Compose, Material 3) instead of copied screen by screen.
 
 | Folder | What |
 |---|---|
-| `core/` | The rules, without Android: server messages, link timing, sound decisions, status words, sightings, update and fault notices. A port of `ios/Slot17/Core`, tested against `../shared/parity`, which the iOS tests use too. |
+| `core/` | The rules, without Android: server messages, link timing, sound decisions, status words, sightings, update and fault notices. A port of `ios/Slot17/Core`, tested against `../shared/parity` (the iOS tests read its Bluetooth frames). |
 | `app/` | The Android app: screens, sound, background service, notifications, widgets and tiles. |
 | `scripts/gradle-bootstrap.sh` | Fetches the pinned Gradle with its checksum and makes `./gradlew`, if the wrapper isn't there yet. |
 

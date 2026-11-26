@@ -63,7 +63,7 @@ python3 -B ~/Slot17/p0/support.py --drive SESSION --everything --recordings --ou
 | File | |
 |---|---|
 | `REPORT.txt` | First in the zip: the setup check's verdicts, then per drive its start (corrected; folder names can be wrong because the car computer has no clock), length, matches, faults, samples dropped after the start and interference |
-| `doctor.json` | `bash setup.sh doctor`, all verdicts |
+| `doctor.json` | `bash ~/Slot17/setup.sh doctor`, all verdicts |
 | `system.txt` | Software version, the computer, power (`get_throttled`, supply voltage), temperature, USB, network and routes, disk, memory, clock, the boots, the services, Bluetooth |
 | `settings.json` | Calibration, Bluetooth (on or off and the name), the Pushover switch, whether a display server and signed updates are set up, the service files' start lines |
 | `journal/` | The system log per boot, without the detector's per-candidate lines (their number is noted) |

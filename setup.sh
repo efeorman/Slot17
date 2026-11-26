@@ -28,7 +28,7 @@ case "$role" in
 
 Slot17 setup. What is this machine?
 
-  1) The car computer: a Raspberry Pi (or similar) with the Airspy receiver
+  1) The car computer: a Raspberry Pi (or similar) with its radio receiver
   2) The display server: a Linux server the phone and the car computer can reach
 
 EOF

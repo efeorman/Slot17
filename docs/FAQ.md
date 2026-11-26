@@ -18,7 +18,7 @@ No. Police, ambulances, the fire brigade and a lot of others (in the Netherlands
 A lot of DIY projects just measure how much power is in the band. Then LTE, a phone charger or plain noise sets them off all the time. Slot17 checks for the TETRA training pattern from the ETSI standard, which noise and other systems don't have. In our tests it gave 0 false matches on 338,438 test signals and recordings without TETRA.
 
 ### What does it cost?
-The software is free, and so is a hosted server from us. You pay for the hardware: a Raspberry Pi 5, an Airspy Mini, an antenna, storage and a good car charger. Count on a few hundred euros, depending on what you already have.
+The software is free, and so is a hosted server from us. You pay for the hardware: a Raspberry Pi 5, a receiver (we use an Airspy Mini), an antenna, storage and a good car charger. Count on a few hundred euros, depending on what you already have.
 
 ### Can I sell it or use it in a business?
 No. It's under the [PolyForm Noncommercial licence](https://github.com/efeorman/Slot17/blob/main/LICENSE): free for personal use, research, hobby projects, schools and charities, not for selling or commercial use.
@@ -26,7 +26,7 @@ No. It's under the [PolyForm Noncommercial licence](https://github.com/efeorman/
 ## What it can and can't tell you
 
 ### How far away does it hear a radio?
-We haven't measured that yet. 380 MHz from a few watts reaches kilometres over a clear path, so it often hears radios you can't see. A beep means a radio transmitted and the signal was strong, not that it's close.
+It depends on your antenna, your car and the buildings or land in between. 380 MHz from a few watts reaches kilometres over a clear path, so it often hears radios you can't see. A beep means a radio transmitted and the signal was strong, not that it's close.
 
 ### Isn't a stronger signal a closer radio?
 Not with TETRA. A radio sets its own power by how well it hears its mast, over a range of 30 dB. That's a factor of 32 in distance. A handheld 200 m away next to a mast can reach you weaker than a van 3 km away at the edge of the cell.
@@ -55,7 +55,7 @@ A Raspberry Pi 5. We use the 8 GB one; 2 GB and up should be fine, the detector 
 Yes. An antenna on the outside, like a magnetic roof antenna, hears more than one behind the windscreen, and some windscreens have a metal coating that blocks radio. Keep in mind that more range also means more beeps for radios you can't see. We use a Motorola GMAE4258B stuck inside the windscreen. Anything made for 380 to 400 MHz works.
 
 ### What power supply?
-We use the UGREEN Nexode 60 W car charger (EC602). It gives 3 A at 5 V, which was enough for our Pi with the receiver, an SSD and a 4G stick. Bigger car chargers don't give the Pi more: their extra watts are at higher voltages. If Slot17 reports undervoltage, your setup needs more: use a 12 V to 5 V converter rated for 5 A, as the [README](../README.md#what-you-need) explains. Where to buy the parts in your country, with prices and a total: [slot17.cloud/parts/](https://slot17.cloud/parts/).
+We use the UGREEN Nexode 60 W car charger (EC602). It gives 3 A at 5 V, which was enough for our Pi with the receiver, an SSD and a 4G stick. Bigger car chargers don't give the Pi more: their extra watts are at higher voltages. If Slot17 reports undervoltage, your setup needs more: use a 12 V to 5 V converter rated for 5 A, as the [README](https://github.com/efeorman/Slot17#what-you-need) explains. Where to buy the parts in your country, with prices and a total: [slot17.cloud/parts/](https://slot17.cloud/parts/).
 
 ### Do I need internet in the car?
 Not with Bluetooth on (since 1.6.0). The car computer then sends everything straight to the app, and the app's buttons work over it too. You still need internet once, at home is fine, to set Bluetooth up, and without it in the car you miss the web page, the car computer's part of the drive report and support packages; updates come when the car computer starts on your home Wi-Fi. Without Bluetooth, yes: the car computer reaches the server over your phone's hotspot, or a 4G USB stick with its own SIM, which saves your phone's battery (we use a ZTE MF833N). The [README](https://github.com/efeorman/Slot17#bluetooth-or-the-server) compares the two.
@@ -101,7 +101,7 @@ From 1.3.1 the car computer installs new versions by itself, if you said yes to 
 Yes, for iPhone and for Android, and the web page works on any phone or computer. Both apps are on the [latest release](https://github.com/efeorman/Slot17/releases/latest).
 
 ### How do I install the iPhone app?
-It isn't in the App Store, so you sign it yourself with Signulous (paid, works for a year) or Sideloadly (free, reinstall every 7 days). The [README's step 4](https://github.com/efeorman/Slot17#iphone) explains both.
+It isn't in the App Store, so you sign it yourself with Signulous (paid, works for a year) or Sideloadly (free, signs it for 7 days and can sign it again by itself). The [README's step 4](https://github.com/efeorman/Slot17#iphone) explains both.
 
 ### How do I install the Android app?
 Open **Slot17.apk** from the latest release on your phone and allow the install. Then in the app's Settings, tap **Let Slot17 run in the background**, so it keeps beeping with the screen off.

@@ -108,14 +108,22 @@ a corrupt one.
 
 ## Checking a session after an interrupted drive
 
+List the drives, with their corrected start times where the clock was set during the drive, and pick one:
+
 ```bash
-cd /home/pi/Slot17
-python3 - <<'PY'
-import json, glob, os
-d = sorted(glob.glob('captures/*/'), key=os.path.getmtime)[-1]
+python3 -B ~/Slot17/p0/support.py --list
+```
+
+Then read its summary, with the folder name in place of `FOLDER`:
+
+```bash
+cd ~/Slot17
+python3 - FOLDER <<'PY'
+import json, sys
+d = 'captures/' + sys.argv[1].strip('/') + '/'
 s = json.load(open(d + 'summary.json'))
 print(d)
-print('final          :', s['final'], '(false = power was cut)')
+print('final          :', s['final'], '(false = no clean finish recorded)')
 # The window length is in the summary from version 1.1.3; before that, in its last health record.
 w = s.get('window_s') or round((s.get('rf_health') or {}).get('window_duration_s') or 3, 1)
 print('windows        :', s['windows'], '->', round(s['windows'] * w), 's of signal')
@@ -125,5 +133,6 @@ print('degraded       :', s['degraded_reasons'])
 PY
 ```
 
-If `final` is `false`, the counters are up to 30 seconds stale and the session
-ended by power removal. That is expected in this installation and is not a fault.
+If `final` is `false`, the detector didn't record a clean finish, usually because the ignition cut the power,
+and the counters can be up to 30 seconds behind. On its own it can't tell why the session ended. In a car that
+switches the power off with the ignition, it is expected and is not a fault.

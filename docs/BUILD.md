@@ -8,35 +8,36 @@ From a box of parts to a car computer that beeps on the first drive. It takes an
 
 - Raspberry Pi 5 (we use 8 GB), in a case with cooling. We use an Argon case with an NVMe slot.
 - Storage: an NVMe SSD in that case, or a good microSD card of 128 GB or more.
-- Airspy Mini and its USB cable.
-- An antenna for 380 to 400 MHz, plus an adapter to SMA if its plug is different.
+- A receiver and its USB cable: we use an Airspy Mini. An SDRplay RSP1B or RSP1A, or two RTL-SDR sticks, work too.
+- An antenna for 380 to 400 MHz, plus an adapter to SMA (the receiver's screw-on socket) if its plug is different.
 - A good USB-C car charger. We use the [UGREEN Nexode 60 W (EC602)](https://www.amazon.nl/dp/B0DSBSBSGW), with the Pi on its built-in cable; see [Power](#5-power).
 
-Where to buy each part in your country, with prices and a total: [slot17.cloud/parts/](https://slot17.cloud/parts/).
 - Optional: a 4G USB stick with its own SIM, and a few clip-on ferrites (the "noise caps" for cables).
+
+Where to buy each part in your country, with prices and a total: [slot17.cloud/parts/](https://slot17.cloud/parts/).
 
 ![The parts laid out](images/build/01-parts.png)
 
-## 2. Put it together on the table first
+## 2. The software first
 
-1. Write the software to the SSD or card first ([step 3](#3-the-software-the-easy-way)): Raspberry Pi Imager writes to storage connected to your computer. An NVMe SSD needs a USB enclosure for NVMe drives, a microSD card a card reader. Then fit the SSD in the case (or put the card in), and close the case.
-2. Plug the antenna into the Airspy Mini, then the Airspy into a **blue USB 3 port** on the Pi.
-3. With a 4G stick: put it in the **other blue port**. Each blue port has its own USB controller; a stick starting up on the same one as the Airspy can cost a few samples in the first minute.
-4. Power the Pi from a normal USB-C supply at home first. Once the app is installed and connected ([README step 4](../README.md#step-4-install-the-app)), check that its Pi screen says **Detector running** before anything goes into the car.
+First get your server address and car computer key: type `/server create` in the [Discord](https://discord.gg/rSFPWSWNfh) ([README step 2](../README.md#step-2-set-up-the-display-server)). Then write the ready-made image from the [latest release](https://github.com/efeorman/Slot17/releases/latest) (`slot17-…-raspios-lite-arm64.img.xz`, under **Assets**) to the storage, while it's still connected to your computer: an NVMe SSD through a USB enclosure for NVMe drives, a microSD card through a card reader.
 
-![Pi, Airspy and antenna connected](images/build/02-on-the-table.png)
-
-## 3. The software, the easy way
-
-First get your server address and car computer key: type `/server create` in the [Discord](https://discord.gg/rSFPWSWNfh) ([README step 2](../README.md#step-2-set-up-the-display-server)). Then use the ready-made image from the [latest release](https://github.com/efeorman/Slot17/releases/latest) (`slot17-…-raspios-lite-arm64.img.xz`, under **Assets**):
-
-1. In [Raspberry Pi Imager](https://www.raspberrypi.com/software/), choose your Raspberry Pi 5, then **Use custom** and pick the image file, then your card or SSD.
+1. In [Raspberry Pi Imager](https://www.raspberrypi.com/software/), choose your Raspberry Pi 5, then **Use custom** and pick the image file, then your card or SSD. Writing erases it, so check its name and size.
 2. In **Customisation**, set a **username and password**, your **Wi-Fi** (home Wi-Fi is fine for now) and your country. SSH is already on in the image. **If Imager shows no Customisation for the file, stop here** and follow the [README's steps by hand](../README.md#step-1-prepare-the-car-computer) instead: without a username the card can't set itself up.
 3. Write it. Then open the card's **bootfs** drive on your computer, open **slot17.txt** and fill in your server address and car computer key and your phone's hotspot name and password. Fill in both the address and the key now: the card reads them only at its first start. Using Bluetooth alone in the car? Leave the hotspot empty: Bluetooth is on by default there. With an SDRplay RSP1B or RSP1A, read the note about SDRplay's licence in that file. Save it as plain text and eject the drive.
-4. Put the card in the Pi and power it up. After about 5 minutes the app shows the car computer. If not, open **slot17-setup.log** on the card; it says what went wrong.
-5. In the app, set up Bluetooth: Settings, **Bluetooth to the car computer**, **Set up**, with the car computer nearby. The app then also works in the car without internet ([README](../README.md#optional-bluetooth-to-the-app)).
 
 Prefer to do it by hand? The [README](../README.md#step-1-prepare-the-car-computer) has every step.
+
+## 3. Put it together on the table
+
+1. Fit the SSD in the case (or put the card in), and close the case.
+2. Plug the antenna into the receiver, then the receiver into a **blue USB 3 port** on the Pi. Two RTL-SDR sticks each need the antenna's signal: a splitter for 380 to 400 MHz, or two antennas.
+3. With a 4G stick: put it in the **other blue port**. Each blue port has its own USB controller; a stick starting up on the same one as the receiver can cost a few samples in the first minute.
+4. Install the app ([README step 4](../README.md#step-4-install-the-app)), then power the Pi from a normal USB-C supply at home. After about 5 minutes the app shows the car computer. If not, open **slot17-setup.log** on the card; it says what went wrong.
+5. Check that the app's Pi screen says **Detector running** before anything goes into the car.
+6. In the app, set up Bluetooth: Settings, **Bluetooth to the car computer**, **Set up**, with the car computer nearby. The app then also works in the car without internet ([README](../README.md#optional-bluetooth-to-the-app)).
+
+![Pi, Airspy and antenna connected](images/build/02-on-the-table.png)
 
 ## 4. Where the antenna goes
 

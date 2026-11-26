@@ -592,7 +592,7 @@
     for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); }
     return false;
   };
-  const DEFAULTS = { red: 22, yellow: 12, vol: 100, sound: true, repeat: false, antennaWarn: true, urgent: true };
+  const DEFAULTS = { red: 35, yellow: 12, vol: 100, sound: true, repeat: false, antennaWarn: true, urgent: true };
   const LINK_LOST_MS = 6000;     // no message for this long: the link is down, whatever the last state said
   const REOPEN_MS = 9000;        // a silent stream is reopened (a half-open mobile socket never errors)
   const CLEAR_MS = 20000;        // after this, stale bars are removed entirely
@@ -617,8 +617,9 @@
   };
   let cfg = store.get();
   /* The server's levels (app-config.json, the same the apps take), except a level set by hand in this browser.
-     Until 1.7.2 the page kept its own 22 dB while the apps chimed from the server's 35. Settings saved before then
-     hold every value, so a red or yellow still at the old default counts as not set by hand. */
+     Until 1.7.2 the page kept its own 22 dB while the apps chimed from the server's 35. Its own levels are now the
+     ones app-config.json ships with, for the car computer's own screen, which has no server settings to read.
+     Settings saved before then hold every value: a red still at the old 22, not set by hand, moves to 35 once. */
   async function loadServerLevels() {
     try {
       const r = await fetch("/api/config", { cache: "no-store", signal: timeoutSignal(4000) });
@@ -631,11 +632,12 @@
       if (num(rules.yellow_db) && !cfg.yellowByHand && cfg.yellow === DEFAULTS.yellow) cfg.yellow = num(rules.yellow_db);
       if (cfg.yellow > cfg.red) cfg.yellow = cfg.red;
       syncControls(); render();
-    } catch (_) { /* no server settings (the car computer's own screen, or offline): the page's own levels */ }
+    } catch (_) { /* no server settings (the car computer's own screen, or offline): the page's own levels, the same */ }
   }
   // Once only: the operator found the old 30 % default too quiet at full phone volume, and
   // that value is saved in this browser. A level chosen after this is kept.
   if (cfg.soundRev !== 2) { cfg.vol = 100; cfg.soundRev = 2; store.set(cfg); }
+  if (cfg.levelRev !== 2) { if (!cfg.redByHand && cfg.red === 22) cfg.red = DEFAULTS.red; cfg.levelRev = 2; store.set(cfg); }
   let audio = null, silentEl = null, mutedUntil = 0, started = false, demo = false;
   const lastCall = {};                  // channel -> when its call tone last played
   let lastSilenceReason = "";           // why the most recent red match did not chime

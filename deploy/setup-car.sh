@@ -406,6 +406,11 @@ fi
 # --- 10b. the car computer's own screen (only when asked) ----------------------
 if [ "$SCREEN" = yes ]; then
     step "The car computer's own screen"
+    # The screen's data comes from the publisher, which is installed with the display server connection (found in
+    # review, 26 November 2026: a screen set up without one opened and showed no data, with no word why).
+    if [ "$DISPLAY_LINK" != yes ] && [ ! -f "$DISPLAY_CONFIG" ]; then
+        note "the screen shows the detector's data once this car computer is connected to a display server: the part that feeds the screen comes with that connection. Run the setup again with --server ADDRESS --pi-key KEY (from step 2 of the README)."
+    fi
     sudo bash "$HERE/install-screen.sh" --user "$RUN_USER"
 elif [ "$SCREEN" = no ] && [ -f /etc/systemd/system/slot17-kiosk.service ]; then
     step "The car computer's own screen"

@@ -23,6 +23,9 @@ flowchart LR
   than on a phone, and it keeps working where there is no signal.
 - **The same page as a phone** (`display/page.html`): the cockpit (Live, Sightings, Car computer, Logs,
   Settings) and drive mode. One page to maintain, not a second program.
+- **Sound levels:** the screen doesn't read the server's `app-config.json`, so it uses the page's own levels, the
+  ones that file ships with: a chime from 35 dB, the urgent beep from 50 dB. A server with other levels doesn't
+  change them there; set them in the screen's Settings. Until 1.7.2 the page's own chime level was 22 dB.
 - **Requests from the screen** (a sighting, a recording, stop, power off, Pushover, Bluetooth, the setup
   check) go to the publisher as one file each, and are carried out exactly like the app's, by id, so one
   is never done twice. The Bluetooth link's key never goes this way; it only comes through the server.
@@ -43,7 +46,8 @@ flowchart LR
 ## Setting it up
 
 ```bash
-bash setup.sh car --screen          # or, on its own:
+sudo systemctl stop tetra-detector.service
+bash ~/Slot17/setup.sh car --screen --no-calibrate --no-start     # or, on its own:
 sudo bash deploy/install-screen.sh  # --dry-run shows the plan; --off, --on, --uninstall
 ```
 
@@ -51,7 +55,7 @@ sudo bash deploy/install-screen.sh  # --dry-run shows the plan; --off, --on, --u
   runs Chromium on the first console (`deploy/slot17-kiosk.service`).
 - **A desktop** (a display manager such as lightdm runs): Chromium starts with the desktop, from
   `~/.config/autostart/slot17-screen.desktop`; the desktop itself is left as it is.
-- **Off again:** `sudo bash deploy/install-screen.sh --off`, or `bash setup.sh car --no-screen`. It stays off
+- **Off again:** `sudo bash deploy/install-screen.sh --off`, or, with the detector stopped, `bash ~/Slot17/setup.sh car --no-screen --no-calibrate --no-start`. It stays off
   after a power-up.
 - **Updates:** signed updates bring the page with the detector (as `p0/web/page.html`). The services
   themselves come with the installer.

@@ -48,7 +48,7 @@ These show demo data. More pictures are in [SCREENSHOTS.md](docs/SCREENSHOTS.md)
 
 ```mermaid
 flowchart LR
-    A[Antenna] --> B["Receiver<br/>(Airspy Mini)"]
+    A[Antenna] --> B["Receiver<br/>(Airspy Mini, SDRplay<br/>or two RTL-SDRs)"]
     B --> C["Car computer<br/>(Raspberry Pi)"]
     C -- "over your phone's hotspot<br/>or a 4G stick" --> D["Display server<br/>(a small Linux server)"]
     D --> E["App<br/>(iPhone or Android)"]
@@ -122,8 +122,8 @@ The steps below do the same by hand.
 On an iPhone, the hotspot is under **Settings > Personal Hotspot**. Turn on **Maximise Compatibility** if the computer can't find it.
 
 **2. Connect the hardware.**
-1. Plug the antenna into the Airspy Mini.
-2. Plug the Airspy into a blue **USB 3** port on the Raspberry Pi.
+1. Plug the antenna into the receiver. Two RTL-SDR sticks each need the antenna's signal: use a splitter for 380 to 400 MHz, or two antennas.
+2. Plug the receiver into a blue **USB 3** port on the Raspberry Pi.
 3. Insert the storage and connect the power.
 
 **3. Log in to it from your computer.** SSH lets you type commands on the car computer from your own computer.
@@ -198,7 +198,7 @@ You can print them again at any time with `bash ~/Slot17/setup.sh server --show`
 
 The address it prints is the server's public internet address, which it looks up for you. If that's wrong, for example behind a router, give the right one: `bash ~/Slot17/setup.sh server --address 203.0.113.5`.
 
-**The server must be reachable from the internet on port 5732.** The installer opens that port in `ufw` if it's in use, but many hosting providers also have their own firewall in their web dashboard; allow incoming TCP on port 5732 there. To test, open the server address it printed with `/healthz` after it, for example `http://203.0.113.5:5732/healthz`, on your phone with Wi-Fi **off**: it should say `ok`.
+**The server must be reachable from the internet on port 5732.** The installer opens that port in `ufw` (Linux's firewall) if it's in use, but many hosting providers also have their own firewall in their web dashboard; allow incoming TCP on port 5732 there. To test, open the server address it printed with `/healthz` after it, for example `http://203.0.113.5:5732/healthz`, on your phone with Wi-Fi **off**: it should say `ok`.
 
 ## Step 3: Set up the car computer
 
@@ -228,7 +228,8 @@ To see what is installed, without changing anything:
 bash ~/Slot17/setup.sh car --check
 ```
 
-**Changing a setting later.** The setup only runs with the detector stopped, and it asks again whether to calibrate
+**Changing a setting later.** The detector runs as a background service (`tetra-detector.service`), which
+`systemctl` starts and stops. The setup only runs with the detector stopped, and it asks again whether to calibrate
 and start. Say no to both, or add `--no-calibrate --no-start`: the receiver was already opened once in this power-up,
 and a second opening can make it stop responding. The detector starts again at the next power-up. For example:
 
@@ -249,7 +250,7 @@ bash ~/Slot17/setup.sh modem
 
 It installs a USB fix made by someone else and a small check of ours that keeps the stick connected. That check switches the stick's data roaming on; to keep your own setting, see [MOBILE-MODEM.md](docs/operations/MOBILE-MODEM.md#what-the-setup-installs-part-2-keep-the-data-session-up-and-rank-the-route) before you run it. [MOBILE-MODEM.md](docs/operations/MOBILE-MODEM.md) explains both, what was tested, and what to know about other sticks.
 
-- **Plug the stick into the other pair of USB sockets**, not the pair the receiver is in. On the same pair, the receiver lost samples while the stick started, on three of four starts.
+- **Plug the stick into the other blue USB 3 port**, not next to the receiver on the same controller: each blue port of a Pi 5 has its own USB controller, and `lsusb -t` should show the receiver and the stick under different `Bus` lines. On the same controller, the receiver lost samples while the stick started, on three of four starts.
 - **Leave the hotspot switched on for the first drives.** On our first drive the stick lost its mobile connection once for eight minutes, and with no hotspot the phone had nothing from the car for that time.
 
 ### Optional: Bluetooth to the app
@@ -328,7 +329,7 @@ It does the same as the iPhone app; [android/README.md](android/README.md) lists
 
 1. **Start the car.** The car computer powers up, joins your phone's hotspot and starts listening by itself. Keep your hotspot on, unless you use Bluetooth alone; then the phone only needs to be in the car.
 2. **Open the Slot17 app once, then lock the phone.** iOS doesn't let an app start sound from the background, so opening it is what arms the sound. On CarPlay you hear it through the car, and a Live Activity shows the status. On Android the app keeps a notification while it runs and the sound follows the phone's audio, over Bluetooth or Android Auto.
-3. **Strong signals give a sound:** a chime at 35 dB above the background, and an urgent beep at 50 dB. The apps and the web page take these levels from your display server; a level you change in an app's or the web page's Settings stays yours. These are signal strengths, not distances.
+3. **Strong signals give a sound:** a chime at 35 dB above the background (dB here says how much stronger the burst is than that channel's usual noise), and an urgent beep at 50 dB. The apps and the web page take these levels from your display server; a level you change in an app's or the web page's Settings stays yours. The car computer's own screen doesn't read the server's settings: it uses 35 and 50 dB, or what you set in its Settings. These are signal strengths, not distances.
    - **A radio in a call** (normal bursts on every TETRA frame, which is what speech or a data call looks like) gets a soft, lower two-note tone from 18 dB, below the chime level. It is traffic on that channel; it says nothing about who or how far.
    - The meters also say **Rising** when a channel's newest match is at least 6 dB above the weakest of the last minute and the strongest so far. Louder is not nearer: a radio sets its power by its own mast.
 4. **If you have a passenger, mark what you see** with **I SAW** in the app, including vehicles that gave no alert. That is the only way to learn what Slot17 misses.
@@ -368,7 +369,7 @@ From 1.3.1 the car computer can install new versions by itself, at its next star
 - **What it replaces:** `p0/`, `tests/` and `display/display_publisher.py`. Never your calibration or channel files, and never the service files.
 - **Where you see it:** the app's Pi screen shows the installed version, and the Live Activity says "Updated to …" for a few minutes after an update, or that one failed.
 
-Turn it off with `bash ~/Slot17/setup.sh car --no-updates --no-calibrate --no-start`. With your own fork, put your own public key there instead (64 hex characters, Ed25519) and sign your releases yourself; `p0/update.py` describes the format (`manifest.json` plus the files in a signed tar.gz, described by `release.json`).
+Turn it off with `bash ~/Slot17/setup.sh car --no-updates --no-calibrate --no-start`, with the detector stopped. With your own fork, put your own public key there instead (64 hex characters, Ed25519) and sign your releases yourself; `p0/update.py` describes the format (`manifest.json` plus the files in a signed tar.gz, described by `release.json`).
 
 ### Slower and faster computers
 
@@ -418,7 +419,7 @@ Environment=SLOT17_CHECK_THREADS=2
 | Calibration found no carriers | Your country may not use 390–395 MHz for the base stations, or the antenna isn't connected. Slot17 still runs, using an example calibration |
 | The storage is full | Old recordings are never deleted automatically. Delete old folders in `~/Slot17/captures/` |
 | Bluetooth: **A different car computer answered**, or it never connects | Settings, Bluetooth to the car computer, **Set up again**, with the car computer on and nearby. On the car computer, `bash ~/Slot17/setup.sh doctor` has a Bluetooth line. On Android, allow **Nearby devices** for Slot17, and switch Location on while setting up |
-| Bluetooth: the phone asks to **pair**, or to confirm a code, at every connection | On the car computer run `bash ~/Slot17/setup.sh car --bluetooth` once (since 1.5.1 it stops the car computer from asking phones to pair), then forget the car computer in the phone's own Bluetooth settings. The app's Bluetooth card says when this is still needed |
+| Bluetooth: the phone asks to **pair**, or to confirm a code, at every connection | On the car computer, with the detector stopped (`sudo systemctl stop tetra-detector.service`), run `bash ~/Slot17/setup.sh car --bluetooth --no-calibrate --no-start` once (since 1.5.1 it stops the car computer from asking phones to pair), then forget the car computer in the phone's own Bluetooth settings. The app's Bluetooth card says when this is still needed |
 
 ## Reading a session
 
@@ -537,7 +538,7 @@ Read [SECURITY.md](SECURITY.md) before relying on this. The main points:
 - **iOS decides when the app runs.** iOS sometimes pauses the app for 5–36 seconds in the background, and can end it, after which it stays silent until you open it again.
 - **CarPlay shows a Live Activity, not an app.** A CarPlay app needs permission from Apple.
 - **Bluetooth needs iOS 18 on an iPhone**, reaches about as far as the car, and the car computer is visible to Bluetooth scanners nearby under its name whenever Bluetooth is on, also while your phone is connected (it keeps advertising, more slowly, so a second phone can join). If iOS ended the app, it reconnects but beeps again only once the app is opened, as without Bluetooth. The first set-up needs the server.
-- **Frequency drift.** A receiver's frequency changes with temperature and age. Ours measured +9.6 and later +4.1 ppm. Detection worked at both settings, but recalibrating now and then does no harm.
+- **Frequency drift.** A receiver's frequency changes with temperature and age. Ours measured +9.6 and later +4.1 ppm (parts per million: a tiny offset). Detection worked at both settings, but recalibrating now and then does no harm.
 
 ## Repository layout
 
@@ -546,7 +547,7 @@ Read [SECURITY.md](SECURITY.md) before relying on this. The main points:
 | [install.sh](install.sh), [setup.sh](setup.sh) | The installer and the setup |
 | [p0/](p0) | The detector: capture, channels, burst detection, training-pattern recognition, recording, health |
 | [display/](display) | The car computer's link to the server, the server, the web page and their tests |
-| [deploy/](deploy) | Setup scripts, service files, permission rules and `doctor.py` (`bash setup.sh doctor`) |
+| [deploy/](deploy) | Setup scripts, service files, permission rules and `doctor.py` (`bash ~/Slot17/setup.sh doctor`) |
 | [ios/](ios) | The iPhone app, with its Live Activity and widget |
 | [android/](android) | The Android app, with its notification, widget and Quick Settings tiles |
 | [shared/](shared) | Test cases both apps must pass in the same way |

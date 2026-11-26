@@ -9,7 +9,7 @@ The app plays Slot17's sounds with the screen locked and while connected to CarP
 1. Download **Slot17.ipa** from the [latest release](https://github.com/efeorman/Slot17/releases/latest), or build it yourself; see [Build and test](#build-and-test).
 2. Sign and install it:
    - **[Signulous](https://www.signulous.com):** $19.99 a year per iPhone, and works for a year. Register the iPhone on [signulous.com/register](https://www.signulous.com/register), ideally from Safari on the iPhone with **Link this device**, install their profile, then upload **Slot17.ipa** with their own-app signing. This is what we use, since app 1.5.1; the sighting widget's App Group then gets a name of Signulous's own, which the app finds by itself.
-   - **[Sideloadly](https://sideloadly.io):** free with a normal Apple ID, from Windows or a Mac, but it stops working after 7 days. We used it at first.
+   - **[Sideloadly](https://sideloadly.io):** free with a normal Apple ID, from Windows (with the web versions of iTunes and iCloud that its page links to) or a Mac. It signs the app for 7 days and can sign it again by itself. We used it at first.
 3. On the iPhone, allow your profile under **Settings > General > VPN & Device Management**. You may also need **Developer Mode** under **Settings > Privacy & Security**.
 4. Open the app and paste your private link, the one that opens the web page. It's stored in the phone's Keychain and is never built into the app.
 
@@ -24,7 +24,7 @@ Open the app once before driving, then lock the phone. iOS won't let an app star
 | Live | Status, the link from server to receiver, three signal bars, last alert and I SAW buttons |
 | Dashboard | Turn the phone sideways, or tap the rotate button if rotation lock is on |
 | Sightings | Everything you marked and whether the Pi saved it, plus adding one with a note |
-| Pi | Health, Save a recording, Collect the Pi's logs, Stop the detector and Power off |
+| Pi | The setup check, the connection, health, a support package, Save a recording, Collect the Pi's logs, Stop the detector and Power off |
 | Logs | Every alert with why it sounded or not and which recognition rule matched, diagnostics, and logs kept on the server |
 | Settings | Private link, sound, levels, warnings, fault messages, the car computer's Pushover switch, Bluetooth to the car computer and demo mode |
 
@@ -41,7 +41,7 @@ Open the app once before driving, then lock the phone. iOS won't let an app star
 - **Reaching the Pi:** after Stop from the app, the publisher ends with the detector, so Power off is no longer available from the app. A detector that stops by itself (car computer 1.6.0) leaves the publisher running, so the app can still read the Pi, get its log or power it off.
 - **Power off:** coming back needs the power to go off and on. There's no start or reboot button, because cycling this Airspy can wedge it.
 - **Recordings:** a sighting saves a recording only if it reaches the detector within about 5 seconds, and at most one per 10 seconds. Recordings stay on the Pi.
-- **Security:** the display server uses plain HTTP, so the private link and everything sent with it, including Stop and Power off, isn't encrypted.
+- **Security:** a hosted server uses HTTPS. A server of your own uses plain HTTP, so there the private link and everything sent with it, including Stop and Power off, isn't encrypted.
 - **App Store:** the near-silent audio loop that keeps the app running breaks App Store rules, so this is for personal install only.
 
 ## Build and test

@@ -25,7 +25,7 @@ Airspy Mini -> Pi 5 detector -> publisher -> display server (VPS) -> iPhone app 
 | Publisher | `display/display_publisher.py` on the Pi | Sends the live state to the server, and picks up commands |
 | Display server | `display/server.py` on the VPS | Streams the state to the phone, stores uploads, serves settings and sounds |
 | Settings file | `display/app-config.json` on the VPS | Levels, spacing, colours, words and sounds, changeable without a new app |
-| iPhone app | `ios/` (separate private repository) | Decides on sounds, shows status, records sightings and location |
+| iPhone app | `ios/` | Decides on sounds, shows status, records sightings and location |
 | Tile and widget | `ios/Slot17Live/`, `ios/Shared/` | Live Activity and CarPlay widget, drawn by iOS |
 
 ## What the app does

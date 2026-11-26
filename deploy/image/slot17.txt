@@ -24,7 +24,8 @@ receiver=
 #
 # An SDRplay receiver needs SDRplay's own driver, the SDRplay API, under SDRplay's licence (in the package at
 # https://www.sdrplay.com/software/SDRplay_RSP_API-Linux-3.15.2.run). Write accepted here only if you have read it
-# and accept it; the first start then installs it. Otherwise it isn't installed, and setup asks you later.
+# and accept it; the first start then installs it. Without it, the first start stops before setting anything up and
+# says why in slot17-setup.log: write accepted here and start again, or set it up over SSH.
 sdrplay_licence=
 #
 # At the first start the car computer reads this, sets itself up (about 5 minutes) and then removes the

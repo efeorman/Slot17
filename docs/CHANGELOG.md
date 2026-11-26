@@ -4,7 +4,7 @@ What changed, why, and what was tried and left out. Newest first. Figures come f
 
 ## Unreleased: the guides read as a newcomer, and three fixes they found (26 November 2026)
 
-Every guide was read as someone setting Slot17 up for the first time, and checked against the code, by two
+Every guide was read as someone setting Slot17 up for the first time, and checked against the code, by three
 reviewers independently, then each finding was checked again before anything changed.
 
 - **The setup no longer opens the receiver twice in one power-up.** It runs only with the detector stopped, so a
@@ -15,7 +15,8 @@ reviewers independently, then each finding was checked again before anything cha
   an explicit `--calibrate` still works, with a warning. 4 new setup tests; each fails on the old script.
 - **The web page takes the server's sound levels**, as the apps do: the chime from 35 dB and the urgent beep and
   call tone where `app-config.json` puts them, unless you set a level by hand in that browser. It chimed from its
-  own 22 dB. The car computer's own screen, which has no server settings, keeps the page's levels.
+  own 22 dB. The car computer's own screen has no server settings, so the page's own levels are now the ones
+  `app-config.json` ships with (35 and 50 dB); a saved 22 that wasn't set by hand moves to 35 once.
 - **The phone's status row** says "Car", on one line like its neighbours; it took two lines for "Car computer".
 - **The guides:** the server key before the image; Imager's current screens and what to do when it offers no
   Customisation for the image; writing an NVMe SSD; `slot17.txt` is read only once (the first start's own note said
@@ -23,10 +24,18 @@ reviewers independently, then each finding was checked again before anything cha
   the receivers of 1.7.0 in the FAQ; new keys on your own server; `sudo` for the server's own check; the car screen
   needs the server once; where the app sends your route; data roaming with the 4G stick; other bands aren't
   supported. New pictures of the web page and drive mode, and the build drawings with our 3 A charger.
+- **A third read:** full paths (`~/Slot17/setup.sh`) for every setup command in the guides, and the detector stopped
+  first where a setting changes later; `slot17.txt` says the first start stops without the SDRplay licence line,
+  as it does; checking a session after a power cut starts from the drive list and doesn't claim that `final:
+  false` proves a power cut; the 4G stick goes in the other blue port, on its own USB controller (`lsusb -t`);
+  BUILD.md in the order you do it, software first; the RTL-SDR pair needs a splitter or two antennas; short
+  explanations of ufw, ppm, SMA and dB; HTTPS on hosted servers in the iPhone guide; the FAQ's range answer.
+- **A screen without a server:** the setup now says, when it sets up the car computer's screen without a display
+  server connection, that the screen's data comes with that connection. 2 new setup tests.
 - **Not changed, written down:** the image's first start waits for the user Imager makes, so an Imager that offers
   no Customisation for the file leaves the card waiting; the guides now say to use the manual steps then. A screen
-  on a car computer with no display server at all shows no data, because the part that feeds it comes with the
-  server connection.
+  on a car computer with no display server at all still shows no data, because the part that feeds it comes with
+  the server connection; the setup now says so.
 
 ## 1.7.1: the ready-made Raspberry Pi image again (26 November 2026)
 

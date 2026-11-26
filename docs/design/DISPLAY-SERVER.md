@@ -47,7 +47,7 @@ Levels are in dB above that channel's own noise floor. They're signal strength, 
 | `GET /api/clock`, `POST /api/push` | Pi | The publisher's ticket and upload |
 | `GET /api/pi-on?token=KEY` | Status | Plain `on` or `off`, for a phone shortcut |
 
-`/api/pi-on` means the server accepted a push within the last 30 seconds. It can lag a shutdown by that long, and says `off` after a server restart. Its key, `pi_status_key`, is created by the setup and opens nothing else; `bash setup.sh server --show` prints the full link.
+`/api/pi-on` means the server accepted a push within the last 30 seconds. It can lag a shutdown by that long, and says `off` after a server restart. Its key, `pi_status_key`, is created by the setup and opens nothing else; `bash ~/Slot17/setup.sh server --show` prints the full link.
 
 ## Changing the app without an app update
 
@@ -72,7 +72,7 @@ The app reads `app-config.json` from the server when it connects, and every 5 mi
 | `warnings` | `link_lost_after_s`, `receiver_quiet_windows`, `receiver_tone_repeat_s` |
 | `marks` | `summary_window_s`: how long after a sound a mark counts for it |
 | `location` | `track_every_s` |
-| `display` | `weak_colour`, `silent_colour`, `chime_colour`, `strong_outline_colour`, `strong_badge`, `frequent_text`, `pulse_on_new_strong`, `tile_gap_s` |
+| `display` | `weak_colour`, `silent_colour`, `chime_colour`, `strong_outline_colour`, `strong_badge`, `frequent_text`, `pulse_on_new_strong`, `tile_gap_s`, `floor_quiet_db` (the noise floor with the antenna hearing nothing, measured once at home) |
 | `sounds` | `urgent`, `chime`, `call`, `warning`, `link_lost`: a recipe or `{"wav": "name.wav"}`. Add `call` only once every phone has app 1.4.8: older apps refuse a file that names a sound they do not know |
 
 **A sound recipe:**

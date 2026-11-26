@@ -156,6 +156,20 @@ class OneOpeningPerSetup(Steps):
         self.assertIn("isn't all plugged in", out)
 
 
+class TheScreenWithoutAServer(Steps):
+    """Found in review on 26 November 2026: a screen set up without a display server showed no data, with no word why."""
+    def test_a_screen_without_a_server_says_what_it_needs(self):
+        rc, calls, out = self.run_section("# --- 10b. the car computer's own screen", "# --- 11. calibration",
+                                          SCREEN="yes", DISPLAY_LINK="no", DISPLAY_CONFIG="/nonexistent/slot17-display.json", RUN_USER="pi")
+        self.assertIn("connected to a display server", out)
+        self.assertTrue(any("install-screen.sh" in c for c in calls), calls)
+
+    def test_a_screen_with_a_server_installs_without_that_note(self):
+        rc, calls, out = self.run_section("# --- 10b. the car computer's own screen", "# --- 11. calibration",
+                                          SCREEN="yes", DISPLAY_LINK="yes", DISPLAY_CONFIG="/nonexistent/x.json", RUN_USER="pi")
+        self.assertNotIn("connected to a display server", out)
+
+
 class CalibrationOfItsOwnCapture(Steps):
     def test_calibration_measures_the_capture_it_just_made_and_no_other(self):
         captures, starts, calls, out = self.calibrate_and_start(CALIBRATE="yes", START="no", RECEIVER="rsp1b")

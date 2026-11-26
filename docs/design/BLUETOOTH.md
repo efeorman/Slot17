@@ -132,7 +132,7 @@ The key is 32 random bytes, made on the car computer the first time Bluetooth is
 - **What a state carries instead:** `key_id`, the first 8 hex digits of the key's SHA-256. An app checks it
   against `info` after connecting, so it notices a different car computer.
 
-That server link is plain HTTP, the operator's choice; anyone who can read it already has the link key itself, so
+On a server of your own that link is plain HTTP (a hosted one uses HTTPS); anyone who can read it already has the link key itself, so
 the Bluetooth key adds no new weakness there.
 
 An app takes a frame only if:
@@ -146,11 +146,11 @@ So a recording of the link, replayed later, cannot raise an alert.
 
 | Where | How |
 |---|---|
-| Setup | `bash setup.sh car` asks "Send alerts over Bluetooth too?", yes by default, and for the name (Enter keeps `Slot17`). `--bluetooth`, `--no-bluetooth` and `--bluetooth-name NAME` skip the questions. Skipped where there is no adapter, or no display server, which the app needs for the key |
+| Setup | `bash ~/Slot17/setup.sh car` asks "Send alerts over Bluetooth too?", yes by default, and for the name (Enter keeps `Slot17`). `--bluetooth`, `--no-bluetooth` and `--bluetooth-name NAME` skip the questions. Skipped where there is no adapter, or no display server, which the app needs for the key |
 | Ready-made image | `bluetooth=yes` or `no`, and `bluetooth_name=`, in `slot17.txt` |
 | App, the car computer | Settings, Bluetooth to the car computer: the switch and Rename. With this phone connected, off and Rename go over Bluetooth at once; otherwise, and for on, through the server like the Pushover switch, where a change made while the car is off waits up to a day |
 | App, this phone | Set up (the key through the server, then the system's chooser), Use Bluetooth on this phone, Remove |
-| By hand | `python3 -B p0/bluetooth_config.py --show`, `--on [--name N]`, `--off`, `--new-key` (every phone sets up again; the link takes it when the publisher restarts); `python3 -B p0/bluetooth_link.py adapter [--name N]` |
+| By hand | `python3 -B ~/Slot17/p0/bluetooth_config.py --show`, `--on [--name N]`, `--off`, `--new-key` (every phone sets up again; the link takes it when the publisher restarts); `python3 -B p0/bluetooth_link.py adapter [--name N]` |
 | Doctor | A Bluetooth line: off (a note), on with a working adapter, or what is missing |
 
 **What the app shows:**

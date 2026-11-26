@@ -100,7 +100,7 @@ class BrowserTests(unittest.TestCase):
         page.on("pageerror", lambda e: errors.append(str(e)))
         self.addCleanup(lambda: self.assertEqual(errors, []))
         # No server sound levels unless a test gives them: the other tests check the page's own rules at its own
-        # 22 dB (the real server's app-config.json says 35). Routes added later win over this one.
+        # 35 dB, the level app-config.json ships with (22 until 26 November 2026). Routes added later win over this one.
         page.route("**/api/config", lambda r: r.fulfill(status=404, body='{"error":"no settings"}'))
         for pattern, handler in (routes or {}).items():
             page.route(pattern, handler)
@@ -137,8 +137,8 @@ class BrowserTests(unittest.TestCase):
         page = self.open()
         self.wait(page, self.TITLE, "Detector running")
         red = {"v": 2, "seq": 2, "session": "e2e", "detector": {"state": "running", "windows": 3},
-               "channels": [channel(154, 31.0, 0.3, "e2e/w9-ch154")],
-               "matches": [match(154, 31.0, 0.3, "e2e/w9-ch154")]}
+               "channels": [channel(154, 41.0, 0.3, "e2e/w9-ch154")],
+               "matches": [match(154, 41.0, 0.3, "e2e/w9-ch154")]}
         t0 = time.monotonic()
         self.assertEqual(self.push(red), 204)
         self.wait(page, self.TONE_COUNT, 2, timeout=3)
@@ -153,7 +153,7 @@ class BrowserTests(unittest.TestCase):
 
     # -- scripted network conditions -------------------------------------------------------
     def test_link_loss_with_hung_requests_is_shown_and_ages_keep_running(self):
-        first = message(1, [channel(190, 30.0, 1.0)], [])
+        first = message(1, [channel(190, 40.0, 1.0)], [])
         served = {"n": 0}
 
         def stream(route):
@@ -174,7 +174,7 @@ class BrowserTests(unittest.TestCase):
 
     def test_a_late_older_response_cannot_replace_a_newer_one(self):
         newer = message(5, [channel(190, 10.0, 0.5)], [])
-        older = message(3, [channel(190, 30.0, 0.5)], [])
+        older = message(3, [channel(190, 40.0, 0.5)], [])
         older["server_mono_s"] = newer["server_mono_s"] - 0.01
 
         def state(route):
@@ -220,15 +220,15 @@ class BrowserTests(unittest.TestCase):
         for state in ("stopped", "stale", "starting"):
             with self.subTest(state=state):
                 page = self.controlled()
-                self.emit(page, message(1, [channel(190, 30, 1)],
-                                       [match(190, 30, 1, "s/red")], state=state))
+                self.emit(page, message(1, [channel(190, 40, 1)],
+                                       [match(190, 40, 1, "s/red")], state=state))
                 self.assertEqual(page.evaluate(self.TONE_COUNT), 0)
 
     def test_pending_start_chime_is_cancelled_by_stop_or_link_loss(self):
         for cause in ("stop", "link", "session", "car", "auth"):
             with self.subTest(cause=cause):
                 page = self.controlled(start=False)
-                self.emit(page, message(1, [channel(190, 30, 0.5)], [match(190, 30, 0.5, "s/red")]))
+                self.emit(page, message(1, [channel(190, 40, 0.5)], [match(190, 40, 0.5, "s/red")]))
                 if cause == "stop":
                     self.emit(page, message(2, [], [], state="stopped"))
                 elif cause == "link":
@@ -252,17 +252,17 @@ class BrowserTests(unittest.TestCase):
 
     def test_start_still_chimes_for_a_fresh_live_red(self):
         page = self.controlled(start=False)
-        self.emit(page, message(1, [channel(190, 30, 0.5)], [match(190, 30, 0.5, "s/red")]))
+        self.emit(page, message(1, [channel(190, 40, 0.5)], [match(190, 40, 0.5, "s/red")]))
         self.assertEqual(page.evaluate(self.TONE_COUNT), 0)
         page.click("#startBtn")
         self.assertEqual(page.evaluate(self.TONE_COUNT), 2)
 
     def test_same_sequence_delayed_frame_cannot_freshen_stale_state(self):
         page = self.controlled()
-        old = message(1, [channel(190, 30, 0.5)], [], server_age=6)
+        old = message(1, [channel(190, 40, 0.5)], [], server_age=6)
         old["server_mono_s"] = page.evaluate("window.__serverNow()")
         page.evaluate("window.__advance += 2.5")
-        self.emit(page, message(1, [channel(190, 30, 0.5)], [], server_age=8.5))
+        self.emit(page, message(1, [channel(190, 40, 0.5)], [], server_age=8.5))
         self.assertEqual(page.evaluate(self.TITLE), "No data from the car")
         page.evaluate("m => window.__stream.onmessage({data: JSON.stringify(m)})", old)
         self.assertEqual(page.evaluate(self.TITLE), "No data from the car")
@@ -272,7 +272,7 @@ class BrowserTests(unittest.TestCase):
         # Start with a valid prior clock sample; serialize the next SSE frame
         # now, then hold it in the network for 3 seconds before delivering it.
         page.evaluate("window.__advance += 3.1")
-        self.emit(page, message(1, [channel(190, 30, 8)], [match(190, 30, 8, "s/red")]), wire_delay=3)
+        self.emit(page, message(1, [channel(190, 40, 8)], [match(190, 40, 8, "s/red")]), wire_delay=3)
         self.assertEqual(page.evaluate(self.TITLE), "Detector running")
         self.assertEqual(page.evaluate(self.TONE_COUNT), 0)
         label = page.locator("#stSub").inner_text()
@@ -291,29 +291,29 @@ class BrowserTests(unittest.TestCase):
         page.evaluate("window.__stream.onerror()")
         page.wait_for_timeout(100)
         self.emit(page, message(1, [], [], boot="b2", state="stopped"))
-        self.emit(page, message(99, [channel(190, 30, 0.5)], [match(190, 30, 0.5, "s/red")], boot="b1"))
+        self.emit(page, message(99, [channel(190, 40, 0.5)], [match(190, 40, 0.5, "s/red")], boot="b1"))
         self.assertEqual(page.evaluate(self.TITLE), "Detector stopped")
         self.assertEqual(page.evaluate(self.TONE_COUNT), 0)
 
     def test_a_burst_that_is_old_end_to_end_never_chimes(self):
         # Repro: new to this viewer, 1 s old at the Pi but 14 s at the server.
         # The car link itself is then stale, so nothing is shown and nothing sounds.
-        stale = message(1, [channel(190, 30.0, 1.0, "s/a")], [match(190, 30.0, 1.0, "s/a")], server_age=14.0)
+        stale = message(1, [channel(190, 40.0, 1.0, "s/a")], [match(190, 40.0, 1.0, "s/a")], server_age=14.0)
         page = self.open(self.scripted(stale))
         self.wait(page, self.TITLE, "No data from the car")
         time.sleep(0.5)
         self.assertEqual(page.evaluate(self.TONE_COUNT), 0)
         # The sound rule on its own: 9 s at the Pi + 3 s at the server = 12 s, link fresh.
         # The old rule (Pi age only, 9 <= 10) would have chimed here.
-        late = message(1, [channel(190, 30.0, 9.0, "s/b")], [match(190, 30.0, 9.0, "s/b")], server_age=3.0)
+        late = message(1, [channel(190, 40.0, 9.0, "s/b")], [match(190, 40.0, 9.0, "s/b")], server_age=3.0)
         page = self.open(self.scripted(late))
         self.wait(page, "/1[2-9] s ago/.test(document.querySelector('.meter .meta').textContent)", True)
         time.sleep(0.5)
         self.assertEqual(page.evaluate(self.TONE_COUNT), 0)
 
     def test_red_among_three_newer_greens_is_shown_and_chimes(self):
-        chans = [channel(190, 30.0, 0.9)] + [channel(c, 8.0 + i, 0.8 - 0.1 * i) for i, c in enumerate((10, 11, 12))]
-        mats = [match(190, 30.0, 0.9, "s/r")] + [match(c, 8.0 + i, 0.8 - 0.1 * i, f"s/g{c}")
+        chans = [channel(190, 40.0, 0.9)] + [channel(c, 8.0 + i, 0.8 - 0.1 * i) for i, c in enumerate((10, 11, 12))]
+        mats = [match(190, 40.0, 0.9, "s/r")] + [match(c, 8.0 + i, 0.8 - 0.1 * i, f"s/g{c}")
                                                 for i, c in enumerate((10, 11, 12))]
         msg = message(1, chans, mats)
         page = self.open({"**/api/stream": lambda r: r.fulfill(
@@ -332,7 +332,7 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(page.evaluate(self.CHANNELS), ["—", "—", "—"])
 
     def test_a_call_below_red_gets_the_soft_tone_and_the_meter_says_so(self):
-        # 20 dB: under the page's 22 dB red, over the 18 dB call level.
+        # 20 dB: under the page's 35 dB red, over the 18 dB call level.
         row = dict(channel(170, 20.0, 0.5), call=True, rising=True)
         calling = message(1, [row], [dict(match(170, 20.0, 0.5, "s/call"), call=True, rising=True)])
         page = self.open(self.scripted(calling))
@@ -391,7 +391,7 @@ class BrowserTests(unittest.TestCase):
 
     def test_repeat_needed_setting_gates_the_chime(self):
         # One red match on a channel seen once in the last minute.
-        once = message(1, [channel(190, 30.0, 0.5)], [match(190, 30.0, 0.5, "s/one")])
+        once = message(1, [channel(190, 40.0, 0.5)], [match(190, 40.0, 0.5, "s/one")])
         once["state"]["channels"][0]["hits_60s"] = 1
         # Default: a single burst still chimes (a passing vehicle may transmit once).
         page = self.open(self.scripted(once))
@@ -404,7 +404,7 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(page2.evaluate(self.TONE_COUNT), 0)
 
         # ... while a channel that matched twice in the window still chimes.
-        twice = message(1, [channel(190, 30.0, 0.5)], [match(190, 30.0, 0.5, "s/two")])
+        twice = message(1, [channel(190, 40.0, 0.5)], [match(190, 40.0, 0.5, "s/two")])
         twice["state"]["channels"][0]["hits_60s"] = 2
         page3 = self.open(self.scripted(twice), init="localStorage.setItem('s17cfg', JSON.stringify({repeat: true}));")
         self.wait(page3, self.TONE_COUNT, 2)
@@ -439,10 +439,10 @@ class BrowserTests(unittest.TestCase):
         page = self.open(init="localStorage.setItem('s17cfg', JSON.stringify({repeat: true}));")
         self.wait(page, self.TITLE, "Detector running")
         # A red match arriving after Start, on a channel seen once in the window.
-        row = channel(190, 30.0, 0.3, "why/one")
+        row = channel(190, 40.0, 0.3, "why/one")
         row["hits_60s"] = 1
         self.push({"v": 2, "seq": 2, "session": "why", "detector": {"state": "running", "windows": 3},
-                   "channels": [row], "matches": [match(190, 30.0, 0.3, "why/one")]})
+                   "channels": [row], "matches": [match(190, 40.0, 0.3, "why/one")]})
         self.wait(page, self.CLASSES + "[0]", "meter red")
         page.click("#gearBtn")
         self.wait(page,
@@ -568,8 +568,8 @@ class BrowserTests(unittest.TestCase):
     def test_an_ordinary_chime_in_the_same_push_cannot_block_the_urgent_beep(self):
         page = self.urgent_page("u4")
         self.push({"v": 2, "seq": 2, "session": "u4", "detector": {"state": "running", "windows": 2},
-                   "channels": [channel(10, 30.0, 0.3, "u4/o"), channel(178, 60.0, 0.3, "u4/u")],
-                   "matches": [match(10, 30.0, 0.3, "u4/o"), match(178, 60.0, 0.3, "u4/u")]})
+                   "channels": [channel(10, 40.0, 0.3, "u4/o"), channel(178, 60.0, 0.3, "u4/u")],
+                   "matches": [match(10, 40.0, 0.3, "u4/o"), match(178, 60.0, 0.3, "u4/u")]})
         self.wait(page, self.TONE_COUNT, 3)
         time.sleep(0.8)
         self.assertEqual(self.sounds(page), {"urgent": 1, "chime": 0})
@@ -621,8 +621,8 @@ class BrowserTests(unittest.TestCase):
         page = self.open(start=False)
         self.wait(page, self.TITLE, "Detector running")
         self.push({"v": 2, "seq": 2, "session": "u10", "detector": {"state": "running", "windows": 2},
-                   "channels": [channel(178, 60.0, 0.3, "u10/u"), channel(10, 30.0, 0.3, "u10/o")],
-                   "matches": [match(178, 60.0, 0.3, "u10/u"), match(10, 30.0, 0.3, "u10/o")]})
+                   "channels": [channel(178, 60.0, 0.3, "u10/u"), channel(10, 40.0, 0.3, "u10/o")],
+                   "matches": [match(178, 60.0, 0.3, "u10/u"), match(10, 40.0, 0.3, "u10/o")]})
         time.sleep(0.4)
         page.click("#startBtn")
         self.wait(page, self.TONE_COUNT, 3)
@@ -667,15 +667,15 @@ class BrowserTests(unittest.TestCase):
 
     # -- the cockpit and drive mode (1.7) ------------------------------------------------------
     def strong(self, seq=1):
-        return message(seq, [dict(channel(190, 30.0, 0.5), rising=True), channel(60, 14.0, 5.0)],
-                       [match(190, 30.0, 0.5, f"d/strong{seq}")])
+        return message(seq, [dict(channel(190, 40.0, 0.5), rising=True), channel(60, 14.0, 5.0)],
+                       [match(190, 40.0, 0.5, f"d/strong{seq}")])
 
     def test_drive_mode_shows_the_strongest_channel_and_is_remembered(self):
         page = self.open(self.scripted(self.strong()))
         self.wait(page, self.TITLE, "Detector running")
         page.click("#driveBtn")
         self.wait(page, "document.getElementById('drive').hidden", False)
-        self.wait(page, "document.getElementById('dDb').textContent", "30.0")
+        self.wait(page, "document.getElementById('dDb').textContent", "40.0")
         self.assertIn("alerting", page.evaluate("document.getElementById('drive').className"))
         self.assertIn("L190", page.evaluate("document.getElementById('dCh').textContent"))
         self.assertIn("L60", page.evaluate("document.getElementById('dOthers').textContent"))
@@ -760,14 +760,14 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(saved, [])                                         # drive or cockpit is not kept any more
 
     def three(self, seq=1):
-        return message(seq, [dict(channel(190, 30.0, 0.5), rising=True), channel(60, 14.0, 5.0), channel(119, None, 31.0)],
-                       [match(190, 30.0, 0.5, f"d/strong{seq}")])
+        return message(seq, [dict(channel(190, 40.0, 0.5), rising=True), channel(60, 14.0, 5.0), channel(119, None, 31.0)],
+                       [match(190, 40.0, 0.5, f"d/strong{seq}")])
 
     def test_drive_mode_shows_one_bar_and_three_when_asked_and_keeps_the_choice(self):
         page = self.open(self.scripted(self.three()), width=1024, height=600)
         self.wait(page, self.TITLE, "Detector running")
         page.click("#driveBtn")
-        self.wait(page, "document.getElementById('dDb').textContent", "30.0")
+        self.wait(page, "document.getElementById('dDb').textContent", "40.0")
         self.assertTrue(page.evaluate("document.getElementById('dThree').hidden"))          # one bar by default
         self.assertFalse(page.evaluate("document.getElementById('dBar').hidden"))
         self.assertEqual(page.evaluate("document.getElementById('dBarsText').textContent"), "3 bars")
@@ -778,11 +778,11 @@ class BrowserTests(unittest.TestCase):
         rows = page.evaluate("[...document.querySelectorAll('#dThree .d-row')].map(r => [r.className, r.querySelector('.d-rh').innerText,"
                              " r.querySelectorAll('.d-rbar i').length, r.querySelectorAll('.d-rbar i.on').length])")
         self.assertEqual([r[0] for r in rows], ["d-row lvl-red", "d-row lvl-yellow", "d-row lvl-grey"])
-        self.assertIn("30.0", rows[0][1]); self.assertIn("STRONG", rows[0][1]); self.assertIn("L190", rows[0][1])
+        self.assertIn("40.0", rows[0][1]); self.assertIn("STRONG", rows[0][1]); self.assertIn("L190", rows[0][1])
         self.assertIn("rising", rows[0][1])
         self.assertIn("L60", rows[1][1]); self.assertIn("n/a", rows[2][1]); self.assertIn("L119", rows[2][1])
         self.assertEqual([r[2] for r in rows], [12, 12, 12])
-        self.assertEqual([r[3] for r in rows], [10, 4, 0])                                   # the one bar's own scale
+        self.assertEqual([r[3] for r in rows], [12, 4, 0])                                   # the one bar's own scale: 40 dB fills it
         self.assertEqual(page.evaluate("document.getElementById('dBarsText').textContent"), "1 bar")
         page.reload()
         page.click("#startBtn")
@@ -850,7 +850,7 @@ class BrowserTests(unittest.TestCase):
         page = self.open(self.scripted(self.strong()), width=1920, height=1080)
         self.wait(page, self.TITLE, "Detector running")
         page.click("#driveBtn")
-        self.wait(page, "document.getElementById('dDb').textContent", "30.0")
+        self.wait(page, "document.getElementById('dDb').textContent", "40.0")
         unit = 1920 / 844                                        # drawn at 844 x 390, scaled as a whole
         size = page.evaluate("parseFloat(getComputedStyle(document.getElementById('dDb')).fontSize)")
         drawn = 120 if page.evaluate("document.getElementById('drive').classList.contains('alerting')") else 112
@@ -910,6 +910,20 @@ class BrowserTests(unittest.TestCase):
         time.sleep(0.8)
         self.assertEqual(page.evaluate("document.getElementById('redOut').textContent"), "30 dB")   # not the old default
 
+    def test_without_server_levels_the_page_chimes_from_35_and_an_old_saved_22_moves_once(self):
+        # Review of 26 November 2026: the car computer's own screen has no /api/config, so it chimed from
+        # the page's own 22 dB while the README and the apps say 35.
+        page = self.open(self.scripted(message(1, [], [])), width=1440, height=900)
+        self.wait(page, "document.getElementById('redOut').textContent", "35 dB")
+        page = self.open(self.scripted(message(1, [], [])), width=1440, height=900,
+                         init="if (!sessionStorage.getItem('seeded')) { sessionStorage.setItem('seeded', '1'); "
+                              "localStorage.setItem('s17cfg', JSON.stringify({red: 22, yellow: 12})); }")
+        self.wait(page, "document.getElementById('redOut').textContent", "35 dB")
+        page.evaluate("const c = JSON.parse(localStorage.getItem('s17cfg')); c.red = 22; localStorage.setItem('s17cfg', JSON.stringify(c))")
+        page.reload()                                         # once only: a 22 chosen after the move stays
+        time.sleep(0.8)
+        self.assertEqual(page.evaluate("document.getElementById('redOut').textContent"), "22 dB")
+
     def test_the_phones_status_row_says_car_on_one_line_like_the_others(self):
         # Seen in the docs review's new pictures, 26 November 2026: "Car computer" took two lines there.
         page = self.open(self.scripted(message(1, [], [])), width=390, height=844)
@@ -945,7 +959,7 @@ class BrowserTests(unittest.TestCase):
         self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 800)
         self.assertLessEqual(page.evaluate("document.getElementById('nav').getBoundingClientRect().width"), 80)
         page.click("#driveBtn")
-        self.wait(page, "document.getElementById('dDb').textContent", "30.0")
+        self.wait(page, "document.getElementById('dDb').textContent", "40.0")
         for sel in ("#dSaw button[data-label='noise']", "#dExit", "#dDb"):
             box = page.evaluate(f"JSON.stringify(document.querySelector(\"{sel}\").getBoundingClientRect())")
             box = json.loads(box)
@@ -953,8 +967,8 @@ class BrowserTests(unittest.TestCase):
             self.assertLessEqual(box["right"], 800, sel)
 
     def test_narrow_phone_layout_fits(self):
-        msg = message(1, [channel(190, 30.0, 1.0), channel(60, 14.0, 5.0), channel(119, None, 30.0)],
-                      [match(190, 30.0, 1.0, "s/layout")])
+        msg = message(1, [channel(190, 40.0, 1.0), channel(60, 14.0, 5.0), channel(119, None, 30.0)],
+                      [match(190, 40.0, 1.0, "s/layout")])
         page = self.open({"**/api/stream": lambda r: r.fulfill(
             status=200, headers={"Content-Type": "text/event-stream"}, body=sse(msg)),
             "**/api/state": lambda r: r.fulfill(status=200, headers={"Content-Type": "application/json"},
