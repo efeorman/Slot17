@@ -2,7 +2,7 @@
 
 What changed, why, and what was tried and left out. Newest first. Figures come from our own car, receiver and drives; yours will differ.
 
-## Unreleased: the guides read as a newcomer, and three fixes they found (26 November 2026)
+## 1.7.2: the guides read as a newcomer, and three fixes they found (26 November 2026)
 
 Every guide was read as someone setting Slot17 up for the first time, and checked against the code, by three
 reviewers independently, then each finding was checked again before anything changed.
