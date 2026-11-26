@@ -2,6 +2,134 @@
 
 What changed, why, and what was tried and left out. Newest first. Figures come from our own car, receiver and drives; yours will differ.
 
+## 1.7.0: the cockpit web page, drive mode and the car computer's own screen; the SDRplay RSP1B and RSP1A, and a pair of RTL-SDRs (26 November 2026)
+
+Detection is unchanged for the Airspy Mini, and so are the apps (iPhone app 1.9.0, Android app 1.11.0). Signed updates
+bring the detector, the receiver code and the page for the car computer's own screen. The screen itself
+(`setup.sh car --screen`) and a new receiver need the installer again, and so does a server of your own for the new web
+page.
+
+### The cockpit web page, drive mode and the car computer's own screen (25 and 26 November 2026)
+
+- **The web page is now a cockpit with the app's five sections:** Live, Sightings, Car computer, Logs and Settings. Until now it was three meters and a settings sheet.
+  - **Live:** the four status lights (server, car computer, detector, receiver), the meters with a STRONG mark, the last sound played, the I saw buttons, the matches recognised since the page opened, and the car computer at a glance.
+  - **Car computer:** health, connection and Bluetooth, the setup check with where to start, software, and the actions the app has: save a recording, collect the log, a support package, the Pushover and Bluetooth switches, stop, and power off (two taps).
+  - **Sightings and Logs:** the sightings made on this device with the car computer's answer, the car computer's logs and the support packages on the server.
+  - The page's sound, timing and safety rules are unchanged, line for line; its 36 browser tests pass unchanged except where a control moved (switches instead of labelled buttons, stop under Car computer).
+- **Drive mode:** one glance on a car mount. The strongest channel in very large figures, its bar, the other channels, and four large I saw buttons; red, with the urgent beep's line, during a strong burst. Landscape and portrait. Remembered on the device. **One bar or three:** the strongest channel's bar (the default), or the three strongest channels, each with its figure, its line and its own bar in its own colour; the button is at the foot of the left side.
+- **Every screen size:** a sidebar on a computer, a tab bar on a phone, an icon rail on a short landscape screen (800 x 480, 1024 x 600), drive mode on any of them. Checked from 320 px wide to 1440 px.
+- **The car computer's own screen** (`p0/screen.py`, `deploy/install-screen.sh`, `setup.sh car --screen`): the same page, full screen at every power-up, served by the car computer itself on 127.0.0.1. The publisher writes its whole state to a file in memory, so a match is on the screen within its 50 ms loop, with no server or internet. Requests from the screen are carried out like the app's, by id. It opens in drive mode at every power-up, whatever it was left on; one bar or three is kept on the car computer through power cuts. Chromium in kiosk mode, under cage on Raspberry Pi OS Lite or started with the desktop where there is one, at a low priority. [CAR-SCREEN.md](design/CAR-SCREEN.md).
+- **Second pass, after the first look on the car computer (26 November 2026).** On its own screen the page looked like another app, and drive mode was out of proportion. Found by comparing the screen with the design files, not by the tests:
+  - **The type.** The design uses Inter and Bricolage Grotesque; the car computer has neither and no internet, so Chromium fell back to DejaVu Sans. Both fonts are now inside the page (Latin, the weights it uses, 92 KB; SIL Open Font License, `display/fonts/`). Both pages' security policy allows `font-src data:` and nothing else new.
+  - **Drawn to the design files' measurements:** the channel cards (name and STRONG on top, ten full-width bars, the strength, frequency, then chips for rising, a call and the rule), the header (the state as the title, the mute button with its words), the car computer's cards in columns that fill from the top (they left large holes with little data), and on a phone the newest channel large and the others as one line each.
+  - **Drive mode is drawn at 844 x 390 and scaled as a whole**, so it keeps its proportions from a 7-inch screen to 1920 x 1080; standing up it stacks. With nothing to show it says why in words where the number goes; it showed a grey bar.
+  - **Play again** on the last sound. **This drive** in the summary.
+  - **The car computer's screen opens on Live** (or drive mode), not on whichever section a browser was left on.
+  - **The screen's own message when the detector runs but no data reaches it** said the publisher was not running; an older publisher was running that did not feed the screen yet. It now says either may be the case, and the state is "no data" instead of "stopped".
+  - Checked at 1920 x 1080, 1440 x 900, 1280 x 800, 1024 x 600, 800 x 480, 844 x 390 and 390 x 844, with a strong burst, a quiet channel and no data: no sideways scrolling, nothing of drive mode off screen, both fonts loaded, no script errors. 4 new browser tests (46).
+- **Third pass, with the car computer's own data (26 November 2026):** with no channel heard, Live showed three dashed placeholder cards that read as "still loading"; one panel now says "No TETRA heard", or the detector's state and its reason. The icon rail and the tab bar cut "Car computer" to "Car compu…"; they say "Car". Drive mode showed an empty bar under its words; it is hidden.
+- **Fourth pass, at the operator's request (26 November 2026):** the car computer's screen opens in drive mode at every start (it opened in the last mode); drive mode shows one bar or three. Drawing them found the alert line cut at its longest: "Urgent beep · 10 s ago" ended in "ag" in landscape, and standing up "Urgent beep · 2 s ag". The design's top line has only Mute; this one also has Cockpit. Where it must, the line now breaks after the dot, within the buttons' height. 4 new browser tests and one rewritten (53); each fails on the earlier page.
+- **Tried and left out:** a separate Python program for the screen. It would be a fourth interface to keep in step with the apps, for a saving in memory (about 300 MB) the Pi 5 doesn't need.
+
+### The SDRplay RSP1B and RSP1A, and a pair of RTL-SDRs (24 and 25 November 2026)
+
+Nothing changes for an Airspy Mini: its code moved into `p0/receiver_airspy.py` without changing a call, and a test
+replays 1.6.0's exact sequence of library calls. On our own car the new receiver layer has run its Airspy Mini since 26
+November: ready within a minute of power-up, and no samples lost in four hours.
+[RECEIVERS.md](design/RECEIVERS.md) describes all three receivers and what is left to check with the hardware,
+which none of the new ones has seen yet.
+
+- **The receiver is chosen once**, by `setup.sh car` from the USB IDs (or `--receiver airspy|rsp1b|rsp1a|rtlsdr2`;
+  `receiver=` in `slot17.txt` for a prepared card), and kept in `~/.config/slot17-receiver.json`. It is never
+  guessed at a start. Only that receiver's code is loaded. The doctor, the status, the supervisor's messages and
+  the boot message name the receiver; for the Airspy their words are unchanged.
+- **SDRplay RSP1B and RSP1A**, through SDRplay's API 3.15 at 6 MSPS: zero IF, 5 MHz, fixed gain, AGC and bias-T
+  off. `deploy/install-sdrplay.sh` downloads SDRplay's installer, checks its SHA-256 and runs it. It shows
+  SDRplay's licence, which forbids passing the API on and allows it to send receiver details to SDRplay; the API
+  runs a root service. Lost samples are found from the API's sample numbers, and overloads are counted.
+- **A pair of RTL-SDRs**, at 381.25 and 383.75 MHz, joined into the 6 MSPS band by FFT (`p0/rtl_combine.py`),
+  handing over at 382.5 MHz, between two channels. A realignment of the two sticks' clocks is counted, not a
+  fault. Lost samples are found from the timing of the USB transfers, from 20 ms up. `calibrate.py` gives each
+  stick its own ppm. `deploy/install-rtlsdr.sh` installs Debian's librtlsdr and keeps the DVB-T driver off the
+  sticks.
+- **Tests: 311** (235 before), plus checks against each receiver's own header files, its real library where it
+  could be loaded without installing, and a stand-in library written in C. On the Pi 5, the RTL pair's joining
+  costs 38 % of a core, and the whole detector on the pair 95 % with six busy channels.
+- **Tried and left out:**
+  - 2.4 MS/s per stick: six channels out of reach, and bursts beyond a stick's reach recognised on the wrong
+    channels.
+  - Longer FFT blocks: no cheaper (28 to 38 % of a core for every shape tried).
+  - A table look-up for the sticks' bytes: five times the cost of arithmetic on the Pi, for the same values.
+  - Reporting realignments as lost samples: that would have marked every long drive degraded.
+- **Fixed after a second engineer's review** (24 November 2026). Each finding was reproduced or traced
+  before fixing, and each fix has a test that fails without it. 322 detector tests (311 before them).
+  - **The RTL join's block edges.**
+    - **The fault:** the overlap was discarded at the start of each block only. The zero-phase weighting wraps
+      round both ends, so the last 16 samples of every 2 ms block had an error larger than the signal.
+    - **How it was measured:** against many tones off the FFT's bins, evaluated exactly.
+    - **Now:** 0.5 ms is discarded at each end. The error is the same everywhere (−47 dB), at the same cost,
+      and the stream is 0.5 ms behind the sticks.
+    - **Why it was missed:** the earlier tests compared the stitcher with itself.
+  - **The RTL pair's overflow:** when both sticks' waiting rooms overflowed, the two losses were added, twice
+    the time. The larger total was reported next. That was wrong too (second round, below).
+    `backlog_max_ms` shows one stick's reader running behind.
+  - **Calibration's choice of captures:**
+    - **The fault:** any pair capture among the files made the newest pair capture win, so an older pair
+      capture overrode the Airspy just captured. A pair's captures also replaced another receiver's calibration.
+    - **Now:** only captures made like this receiver is set up (kind; for the pair also its sticks' serials and
+      ppm settings) are measured together. Setup measures exactly the capture it made.
+    - **Writes:** calibration files are written whole and synced.
+  - **Setup:**
+    - The receiver choice is saved only after its driver is in.
+    - A start asked for at first boot waits until the whole receiver chosen is plugged in.
+  - **The installers:** the DVB-T blacklist check reads only the `*.conf` files modprobe reads. SDRplay's
+    service must be enabled for power-up, not merely running.
+  - **The doctor:** an unreadable receiver settings file is a problem, as it is to the detector, not a working
+    Airspy.
+  - **SDRplay:**
+    - A batch the ring refused is counted whole (8 lost had been reported as 4).
+    - Failed API calls are kept in the status.
+    - After a failed Uninit, nothing is handed on from the closing thread.
+    - A free receiver is preferred over one in use.
+  - **The verifiers:**
+    - A compiler other than zig checks only its own target.
+    - A missing pycparser makes the check incomplete rather than passing.
+    - Results are compared for signedness.
+  - **Left as a limit, written down in RECEIVERS.md:** on the pair, a loss is marked where it is found, up to
+    5 s after it happened. One stick queueing for over 5 s can't be told from a loss.
+- **The review's second round** (the same session, 24 November 2026, evening). 344 detector tests, plus 94 in
+  `scripts/`.
+  - **A test the updater's copy couldn't load (F13):**
+    - **The fault:** setup's order was tested in `tests/`, by reading `deploy/setup-car.sh` when the module
+      loaded. The updater tests a release in a copy of `p0/` and `tests/` only, so that module failed to load
+      there, and every release of this branch would have been rejected. The full checks on the PC and on the
+      Pi both have `deploy/`, so neither saw it.
+    - **Now:** those tests run setup's own steps in bash (`scripts/test_setup_steps.py`). The released code
+      gains a test that every test module loads in the updater's copy.
+  - **The updater's time:**
+    - With that fixed, the copy took 138 s on the development PC, against the 70 s it has on the car computer.
+    - The tests that run the whole detector on stand-in receivers, and the pair's calibration on synthetic
+      captures, now run in the full checks only. The branch then costs about 1.23 times the released code.
+    - It still needs measuring on the Pi before a release.
+  - **One loss rule for the pair (F17):** the joined stream's loss is the smaller of what each stick has
+    passed over: overwritten, skipped to realign, owed, and lost on USB. The larger of the two overflow
+    totals had lost a later overflow of the other stick.
+    - The same rule now reports the stretch a realignment there and back passes over. A reader late by
+      15 ms for 7 s used to shift every later timestamp by 15 ms, unreported.
+    - Checked against the test's own count of what was delivered and joined.
+  - **The join's 0.5 ms delay** now dates the session's start (F15).
+  - **SDRplay's end of session (F16):** a closing gate in both callbacks; a last batch that can't be handed
+    on is counted; after a failed Uninit the receiver is kept alive to the end of the process; a second
+    close does nothing.
+  - **Calibration:** pair captures are grouped by their handover frequency too (F14).
+  - **Smaller ones:**
+    - The pair needs exactly two sticks for setup's check (three passed).
+    - Receiver settings writes sync their folder.
+    - A same-named file in an earlier modprobe folder hides a later one.
+    - SDRplay's already-installed path needs the service enabled.
+    - The verifiers compare a compiler's system as well as its processor.
+    - The receiver capture's levels count the negative rail (as F27 on released code).
+
 ## 1.6.1: the Bluetooth key stays off the Bluetooth link, the second review's fixes, and tests on every change (25 November 2026)
 
 Detection is unchanged, and so are the apps (iPhone app 1.9.0, Android app 1.11.0). Signed updates bring the

@@ -17,6 +17,11 @@
 #     --bluetooth / --no-bluetooth  send alerts to the app over Bluetooth too, or not
 #     --bluetooth-name NAME         the name phones show for this car computer (default Slot17)
 #     --notify / --no-notify        set up phone notifications through Pushover, or not
+#     --receiver KIND       airspy (Airspy Mini), rsp1b or rsp1a (SDRplay), rtlsdr2 (two RTL-SDRs);
+#                           without it: the one set up before, else the one found on USB
+#     --accept-sdrplay-licence  install SDRplay's API without asking (for someone who has read its licence)
+#     --screen / --no-screen        show the display page full screen on a screen attached to this computer,
+#                                   at every power-up, or switch that off (deploy/install-screen.sh)
 #     --calibrate / --no-calibrate  measure this receiver's frequency error, or not
 #     --start / --no-start          start the detector at the end, or not
 #     --no-autostart        don't start the detector at every power-up
@@ -28,7 +33,8 @@ PROJECT="$(cd "$HERE/.." && pwd)"
 . "$HERE/common.sh"
 
 SERVER=""; PI_KEY=""; HOTSPOT=""; HOTSPOT_STEP=ask; UPDATES=ask; DISPLAY_LINK=ask; NOTIFY=ask; CALIBRATE=ask; START=ask
-BLUETOOTH=ask; BT_NAME=""
+BLUETOOTH=ask; BT_NAME=""; SCREEN=keep
+RECEIVER=""; ACCEPT_SDRPLAY=0
 AUTOSTART=1; NO_SERVICES=0; CHECK=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -43,8 +49,12 @@ while [ $# -gt 0 ]; do
         --bluetooth) BLUETOOTH=yes ;;
         --no-bluetooth) BLUETOOTH=no ;;
         --bluetooth-name) BT_NAME="$2"; [ "$BLUETOOTH" = no ] || BLUETOOTH=yes; shift ;;
+        --screen) SCREEN=yes ;;
+        --no-screen) SCREEN=no ;;
         --notify) NOTIFY=yes ;;
         --no-notify) NOTIFY=no ;;
+        --receiver) RECEIVER="$2"; shift ;;
+        --accept-sdrplay-licence|--accept-sdrplay-license) ACCEPT_SDRPLAY=1 ;;
         --calibrate) CALIBRATE=yes ;;
         --no-calibrate) CALIBRATE=no ;;
         --start) START=yes ;;
@@ -63,6 +73,17 @@ DISPLAY_CONFIG="$HOME/.config/slot17-display.json"
 BT_SETTINGS="$PROJECT/p0/bluetooth_config.py"
 
 airspy_present() { command -v lsusb >/dev/null && lsusb -d 1d50:60a1 >/dev/null 2>&1; }
+RECEIVER_PY="$PROJECT/p0/receiver.py"
+configured_receiver() {
+    python3 -B "$RECEIVER_PY" --show 2>/dev/null | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["kind"] if d["set"] else "")' 2>/dev/null || true
+}
+receiver_name() { python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import receiver; print(receiver.name(sys.argv[2]))' "$PROJECT/p0" "$1" 2>/dev/null || echo "$1"; }
+# The set-up receiver is plugged in: the Airspy as always; any other kind by its USB ID, every device it needs.
+receiver_present() {
+    local kind="${RECEIVER:-$(configured_receiver)}"
+    if [ -z "$kind" ] || [ "$kind" = airspy ]; then airspy_present; return; fi
+    command -v lsusb >/dev/null && python3 -B "$RECEIVER_PY" --present "$kind" >/dev/null 2>&1
+}
 
 report() {
     step "What is installed"
@@ -72,7 +93,11 @@ report() {
     printf '  %-22s %s GB free\n' "Storage" "$(df -Pk "$PROJECT" | awk 'NR==2 {print int($4/1048576)}')"
     printf '  %-22s %s\n' "Python" "$(python3 --version 2>&1 || echo missing)"
     printf '  %-22s %s\n' "NumPy and SciPy" "$(python3 -c 'import numpy, scipy; print(numpy.__version__, scipy.__version__)' 2>/dev/null || echo missing)"
-    printf '  %-22s %s\n' "Airspy plugged in" "$(airspy_present && echo yes || echo 'no, or lsusb is missing')"
+    if [ -z "$(configured_receiver)" ] || [ "$(configured_receiver)" = airspy ]; then
+        printf '  %-22s %s\n' "Airspy plugged in" "$(airspy_present && echo yes || echo 'no, or lsusb is missing')"
+    else
+        printf '  %-22s %s\n' "Receiver" "$(receiver_name "$(configured_receiver)"), $(receiver_present && echo 'plugged in' || echo 'not found on USB')"
+    fi
     printf '  %-22s %s\n' "Detector service" "$(systemctl is-enabled $SERVICE 2>/dev/null || echo 'not installed'), $(systemctl is-active $SERVICE 2>/dev/null || true)"
     printf '  %-22s %s\n' "Display link" "$([ -f "$DISPLAY_CONFIG" ] && echo configured || echo 'not configured')"
     printf '  %-22s %s\n' "Bluetooth" "$(python3 -B "$BT_SETTINGS" --show 2>/dev/null | python3 -c '
@@ -102,12 +127,61 @@ EOF
 
 # --- 1. packages ------------------------------------------------------------
 packages=(python3 python3-numpy python3-scipy python3-psutil python3-cryptography usbutils)
-[ "$NO_SERVICES" = 1 ] || packages+=(airspy libairspy0)
 apt_install "${packages[@]}"
 # Lets you type "python" instead of "python3". Optional: not every system has it.
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python-is-python3 >/dev/null 2>&1 \
     && ok "the 'python' command works" || note "'python' isn't available here; use 'python3' instead"
 python_ok || die "Python 3.10 or newer is needed. This system has $(python3 --version 2>&1). Use a newer system, such as Raspberry Pi OS based on Debian 12 or 13."
+
+# --- 1b. the receiver, and only its driver -------------------------------------
+if [ "$NO_SERVICES" != 1 ]; then
+    step "The receiver"
+    if [ -z "$RECEIVER" ]; then
+        RECEIVER="$(configured_receiver)"
+        [ -z "$RECEIVER" ] || ok "set up before: $(receiver_name "$RECEIVER") (choose another with --receiver)"
+    fi
+    if [ -z "$RECEIVER" ]; then
+        mapfile -t seen < <(python3 -B "$RECEIVER_PY" --usb "$(lsusb 2>/dev/null || true)" 2>/dev/null || true)
+        if [ "${#seen[@]}" -eq 1 ]; then
+            RECEIVER="${seen[0]}"
+            ok "found on USB: $(receiver_name "$RECEIVER")"
+        elif [ "${#seen[@]}" -eq 0 ]; then
+            RECEIVER=airspy
+            note "no receiver found on USB, so this sets up for the Airspy Mini. Using another? Plug it in and run the setup again, or add --receiver KIND."
+        elif [ "$YES" = 1 ] || [ ! -t 0 ]; then
+            RECEIVER="${seen[0]}"
+            note "more than one receiver is plugged in; using $(receiver_name "$RECEIVER"). Choose with --receiver KIND."
+        else
+            echo "  More than one receiver is plugged in. Which one should the detector use?"
+            for k in "${seen[@]}"; do echo "    $k  ($(receiver_name "$k"))"; done
+            RECEIVER="$(ask_text "Type one of: ${seen[*]}")"
+        fi
+    fi
+    # The choice is saved only once its driver is in: a licence declined or an install that fails leaves the
+    # receiver set up before (and its tuned gain) as it was (until 24 November 2026 it was saved first).
+    case "$RECEIVER" in
+        airspy|rsp1b|rsp1a|rtlsdr2) ;;
+        *) die "unknown receiver '$RECEIVER': choose airspy, rsp1b, rsp1a or rtlsdr2" ;;
+    esac
+    case "$RECEIVER" in
+        airspy)
+            apt_install airspy libairspy0 ;;
+        rsp1b|rsp1a)
+            echo "  The $(receiver_name "$RECEIVER") needs SDRplay's own driver, the SDRplay API. It is SDRplay's software, under"
+            echo "  SDRplay's licence, which the installer shows you; it runs a service of SDRplay's as root."
+            if [ "$ACCEPT_SDRPLAY" = 1 ]; then
+                bash "$HERE/install-sdrplay.sh" --accept-licence
+            elif [ "$YES" = 1 ] || [ ! -t 0 ]; then
+                die "the SDRplay API needs your agreement to SDRplay's licence: run this in a terminal, or add --accept-sdrplay-licence once you have read it"
+            else
+                bash "$HERE/install-sdrplay.sh"
+            fi ;;
+        rtlsdr2)
+            bash "$HERE/install-rtlsdr.sh" ;;
+    esac
+    python3 -B "$RECEIVER_PY" --set "$RECEIVER" >/dev/null || die "the receiver choice could not be saved ($RECEIVER)"
+    ok "the detector uses the $(receiver_name "$RECEIVER")"
+fi
 
 # --- 2. this machine ----------------------------------------------------------
 step "Checking this machine"
@@ -329,10 +403,19 @@ else
     note "skipped"
 fi
 
+# --- 10b. the car computer's own screen (only when asked) ----------------------
+if [ "$SCREEN" = yes ]; then
+    step "The car computer's own screen"
+    sudo bash "$HERE/install-screen.sh" --user "$RUN_USER"
+elif [ "$SCREEN" = no ] && [ -f /etc/systemd/system/slot17-kiosk.service ]; then
+    step "The car computer's own screen"
+    sudo bash "$HERE/install-screen.sh" --off
+fi
+
 # --- 11. calibration ----------------------------------------------------------
 step "Calibrating the receiver (recommended once)"
-if ! airspy_present; then
-    note "no Airspy found on USB, so this is skipped. Plug it in and run: bash setup.sh car --calibrate --no-display --no-notify"
+if ! receiver_present; then
+    note "no $(receiver_name "${RECEIVER:-airspy}") found on USB, so this is skipped. Plug it in and run: bash setup.sh car --calibrate --no-display --no-notify"
     CALIBRATE=no
 fi
 if [ "$CALIBRATE" = ask ]; then
@@ -343,9 +426,14 @@ fi
 RECEIVER_OPENED=0
 if [ "$CALIBRATE" = yes ]; then
     RECEIVER_OPENED=1       # whether the capture worked or not, the receiver has been opened once this power-up
+    # A tag of its own, so calibration measures exactly this capture, never an older one from another receiver
+    # (until 24 November 2026 it measured the newest files, whatever made them).
+    CAL_TAG="downlink-calibration-$(date +%s)-$$"
+    CAL_DIR="$(python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import paths; print(paths.IQ_DIR)' "$PROJECT/p0")"
     if python3 -B "$PROJECT/p0/capture.py" --freq 392.5 --secs 4 --rate 3 --lna 12 --mixer 12 --vga 12 \
-            --tag downlink-calibration >/dev/null 2>&1 \
-       && (cd "$PROJECT/p0" && python3 -B calibrate.py 2>&1 | tail -4); then
+            --receiver "${RECEIVER:-airspy}" --tag "$CAL_TAG" >/dev/null 2>&1 \
+       && CAL_FILES=("$CAL_DIR"/*_"$CAL_TAG"_*.iq) && [ -f "${CAL_FILES[0]}" ] \
+       && (cd "$PROJECT/p0" && python3 -B calibrate.py "${CAL_FILES[@]}" 2>&1 | tail -4); then
         ok "calibrated; saved in p0/calibration.local.json"
     else
         note "calibration didn't work. Common reasons: no TETRA base stations in 390-395 MHz where you are, or the antenna isn't connected. The detector still runs, using the example calibration. If the receiver stops responding, unplug it and plug it back in."
@@ -362,12 +450,16 @@ if [ "$RECEIVER_OPENED" = 1 ] && [ "$START" != no ]; then
     note "not started now: the calibration has just used the receiver, and a second start in the same power-up can make it stop responding. $([ "$AUTOSTART" = 1 ] && echo "It starts by itself at the next power-up." || echo "After the next power-up, start it with: sudo systemctl start $SERVICE")"
 fi
 if [ "$START" = ask ]; then
-    if airspy_present; then
+    if receiver_present; then
         ask_yes "Start it now?" y && START=yes || START=no
     else
         START=no
-        note "not started, because no Airspy is plugged in. It starts by itself at the next power-up."
+        note "not started, because no $(receiver_name "${RECEIVER:-airspy}") is plugged in. It starts by itself at the next power-up."
     fi
+elif [ "$START" = yes ] && ! receiver_present; then
+    # First boot asks to start when any known receiver is on USB; one stick of a pair isn't the receiver chosen.
+    START=no
+    note "not started: the $(receiver_name "${RECEIVER:-airspy}") isn't all plugged in (both sticks, for the RTL-SDR pair). It starts by itself at the next power-up."
 fi
 if [ "$START" = yes ]; then
     echo "  This waits for the first completed analysis, up to 90 seconds."

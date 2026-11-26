@@ -633,6 +633,7 @@ class ServerTests(unittest.TestCase):
         self.assertNotIn("unsafe-inline", csp)
         self.assertNotIn("media-src *", csp)
         self.assertIn("frame-ancestors 'none'", csp)
+        self.assertIn("font-src data:", csp)                # the page carries its own fonts, nothing from elsewhere
 
     def test_home_screen_app_files_are_public_and_harmless(self):
         status, headers, body = self.req("GET", "/manifest.webmanifest")

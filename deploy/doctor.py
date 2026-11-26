@@ -31,6 +31,15 @@ RELEASE_KEY = HOME / ".config/slot17-release-key.pub"
 SERVICE_FILE = Path("/etc/systemd/system/tetra-detector.service")
 SERVER_CONFIG = Path("/opt/slot17-display/config.json")
 AIRSPY_USB = "1d50:60a1"
+RECEIVER_SETTINGS = HOME / ".config/slot17-receiver.json"
+# kind: the name people see, its USB ID (vendor:product); as in p0/receiver.py.
+RECEIVERS = {"airspy": ("Airspy Mini", AIRSPY_USB), "rsp1b": ("SDRplay RSP1B", "1df7:3050"),
+             "rsp1a": ("SDRplay RSP1A", "1df7:3000"), "rtlsdr2": ("RTL-SDR pair", "0bda:2838")}
+SDRPLAY_LIBRARIES = (Path("/usr/local/lib/libsdrplay_api.so.3"), Path("/usr/lib/libsdrplay_api.so.3"))
+RTLSDR_USB = ("0bda:2838", "0bda:2832")
+RTLSDR_LIBRARIES = tuple(Path(d) / "librtlsdr.so.0" for d in ("/usr/lib/aarch64-linux-gnu", "/usr/lib/x86_64-linux-gnu",
+                                                              "/usr/lib/arm-linux-gnueabihf", "/usr/local/lib", "/usr/lib"))
+DVB_MODULE = Path("/sys/module/dvb_usb_rtl28xxu")       # Linux's DVB-T television driver for these sticks
 
 OK, NOTE, PROBLEM = "ok", "note", "PROBLEM"
 
@@ -93,14 +102,84 @@ def check_python(p):
     return [("Python", OK, f"{v.major}.{v.minor}, NumPy and SciPy {out}")]
 
 
+UNREADABLE = "unreadable"
+
+
+def receiver_kind(p):
+    """The receiver setup chose (p0/receiver.py), the Airspy Mini when nothing is set; UNREADABLE for a file that
+    exists but can't be read (the detector refuses it, so this mustn't pass it as the Airspy); None for a kind
+    this doctor doesn't know."""
+    if not p.exists(RECEIVER_SETTINGS):
+        return "airspy"
+    data = _json(p.read(RECEIVER_SETTINGS))
+    if data is None or not isinstance(data.get("kind"), str):
+        return UNREADABLE
+    return data["kind"] if data["kind"] in RECEIVERS else None
+
+
 def check_receiver(p):
-    status, _ = p.run("lsusb", "-d", AIRSPY_USB)
+    kind = receiver_kind(p)
+    if kind == UNREADABLE:
+        return [("Receiver", PROBLEM, f"{RECEIVER_SETTINGS} can't be read, and the detector won't start with it: "
+                                      "run bash setup.sh car --receiver KIND")]
+    if kind is None:
+        return [("Receiver", PROBLEM, f"{RECEIVER_SETTINGS} names an unknown receiver: run bash setup.sh car")]
+    if kind == "airspy":
+        status, _ = p.run("lsusb", "-d", AIRSPY_USB)
+        if status is None:
+            return [("Receiver", NOTE, "cannot tell: lsusb is missing (sudo apt install usbutils)")]
+        if status != 0:
+            return [("Receiver", PROBLEM, "no Airspy on USB. Check the cable; if it was plugged in, unplug it, plug it "
+                                          "back in and power the computer off and on")]
+        return [("Receiver", OK, "Airspy found on USB (not opened)")]
+    if kind == "rtlsdr2":
+        return check_rtl_pair(p)
+    name, usb = RECEIVERS[kind]
+    out = []
+    status, _ = p.run("lsusb", "-d", usb)
     if status is None:
-        return [("Receiver", NOTE, "cannot tell: lsusb is missing (sudo apt install usbutils)")]
-    if status != 0:
-        return [("Receiver", PROBLEM, "no Airspy on USB. Check the cable; if it was plugged in, unplug it, plug it "
-                                      "back in and power the computer off and on")]
-    return [("Receiver", OK, "Airspy found on USB (not opened)")]
+        out.append(("Receiver", NOTE, "cannot tell: lsusb is missing (sudo apt install usbutils)"))
+    elif status != 0:
+        out.append(("Receiver", PROBLEM, f"no {name} on USB. Check the cable; if it was plugged in, unplug it and plug "
+                                         "it back in"))
+    else:
+        out.append(("Receiver", OK, f"{name} found on USB (not opened)"))
+    # The SDRplay API: SDRplay's installer puts the library in /usr/local/lib and runs its service as sdrplay.service.
+    if not any(p.exists(path) for path in SDRPLAY_LIBRARIES):
+        out.append(("SDRplay API", PROBLEM, f"not installed: run bash setup.sh car --receiver {kind}"))
+    else:
+        _, active = p.run("systemctl", "is-active", "sdrplay.service")
+        if active == "active":
+            out.append(("SDRplay API", OK, "installed; its service runs"))
+        else:
+            out.append(("SDRplay API", PROBLEM, f"installed, but its service is {active or 'not running'}: "
+                                                "sudo systemctl enable --now sdrplay"))
+    return out
+
+
+def check_rtl_pair(p):
+    """Both sticks on USB (counted, not opened), librtlsdr installed, and whether the television driver is loaded."""
+    out = []
+    status, listing = p.run("lsusb")
+    if status is None:
+        out.append(("Receiver", NOTE, "cannot tell: lsusb is missing (sudo apt install usbutils)"))
+    else:
+        n = sum(1 for line in (listing or "").lower().splitlines() if any(f"id {u}" in line for u in RTLSDR_USB))
+        if n == 2:
+            out.append(("Receiver", OK, "both RTL-SDRs of the pair found on USB (not opened)"))
+        elif n < 2:
+            out.append(("Receiver", PROBLEM, f"{n} of the pair's two RTL-SDRs on USB. Check both cables; two sticks "
+                                             "are happier on a powered hub or on the computer's own ports"))
+        else:
+            out.append(("Receiver", PROBLEM, f"{n} RTL-SDRs on USB; Slot17 uses exactly two: unplug the others"))
+    if any(p.exists(path) for path in RTLSDR_LIBRARIES):
+        out.append(("librtlsdr", OK, "installed"))
+    else:
+        out.append(("librtlsdr", PROBLEM, "not installed: run bash setup.sh car --receiver rtlsdr2"))
+    if p.exists(DVB_MODULE):
+        out.append(("Television driver", NOTE, "loaded; librtlsdr detaches it when the detector opens the sticks, and "
+                                               "bash deploy/install-rtlsdr.sh keeps it off after the next power-up"))
+    return out
 
 
 def check_service(p):

@@ -1,0 +1,13 @@
+{
+  "name": "airspy-smoke",
+  "sample_rate": 6000000,
+  "centre_hz": 382500000,
+  "receiver_ppm": 4.09,
+  "noise_rms_per_component": 30,
+  "stall_after_samples": 18350080,
+  "tolerance_samples": 12000,
+  "bursts": [
+    {"id": "cub-with-training", "channel": 99, "slot": 64, "training": true, "payload_seed": 99, "snr_db": 20},
+    {"id": "cub-without-training", "channel": 100, "slot": 128, "training": false, "payload_seed": 100, "snr_db": 20}
+  ]
+}

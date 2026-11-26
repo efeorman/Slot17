@@ -13,7 +13,8 @@ import unittest
 
 
 REQUIRED_TESTS = ("test_detection.py", "test_local_config.py", "test_health.py", "test_notifications.py", "test_phy.py",
-                  "test_reliability.py", "test_runtime.py", "test_review_fixes.py")
+                  "test_reliability.py", "test_runtime.py", "test_review_fixes.py", "test_receivers.py",
+                  "test_rtlsdr.py")
 MIN_TESTS = 70
 
 # --tests-if-changed, for the start of every drive. Until 1.2.8 each start ran the whole suite (32 to 34 s

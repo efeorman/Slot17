@@ -1,0 +1,7 @@
+# /etc/pam.d/slot17-kiosk: the session the car computer's screen runs in (deploy/slot17-kiosk.service).
+# pam_systemd gives it a seat, which cage needs for the screen and the touch input. No password is asked:
+# systemd starts the session itself and never authenticates.
+auth     required pam_unix.so nullok
+account  required pam_unix.so
+session  required pam_unix.so
+session  required pam_systemd.so

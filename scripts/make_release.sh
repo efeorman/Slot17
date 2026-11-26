@@ -14,7 +14,17 @@ git rev-parse --verify --quiet "$ref^{commit}" >/dev/null || { echo "no such com
 
 rm -rf dist
 mkdir dist
-git archive --format=tar --prefix=slot17/ "$ref" | gzip -9 > dist/slot17.tar.gz
+# Not sim/: the hardware-free test environment is for development, not for a car computer (found in review,
+# F36). Left out here rather than by export-ignore, so other archives of the tree (a test copy for the Pi) keep it.
+git archive --format=tar --prefix=slot17/ "$ref" -- . ':(exclude)sim' > dist/slot17.tar
+# The page for the car computer's own screen, where signed updates put it too (p0/screen.py prefers p0/web/:
+# signed updates replace p0/ but never display/). The same bytes as display/page.html.
+web="$(mktemp -d)"
+mkdir -p "$web/slot17/p0/web"
+git show "$ref:display/page.html" > "$web/slot17/p0/web/page.html"
+tar --append -f dist/slot17.tar -C "$web" slot17/p0/web/page.html
+rm -rf "$web"
+gzip -9 dist/slot17.tar
 git show "$ref:install.sh" > dist/install.sh
 (cd dist && sha256sum slot17.tar.gz install.sh > SHA256SUMS)
 echo "Built from $(git rev-parse --short "$ref"), version $(git show "$ref:VERSION"):"

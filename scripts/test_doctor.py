@@ -246,5 +246,88 @@ class DoctorTests(unittest.TestCase):
         self.assertNotIn("x" * 40, out.getvalue(), "no key in what goes to the apps")
 
 
+class ReceiverKinds(unittest.TestCase):
+    """The receiver line follows the receiver setup chose (p0/receiver.py); the Airspy's is unchanged."""
+
+    def rsp(self, **change):
+        m = Machine(**change)
+        m.files[str(doctor.RECEIVER_SETTINGS)] = json.dumps({"kind": "rsp1b"})
+        m.files[str(doctor.SDRPLAY_LIBRARIES[0])] = "lib"
+        m.answers["lsusb"] = (0, "Bus 001 Device 004: ID 1df7:3050 SDRplay RSP1B")
+        return m
+
+    def rows(self, m):
+        return {name: (level, text) for name, level, text in doctor.check_receiver(m)}
+
+    def test_no_settings_file_is_the_airspy_as_before(self):
+        self.assertEqual(self.rows(Machine()), {"Receiver": (doctor.OK, "Airspy found on USB (not opened)")})
+
+    def test_a_settings_file_that_cannot_be_read_is_a_problem(self):
+        """The detector refuses such a file (receiver.configured), so the doctor mustn't call it a working
+        Airspy. Until 24 November 2026 it did (found in review)."""
+        for text in ("", "{", "[1]", json.dumps({"gain": {}}), json.dumps({"kind": 7}), None):
+            m = Machine()
+            m.files[str(doctor.RECEIVER_SETTINGS)] = text
+            level, message = self.rows(m)["Receiver"]
+            self.assertEqual(level, doctor.PROBLEM, text)
+            self.assertIn("can't be read", message)
+
+    def test_a_working_rsp1b(self):
+        rows = self.rows(self.rsp())
+        self.assertEqual(rows["Receiver"], (doctor.OK, "SDRplay RSP1B found on USB (not opened)"))
+        self.assertEqual(rows["SDRplay API"][0], doctor.OK)
+        status, verdict, text = verdicts(self.rsp())
+        self.assertEqual(status, 0, text)
+
+    def test_an_rsp1b_without_its_api_or_service(self):
+        m = self.rsp()
+        del m.files[str(doctor.SDRPLAY_LIBRARIES[0])]
+        self.assertIn("setup.sh car --receiver rsp1b", self.rows(m)["SDRplay API"][1])
+        m = self.rsp()
+        m.answers["systemctl is-active"] = (3, "inactive")
+        self.assertEqual(self.rows(m)["SDRplay API"][0], doctor.PROBLEM)
+
+    def test_an_rsp1b_not_plugged_in(self):
+        m = self.rsp()
+        m.answers["lsusb"] = (1, "")
+        self.assertEqual(self.rows(m)["Receiver"][0], doctor.PROBLEM)
+
+    def rtl(self, sticks=2):
+        m = Machine()
+        m.files[str(doctor.RECEIVER_SETTINGS)] = json.dumps({"kind": "rtlsdr2"})
+        m.files[str(doctor.RTLSDR_LIBRARIES[0])] = "lib"
+        lines = ["Bus 003 Device 002: ID 1d50:60a1 Airspy", "Bus 001 Device 001: ID 1d6b:0002 Linux Foundation"]
+        lines += [f"Bus 001 Device 00{k + 3}: ID 0bda:{'2838' if k % 2 == 0 else '2832'} Realtek RTL2838UHIDIR"
+                  for k in range(sticks)]
+        m.answers["lsusb"] = (0, "\n".join(lines))
+        return m
+
+    def test_a_working_rtl_pair(self):
+        rows = self.rows(self.rtl())
+        self.assertEqual(rows["Receiver"], (doctor.OK, "both RTL-SDRs of the pair found on USB (not opened)"))
+        self.assertEqual(rows["librtlsdr"][0], doctor.OK)
+        self.assertNotIn("Television driver", rows)
+        status, verdict, text = verdicts(self.rtl())
+        self.assertEqual(status, 0, text)
+
+    def test_an_rtl_pair_short_of_a_stick_or_with_one_too_many(self):
+        self.assertIn("1 of the pair's two", self.rows(self.rtl(sticks=1))["Receiver"][1])
+        self.assertEqual(self.rows(self.rtl(sticks=0))["Receiver"][0], doctor.PROBLEM)
+        self.assertIn("exactly two", self.rows(self.rtl(sticks=3))["Receiver"][1])
+
+    def test_an_rtl_pair_without_librtlsdr_or_with_the_tv_driver(self):
+        m = self.rtl()
+        del m.files[str(doctor.RTLSDR_LIBRARIES[0])]
+        self.assertIn("setup.sh car --receiver rtlsdr2", self.rows(m)["librtlsdr"][1])
+        m = self.rtl()
+        m.files[str(doctor.DVB_MODULE)] = ""
+        self.assertEqual(self.rows(m)["Television driver"][0], doctor.NOTE)
+
+    def test_an_unknown_receiver_in_the_settings(self):
+        m = Machine()
+        m.files[str(doctor.RECEIVER_SETTINGS)] = json.dumps({"kind": "hackrf"})
+        self.assertEqual(self.rows(m)["Receiver"][0], doctor.PROBLEM)
+
+
 if __name__ == "__main__":
     unittest.main()

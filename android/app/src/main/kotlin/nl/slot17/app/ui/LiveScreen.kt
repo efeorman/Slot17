@@ -232,7 +232,7 @@ fun Banners(model: AppModel) {
         Text("Quiet mode: chimes from ${Fmt.fixed(model.settings.effectiveRed, 0)} dB. Urgent beeps unchanged.", color = C.dim,
             fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 6.dp))
     }
-    if (model.receiverQuiet) Text("Receiver hears nothing. Check the Airspy antenna and cable.", color = Color.White, fontSize = 13.sp,
+    if (model.receiverQuiet) Text("Receiver hears nothing. Check the antenna and its cable.", color = Color.White, fontSize = 13.sp,
         fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth().background(C.red, RoundedCornerShape(8.dp)).padding(8.dp))
 }

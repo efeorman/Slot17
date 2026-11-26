@@ -87,7 +87,13 @@ def collect(hb_path, include_history=False):
             return None
     age = age_of(hb.get('t')) if hb else None
     procs = detector_processes()
-    usb = airspy_on_usb()
+    # The Airspy as always; another receiver by its own USB ID (p0/receiver.py).
+    try:
+        import notify
+        kind = notify.receiver_kind()
+    except Exception:  # noqa: BLE001 - status stays readable
+        kind = "airspy"
+    usb = airspy_on_usb() if kind == "airspy" else notify.receiver_present(kind)
     session = hb.get('session') if hb else None
     ev = os.path.join(session, 'events.jsonl') if session else (newest_session() if include_history else None)
     n_ev = None
@@ -117,7 +123,7 @@ def collect(hb_path, include_history=False):
     return {"now": now, "heartbeat": hb, "heartbeat_age_s": age,
             "heartbeat_stale": not fresh,
             "ready": bool(fresh and hb.get("ready") and pid_matches),
-            "processes": procs, "airspy_on_usb": usb,
+            "processes": procs, "airspy_on_usb": usb, "receiver": kind,
             "session": session or (os.path.dirname(ev) if ev else None),
             "rf_age_s": age_of(rf.get('measured_utc')), 'host_age_s': age_of(host.get('measured_utc')),
             "events": n_ev, "alerts": n_alert, "last_event": last_ev,
@@ -148,7 +154,8 @@ def report(st):
               f"{(hb.get('centre_hz') or 0)/1e6:.3f} MHz   pid {hb.get('pid')}")
         report_health(st)
     usb = st["airspy_on_usb"]
-    print("  Airspy on USB: "
+    kind = st.get("receiver", "airspy")
+    print(("  Airspy on USB: " if kind == "airspy" else f"  {kind} on USB: ")
           + ("yes" if usb else "not enumerated"
              if usb is False else "unknown"))
     if st["processes"]:

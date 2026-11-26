@@ -84,8 +84,8 @@ class BrowserTests(unittest.TestCase):
         cls.httpd.shutdown()
         cls.httpd.server_close()
 
-    def open(self, routes=None, width=390, cookie=True, start=True, init=""):
-        ctx = self.browser.new_context(viewport={"width": width, "height": 800})
+    def open(self, routes=None, width=390, cookie=True, start=True, init="", height=800):
+        ctx = self.browser.new_context(viewport={"width": width, "height": height})
         if cookie:
             ctx.add_cookies([{"name": "s17", "value": KEY, "url": self.url}])
         ctx.add_init_script(TONES)
@@ -405,7 +405,7 @@ class BrowserTests(unittest.TestCase):
         twice["state"]["channels"][0]["hits_60s"] = 2
         page3 = self.open(self.scripted(twice), init="localStorage.setItem('s17cfg', JSON.stringify({repeat: true}));")
         self.wait(page3, self.TONE_COUNT, 2)
-        self.assertEqual(page3.evaluate("document.getElementById('repeatBtn').textContent"), "Repeat needed: on")
+        self.assertEqual(page3.evaluate("document.getElementById('repeatBtn').getAttribute('aria-checked')"), "true")
 
     def test_the_antenna_warning_can_be_switched_off_for_bench_testing(self):
         """The Pi is started at home with no antenna on purpose, to test."""
@@ -419,8 +419,7 @@ class BrowserTests(unittest.TestCase):
         self.assertTrue(page.evaluate("document.getElementById('antennaBanner').hidden"))
         self.assertEqual(page.evaluate(self.TONE_COUNT), 0)
         page.click("#gearBtn")
-        self.assertEqual(page.evaluate("document.getElementById('antennaBtn').textContent"),
-                         "Antenna warning: off")
+        self.assertEqual(page.evaluate("document.getElementById('antennaBtn').getAttribute('aria-checked')"), "false")
         # Turning it back on must restore the banner without a reload: the
         # operator arriving at a test site should not have to know that.
         page.click("#antennaBtn")
@@ -502,7 +501,7 @@ class BrowserTests(unittest.TestCase):
     def test_stopping_the_detector_from_the_phone_needs_two_taps(self):
         page = self.open(self.scripted(message(1, [], [], state="running")))
         self.wait(page, self.TITLE, "Detector running")
-        page.click("#gearBtn")
+        page.click("#carBtn")                       # stop lives under Car computer since the cockpit (1.7)
         page.click("#stopBtn")
         # One tap only arms it; nothing has been sent.
         self.assertEqual(page.evaluate("document.getElementById('stopBtn').textContent"),
@@ -632,7 +631,7 @@ class BrowserTests(unittest.TestCase):
         self.wait(page, self.TONE_COUNT, 2)
         self.assertEqual(self.sounds(page), {"urgent": 0, "chime": 1})
         page.click("#gearBtn")
-        self.assertEqual(page.evaluate("document.getElementById('urgentBtn').textContent"), "Urgent beep: off")
+        self.assertEqual(page.evaluate("document.getElementById('urgentBtn').getAttribute('aria-checked')"), "false")
         page.click("#testUrgentBtn")
         self.wait(page, self.TONE_COUNT, 5)
         self.assertEqual(self.sounds(page), {"urgent": 1, "chime": 1})
@@ -662,6 +661,255 @@ class BrowserTests(unittest.TestCase):
                       "JSON.parse(localStorage.getItem('s17cfg')), {vol: 50})))")
         page.reload()
         self.assertEqual(page.evaluate("JSON.parse(localStorage.getItem('s17cfg')).vol"), 50)
+
+    # -- the cockpit and drive mode (1.7) ------------------------------------------------------
+    def strong(self, seq=1):
+        return message(seq, [dict(channel(190, 30.0, 0.5), rising=True), channel(60, 14.0, 5.0)],
+                       [match(190, 30.0, 0.5, f"d/strong{seq}")])
+
+    def test_drive_mode_shows_the_strongest_channel_and_is_remembered(self):
+        page = self.open(self.scripted(self.strong()))
+        self.wait(page, self.TITLE, "Detector running")
+        page.click("#driveBtn")
+        self.wait(page, "document.getElementById('drive').hidden", False)
+        self.wait(page, "document.getElementById('dDb').textContent", "30.0")
+        self.assertIn("alerting", page.evaluate("document.getElementById('drive').className"))
+        self.assertIn("L190", page.evaluate("document.getElementById('dCh').textContent"))
+        self.assertIn("L60", page.evaluate("document.getElementById('dOthers').textContent"))
+        page.reload()
+        page.click("#startBtn")
+        self.wait(page, "document.getElementById('drive').hidden", False)
+        page.click("#dExit")
+        self.wait(page, "document.getElementById('drive').hidden", True)
+        page.reload()
+        self.assertTrue(page.evaluate("document.getElementById('drive').hidden"))
+
+    def test_a_drive_mode_sighting_goes_to_the_car_computer_like_the_apps(self):
+        page = self.open(self.scripted(message(1, [], [], state="running")))
+        self.wait(page, self.TITLE, "Detector running")
+        before = set(self.store.ops)
+        page.click("#driveBtn")
+        page.click("#dSaw button[data-label='police']")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not set(self.store.ops) - before:
+            time.sleep(0.05)
+        new = [self.store.ops[k] for k in set(self.store.ops) - before]
+        self.assertEqual(len(new), 1)
+        self.assertEqual(new[0]["kind"], "mark")
+        self.assertEqual(new[0]["payload"]["label"], "police")
+        self.assertIn("Police saved", page.evaluate("document.getElementById('dNote').textContent"))
+
+    def test_sections_switch_and_the_last_one_is_remembered(self):
+        page = self.open(self.scripted(message(1, [], [], state="running")))
+        self.wait(page, self.TITLE, "Detector running")
+        page.click("#carBtn")
+        self.assertFalse(page.evaluate("document.getElementById('v-car').hidden"))
+        self.assertTrue(page.evaluate("document.getElementById('v-live').hidden"))
+        self.assertEqual(page.evaluate("location.hash"), "#car")
+        page.goto(self.url + "/")
+        self.assertFalse(page.evaluate("document.getElementById('v-car').hidden"))
+
+    def test_the_car_computer_section_shows_its_health_and_where_to_start(self):
+        state = self.strong()
+        state["state"].update(pi={"session_s": 1200, "temp_c": 52.0, "throttled": 0x50000, "dropped_samples": 0},
+                              features=["mark", "doctor"],
+                              doctor={"items": [["Receiver", "ok", "Airspy Mini found"],
+                                                ["Power supply", "PROBLEM", "Undervoltage seen"]], "age_s": 30})
+        state["state"]["detector"].update(hits=514, unchecked=1, partial=0)
+        page = self.open(self.scripted(state))
+        self.wait(page, self.TITLE, "Detector running")
+        page.click("#carBtn")
+        self.wait(page, "document.getElementById('carNotice').hidden", False)
+        self.assertIn("Power supply", page.evaluate("document.getElementById('carNoticeTitle').textContent"))
+        health = page.evaluate("document.getElementById('healthKv').textContent")
+        self.assertIn("Undervoltage seen", health)
+        self.assertIn("about 20 min", health)
+        self.assertTrue(page.evaluate("document.getElementById('offBtn').disabled"))     # not in its features
+
+    def screen_routes(self, msg, saved, bars=1):
+        def screen(route):
+            if route.request.method == "POST":
+                saved.append(json.loads(route.request.post_data))
+                return route.fulfill(status=204, body="")
+            route.fulfill(status=200, headers={"Content-Type": "application/json"}, body=json.dumps({"screen": True, "bars": bars}))
+        return dict(self.scripted(msg), **{"**/api/screen": screen})
+
+    # The operator, 26 November 2026: "always start by default in drive mode instead of cockpit, even when they shut
+    # down the pi on cockpit mode".
+    def test_the_car_computers_own_screen_starts_without_a_tap_in_drive_mode_whatever_it_was_left_on(self):
+        saved = []
+        page = self.open(self.screen_routes(self.strong(), saved), start=False, width=800, height=480,
+                         init="if (!sessionStorage.getItem('seen')) { sessionStorage.setItem('seen', '1');"
+                              " localStorage.setItem('s17view', JSON.stringify({section: 'live', mode: 'cockpit'})); }")
+        self.wait(page, "document.getElementById('startOverlay').hidden", True)
+        self.wait(page, "document.getElementById('drive').hidden", False)
+        self.assertTrue(page.evaluate("document.body.classList.contains('kiosk')"))
+        self.wait(page, "document.body.dataset.audio !== 'idle'", True)   # started without a tap (the kiosk browser may play sound)
+        page.click("#dExit")
+        self.wait(page, "document.getElementById('drive').hidden", True)
+        page.click("#driveBtn")
+        page.click("#dExit")
+        page.reload()                                                       # the next start, left on the cockpit
+        self.assertFalse(page.evaluate("document.getElementById('drive').hidden"))   # at once: no cockpit first
+        self.wait(page, "document.body.classList.contains('kiosk')", True)
+        self.assertFalse(page.evaluate("document.getElementById('drive').hidden"))
+        time.sleep(0.3)
+        self.assertEqual(saved, [])                                         # drive or cockpit is not kept any more
+
+    def three(self, seq=1):
+        return message(seq, [dict(channel(190, 30.0, 0.5), rising=True), channel(60, 14.0, 5.0), channel(119, None, 31.0)],
+                       [match(190, 30.0, 0.5, f"d/strong{seq}")])
+
+    def test_drive_mode_shows_one_bar_and_three_when_asked_and_keeps_the_choice(self):
+        page = self.open(self.scripted(self.three()), width=1024, height=600)
+        self.wait(page, self.TITLE, "Detector running")
+        page.click("#driveBtn")
+        self.wait(page, "document.getElementById('dDb').textContent", "30.0")
+        self.assertTrue(page.evaluate("document.getElementById('dThree').hidden"))          # one bar by default
+        self.assertFalse(page.evaluate("document.getElementById('dBar').hidden"))
+        self.assertEqual(page.evaluate("document.getElementById('dBarsText').textContent"), "3 bars")
+        page.click("#dBars")
+        self.wait(page, "document.querySelectorAll('#dThree .d-row').length", 3)
+        for sel in ("dNum", "dLine", "dBar", "dOthers"):
+            self.assertTrue(page.evaluate(f"document.getElementById('{sel}').hidden"), sel)
+        rows = page.evaluate("[...document.querySelectorAll('#dThree .d-row')].map(r => [r.className, r.querySelector('.d-rh').innerText,"
+                             " r.querySelectorAll('.d-rbar i').length, r.querySelectorAll('.d-rbar i.on').length])")
+        self.assertEqual([r[0] for r in rows], ["d-row lvl-red", "d-row lvl-yellow", "d-row lvl-grey"])
+        self.assertIn("30.0", rows[0][1]); self.assertIn("STRONG", rows[0][1]); self.assertIn("L190", rows[0][1])
+        self.assertIn("rising", rows[0][1])
+        self.assertIn("L60", rows[1][1]); self.assertIn("n/a", rows[2][1]); self.assertIn("L119", rows[2][1])
+        self.assertEqual([r[2] for r in rows], [12, 12, 12])
+        self.assertEqual([r[3] for r in rows], [10, 4, 0])                                   # the one bar's own scale
+        self.assertEqual(page.evaluate("document.getElementById('dBarsText').textContent"), "1 bar")
+        page.reload()
+        page.click("#startBtn")
+        self.wait(page, "document.querySelectorAll('#dThree .d-row').length", 3)            # kept on this device
+        page.click("#dBars")
+        self.wait(page, "document.getElementById('dThree').hidden", True)
+        self.assertFalse(page.evaluate("document.getElementById('dBar').hidden"))
+
+    def test_three_bars_with_fewer_channels_shows_those_and_with_none_says_why(self):
+        page = self.open(self.scripted(self.strong()), width=800, height=480,
+                         init="localStorage.setItem('s17view', JSON.stringify({section: 'live', mode: 'drive', bars: 3}));")
+        self.wait(page, "document.querySelectorAll('#dThree .d-row').length", 2)            # no empty third row
+        page = self.open(self.scripted(message(1, [], [], state="stopped")), width=800, height=480,
+                         init="localStorage.setItem('s17view', JSON.stringify({section: 'live', mode: 'drive', bars: 3}));")
+        self.wait(page, "document.getElementById('dEmptyTitle').textContent", "Detector stopped")
+        self.assertTrue(page.evaluate("document.getElementById('dThree').hidden"))
+
+    def test_on_the_car_computers_screen_three_bars_are_kept_on_the_car_computer(self):
+        saved = []
+        page = self.open(self.screen_routes(self.three(), saved, bars=3), start=False, width=800, height=480)
+        self.wait(page, "document.querySelectorAll('#dThree .d-row').length", 3)
+        page.click("#dBars")
+        self.wait(page, "document.getElementById('dThree').hidden", True)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and not saved:
+            time.sleep(0.05)
+        self.assertEqual(saved, [{"bars": 1}])
+
+    def test_three_bars_fit_every_screen_and_no_word_is_cut(self):
+        cut = ("[...document.querySelectorAll('#drive .d-acts button span, #dBars span, #dStatus, #dVia, #dAlert, .d-rch')]"
+               ".filter(e => e.offsetParent && e.scrollWidth > e.clientWidth + 1).map(e => e.id || e.className + ':' + e.textContent)")
+        for width, height in ((1920, 1080), (1280, 800), (1024, 600), (800, 480), (844, 390), (390, 844)):
+            page = self.open(self.scripted(self.three()), width=width, height=height,
+                             init="localStorage.setItem('s17view', JSON.stringify({section: 'live', mode: 'drive', bars: 3}));")
+            self.wait(page, "document.querySelectorAll('#dThree .d-row').length", 3)
+            self.wait(page, "document.getElementById('dAlert').hidden", False)       # the sound's line: the widest top line
+            self.assertEqual(page.evaluate(cut), [], (width, height))
+            # Its longest text (shown up to 10 s): whole, inside the top line's height. It was cut: "…ag", standing up "2 s ag".
+            worst = page.evaluate("""() => { const t = document.getElementById('dAlertText'), a = document.getElementById('dAlert');
+                t.textContent = 'Urgent\u00a0beep\u00a0\u00b7 10\u00a0s\u00a0ago';
+                const r = a.getBoundingClientRect(), b = document.getElementById('dExit').getBoundingClientRect();
+                return [a.scrollWidth <= a.clientWidth + 1, r.height <= b.height + 1, t.getClientRects().length]; }""")
+            self.assertEqual(worst[:2], [True, True], (width, height, worst))
+            for sel in ("#dThree .d-row:last-child .d-rbar", "#dNote", "#dBars", "#dExit", "#dSaw button[data-label='noise']"):
+                box = json.loads(page.evaluate(f"JSON.stringify(document.querySelector(\"{sel}\").getBoundingClientRect())"))
+                self.assertLessEqual(box["bottom"], height + 0.5, (width, height, sel))
+                self.assertLessEqual(box["right"], width + 0.5, (width, height, sel))
+            note = json.loads(page.evaluate("JSON.stringify(document.getElementById('dNote').getBoundingClientRect())"))
+            last = json.loads(page.evaluate("JSON.stringify(document.querySelector('#dThree .d-row:last-child').getBoundingClientRect())"))
+            self.assertLessEqual(last["bottom"], note["top"] + 0.5, (width, height))        # nothing on top of each other
+            self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), width)
+
+    # Found on the car computer's own screen, 25 November 2026: it had neither font, so it fell back to DejaVu
+    # Sans and looked like another app; drive mode at 1920 x 1080 lost the design's proportions; with no data it
+    # showed a grey bar where the number goes; and it opened on the section a test had left it on.
+    def test_the_page_carries_its_own_fonts_and_the_policy_lets_them_load(self):
+        page = self.open(self.scripted(self.strong()), width=1440, height=900)
+        self.wait(page, self.TITLE, "Detector running")
+        self.wait(page, "[...document.fonts].filter(f => f.status === 'loaded').map(f => f.family).sort().join()",
+                  "Bricolage Grotesque,Inter")
+        self.assertTrue(page.evaluate("document.fonts.check('700 22px \"Bricolage Grotesque\"') && document.fonts.check('15px Inter')"))
+        self.assertTrue(page.evaluate("getComputedStyle(document.body).fontFamily.startsWith('Inter')"))
+
+    def test_drive_mode_keeps_the_designs_proportions_on_a_big_screen(self):
+        page = self.open(self.scripted(self.strong()), width=1920, height=1080)
+        self.wait(page, self.TITLE, "Detector running")
+        page.click("#driveBtn")
+        self.wait(page, "document.getElementById('dDb').textContent", "30.0")
+        unit = 1920 / 844                                        # drawn at 844 x 390, scaled as a whole
+        size = page.evaluate("parseFloat(getComputedStyle(document.getElementById('dDb')).fontSize)")
+        drawn = 120 if page.evaluate("document.getElementById('drive').classList.contains('alerting')") else 112
+        self.assertAlmostEqual(size, drawn * unit, delta=2)      # B: 112 px quiet, 120 px in a strong burst
+        column = page.evaluate("document.getElementById('dSaw').getBoundingClientRect().width")
+        self.assertAlmostEqual(column, 340 * unit, delta=2)
+        for sel in ("#dSaw button[data-label='noise']", "#dExit", "#dDb", "#dNote"):
+            box = json.loads(page.evaluate(f"JSON.stringify(document.querySelector(\"{sel}\").getBoundingClientRect())"))
+            self.assertLessEqual(box["bottom"], 1080, sel)
+            self.assertLessEqual(box["right"], 1920, sel)
+
+    def test_drive_mode_with_nothing_to_show_says_why_in_words(self):
+        page = self.open(self.scripted(message(1, [], [], state="stopped")), width=1024, height=600)
+        self.wait(page, self.TITLE, "Detector stopped")
+        page.click("#driveBtn")
+        self.wait(page, "document.getElementById('dEmpty').hidden", False)
+        self.assertTrue(page.evaluate("document.getElementById('dNum').hidden"))
+        self.assertEqual(page.evaluate("document.getElementById('dEmptyTitle').textContent"), "Detector stopped")
+        self.assertTrue(page.evaluate("document.getElementById('dBar').hidden"))   # no empty bar under the words
+
+    def test_the_cockpit_with_no_channel_says_so_in_words_not_with_empty_cards(self):
+        page = self.open(self.scripted(message(1, [], [])), width=1920, height=1080)
+        self.wait(page, self.TITLE, "Detector running")
+        self.wait(page, "document.getElementById('mNone').hidden", False)
+        self.assertTrue(page.evaluate("document.getElementById('meters').hidden"))
+        self.assertEqual(page.evaluate("document.getElementById('mNoneTitle').textContent"), "No TETRA heard")
+        self.assertEqual(page.evaluate("document.getElementById('emptyNote').textContent"), "")
+
+    def test_the_cockpit_with_the_detector_stopped_gives_its_reason_where_the_cards_go(self):
+        page = self.open(self.scripted(message(1, [], [], state="stopped")), width=1920, height=1080)
+        self.wait(page, self.TITLE, "Detector stopped")
+        self.wait(page, "document.getElementById('mNoneTitle').textContent", "Detector stopped")
+
+    def test_the_rail_says_car_and_the_sidebar_car_computer(self):
+        label = "document.querySelector('#carBtn > span').innerText.trim()"
+        page = self.open(self.scripted(message(1, [], [])), width=800, height=480)
+        self.wait(page, self.TITLE, "Detector running")
+        self.assertEqual(page.evaluate(label), "Car")
+        page = self.open(self.scripted(message(1, [], [])), width=1920, height=1080)
+        self.wait(page, self.TITLE, "Detector running")
+        self.assertEqual(page.evaluate(label), "Car computer")
+
+    def test_the_car_computers_screen_opens_on_live_whatever_a_browser_left(self):
+        routes = self.screen_routes(self.strong(), [])
+        page = self.open(routes, start=False, width=1024, height=600,
+                         init="localStorage.setItem('s17view', JSON.stringify({section: 'car', mode: 'cockpit'}));")
+        self.wait(page, "document.body.classList.contains('kiosk')", True)
+        self.wait(page, "document.getElementById('v-live').hidden", False)
+        self.assertTrue(page.evaluate("document.getElementById('v-car').hidden"))
+
+    def test_an_800_by_480_screen_fits_in_both_modes(self):
+        page = self.open(self.scripted(self.strong()), width=800, height=480)
+        self.wait(page, self.TITLE, "Detector running")
+        self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 800)
+        self.assertLessEqual(page.evaluate("document.getElementById('nav').getBoundingClientRect().width"), 80)
+        page.click("#driveBtn")
+        self.wait(page, "document.getElementById('dDb').textContent", "30.0")
+        for sel in ("#dSaw button[data-label='noise']", "#dExit", "#dDb"):
+            box = page.evaluate(f"JSON.stringify(document.querySelector(\"{sel}\").getBoundingClientRect())")
+            box = json.loads(box)
+            self.assertLessEqual(box["bottom"], 480, sel)
+            self.assertLessEqual(box["right"], 800, sel)
 
     def test_narrow_phone_layout_fits(self):
         msg = message(1, [channel(190, 30.0, 1.0), channel(60, 14.0, 5.0), channel(119, None, 30.0)],

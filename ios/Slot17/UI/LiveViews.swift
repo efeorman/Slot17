@@ -232,7 +232,7 @@ struct Banners: View {
             .accessibilityIdentifier("quiet-indicator")
         }
         if model.receiverQuiet {
-            Text("Receiver hears nothing. Check the Airspy antenna and cable.").font(.footnote.bold()).foregroundColor(.white)
+            Text("Receiver hears nothing. Check the antenna and its cable.").font(.footnote.bold()).foregroundColor(.white)
                 .frame(maxWidth: .infinity).padding(8).background(Theme.red).clipShape(RoundedRectangle(cornerRadius: 8))
                 .accessibilityIdentifier("receiver-banner")
         }

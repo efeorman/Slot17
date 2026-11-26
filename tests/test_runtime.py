@@ -480,7 +480,7 @@ class RuntimeTests(unittest.TestCase):
              patch.object(watch.diagnostics, 'receiver_info', return_value={}), \
              patch.object(watch.diagnostics, 'host_health', return_value={}), \
              patch.object(watch.signal, 'signal'), \
-             patch.object(sys, 'argv', ['watch.py', '--minutes', '.01', '--no-notify']), \
+             patch.object(sys, 'argv', ['watch.py', '--minutes', '.01', '--no-notify', '--receiver', 'airspy']), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(watch.main(), 1)  # setup failure after open is not a stream stall
             summary = json.loads(next((Path(tmp)/'captures').glob('*/summary.json')).read_text())

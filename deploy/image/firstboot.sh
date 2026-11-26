@@ -57,8 +57,18 @@ else
         *) args+=(--bluetooth) ;;
     esac
     if [ -n "$S17_BLUETOOTH_NAME" ]; then args+=(--bluetooth-name "$S17_BLUETOOTH_NAME"); fi
-    # Start the detector now only if the receiver is plugged in; it starts at every power-up anyway.
-    if lsusb -d 1d50:60a1 >/dev/null 2>&1; then args+=(--start); else args+=(--no-start); fi
+    # The receiver: the one slot17.txt names, else setup finds it on USB.
+    case "$(printf '%s' "$S17_RECEIVER" | tr '[:upper:]' '[:lower:]')" in
+        "") ;;
+        airspy|rsp1b|rsp1a|rtlsdr2) args+=(--receiver "$(printf '%s' "$S17_RECEIVER" | tr '[:upper:]' '[:lower:]')") ;;
+        *) echo "note: slot17.txt names an unknown receiver ($S17_RECEIVER); setup looks for one on USB instead." ;;
+    esac
+    # SDRplay's driver only when the person wrote that they accept SDRplay's licence.
+    case "$(printf '%s' "$S17_SDRPLAY_LICENCE" | tr '[:upper:]' '[:lower:]')" in
+        accepted|accept|yes) args+=(--accept-sdrplay-licence) ;;
+    esac
+    # Start the detector now only if a receiver is plugged in; it starts at every power-up anyway.
+    if lsusb 2>/dev/null | grep -q -i -E "ID (1d50:60a1|1df7:3050|1df7:3000|0bda:2838|0bda:2832)"; then args+=(--start); else args+=(--no-start); fi
 
     # The installer runs as the normal user and uses sudo for a few steps: allow that for this run only.
     printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$user" > "$SUDOERS"

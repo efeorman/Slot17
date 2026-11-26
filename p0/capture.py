@@ -63,9 +63,15 @@ def main():
                         "unpacks, so the samples are identical either way.")
     p.add_argument("--tag", default="capture", help="short label used in the filename")
     p.add_argument("--note", default="", help="free-text note stored in the sidecar")
+    p.add_argument("--receiver", help="which receiver; by default the one setup chose (p0/receiver.py). "
+                                      "Anything but the Airspy records at 6 MSPS through its own driver")
     args = p.parse_args()
 
     paths.ensure_dirs()          # captures/iq does not exist on a new install
+    import receiver
+    kind = args.receiver or receiver.configured()
+    if kind != "airspy":
+        return capture_with_backend(kind, args)
     rate_hz = int(args.rate * 1e6)
     nsamples = int(rate_hz * args.secs)
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -126,6 +132,86 @@ def main():
         print("  WARNING: clipping - drop VGA or LNA gain and recapture.")
     elif headroom_db > 30:
         print("  NOTE: very quiet - you can raise gain for more resolution.")
+
+
+def capture_with_backend(kind, args, rate_hz=6_000_000):
+    """The same .iq and .json as airspy_rx makes, from any other receiver through its backend (p0/receiver.py).
+
+    6 MSPS: what those receivers run at here, whatever --rate says. The backend is opened once and closed once.
+    """
+    import threading
+    import receiver
+    if args.rate * 1e6 != rate_hz:
+        print(f"  the {receiver.name(kind)} records at {rate_hz / 1e6:g} MSPS here (not {args.rate:g})")
+    want = int(rate_hz * args.secs)
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    base = f"{stamp}_{args.tag}_{args.freq:.4f}MHz_{rate_hz / 1e6:g}Msps"
+    raw = os.path.join(IQ_DIR, base + ".iq")
+    meta_path = os.path.join(IQ_DIR, base + ".json")
+    done = threading.Event()
+
+    class FileSink:
+        def __init__(self, fh):
+            self.fh, self.got, self.dropped = fh, 0, 0
+
+        def first(self, n, delay_s=0.0):
+            pass
+
+        def drop(self, n):
+            self.dropped += n
+
+        def push(self, iq):
+            take = min(len(iq) // 2, want - self.got)
+            if take > 0:
+                self.fh.write(iq[:2 * take].tobytes())
+                self.got += take
+            if self.got >= want:
+                done.set()
+
+        def lost(self, count):
+            self.dropped += count() if callable(count) else count
+
+    print(f"Capturing {args.secs:g}s @ {args.freq} MHz, {rate_hz / 1e6:g} MSPS with the {receiver.name(kind)}")
+    try:
+        rx = receiver.backend(kind).Receiver(kind, fs=rate_hz, centre_hz=args.freq * 1e6, gain=receiver.gain_for(kind))
+    except receiver.ReceiverError as exc:
+        raise SystemExit(f"Capture failed: {exc}") from exc
+    with open(raw, "wb") as fh:
+        sink = FileSink(fh)
+        rx.bind(sink)
+        try:
+            info = rx.open()
+            rx.start()
+            done.wait(timeout=args.secs + 20)
+        except Exception as exc:              # noqa: BLE001 - reported, and the receiver is still closed below
+            info = None
+            print(f"  {type(exc).__name__}: {exc}", file=sys.stderr)
+        finally:
+            rx.close()
+    if sink.got == 0:
+        os.remove(raw)                        # never leave an empty .iq as "the newest capture"
+        raise SystemExit("Capture failed - no data written.")
+    x = np.fromfile(raw, dtype=np.int16, count=min(sink.got, 2_000_000) * 2,
+                    offset=max(0, (sink.got - 2_000_000) // 2) * 4)
+    peak, rms, headroom_db, clipped = levels(x)
+    meta = {
+        "file": os.path.basename(raw),
+        "captured_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "centre_hz": args.freq * 1e6, "sample_rate_hz": rate_hz,
+        "format": f"int16 interleaved IQ ({receiver.name(kind)})",
+        "samples": int(sink.got), "duration_s": round(sink.got / rate_hz, 3),
+        "receiver": {"kind": kind, "name": receiver.name(kind), "info": info},
+        "gain": rx.gain_record(), "dropped_samples": int(sink.dropped),
+        "adc": {"peak": peak, "rms": round(rms, 1), "headroom_db": round(20 * np.log10(FULL_SCALE / max(peak, 1.0)), 1),
+                "clipped_fraction": clipped},
+        "note": args.note,
+    }
+    with open(meta_path, "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, indent=2)
+    print(f"  -> {raw}  ({sink.got} samples, {sink.dropped} lost)")
+    if sink.got < want:
+        raise SystemExit(f"Capture ended early: {sink.got} of {want} samples. What was captured is kept in {raw}.")
+    return 0
 
 
 if __name__ == "__main__":

@@ -1244,7 +1244,7 @@ def make_handler(cfg, store, page_bytes, streams=None, log_dir=None, config_path
                                      "Content-Security-Policy":
                                          f"default-src 'none'; script-src 'nonce-{nonce}'; "
                                          f"style-src 'nonce-{nonce}'; connect-src 'self'; img-src 'self' data:; "
-                                         "media-src blob:; manifest-src 'self'; "
+                                         "font-src data:; media-src blob:; manifest-src 'self'; "
                                          "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"})
             if url.path == "/api/state":
                 if not self.viewer():

@@ -1,0 +1,35 @@
+# The display page full screen on the car computer's own screen: cage (a Wayland compositor that shows one
+# program, full screen) with Chromium in kiosk mode, on the first console. Installed by
+# deploy/install-screen.sh; the unit follows cage's own example for starting at boot with systemd.
+# Low priority on purpose: the detector comes first.
+[Unit]
+Description=Slot17: show the display page on the car computer's own screen
+After=slot17-screen.service systemd-user-sessions.service plymouth-quit-wait.service getty@tty1.service
+Wants=slot17-screen.service
+Conflicts=getty@tty1.service
+ConditionPathExists=/dev/tty1
+
+[Service]
+Type=simple
+User=__USER__
+PAMName=slot17-kiosk
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_SESSION_TYPE=wayland
+ExecStart=/usr/bin/cage -d -s -- __PROJECT__/deploy/kiosk-browser.sh
+Restart=always
+RestartSec=3
+Nice=10
+CPUWeight=20
+IOWeight=20
+MemoryHigh=900M
+
+[Install]
+WantedBy=graphical.target

@@ -35,6 +35,7 @@ import re
 import secrets
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -1341,6 +1342,99 @@ def run_bluetooth(op, pub):
 PUSH_WAIT_S = 15.0     # at most this long for a push in flight, before one that must go now (power off, stop)
 
 
+# The car computer's own screen (p0/screen.py, 1.7): only while its service runs, which it shows by making
+# SCREEN_DIR/ops. A file in memory (/dev/shm), so nothing touches the card several times a second.
+SCREEN_DIR = (Path(os.environ["SLOT17_SCREEN_DIR"]) if os.environ.get("SLOT17_SCREEN_DIR")      # as p0/screen.py
+              else Path("/dev/shm") / f"slot17-screen-{os.getuid() if hasattr(os, 'getuid') else 0}")  # noqa: S108
+SCREEN_EVERY_S = 0.5        # the whole state at least this often, and at once when something changes
+SCREEN_MATCHES_S = 20.0     # matches kept in it, so a page that reloads still has the last ones
+SCREEN_CHECK_S = 2.0        # how often to look whether the screen's service runs
+MAX_MATCHES_SCREEN = 20     # at most this many of them
+
+
+class ScreenLink:
+    """The whole state for the car computer's own screen, and the screen's requests back.
+
+    The same state the apps read over Bluetooth (bluetooth_state), with the matches of the last 20 s: the
+    page there decides exactly as on a phone. Requests come as one file each, written whole by the screen
+    service, and are carried out by run_op like the app's, by id."""
+
+    def __init__(self, folder=SCREEN_DIR):
+        self.folder = Path(folder)
+        self.last = -1e9
+        self.sent_detector = None
+        self.matches = deque(maxlen=MAX_MATCHES_SCREEN)
+        self.checked, self.present = -1e9, False
+        self.failed = 0
+
+    def active(self, now):
+        if now - self.checked >= SCREEN_CHECK_S:
+            self.checked, self.present = now, self._owned(self.folder) and (self.folder / "ops").is_dir()
+        return self.present
+
+    @staticmethod
+    def _owned(folder):
+        """The screen service's folder, and only if it is this user's and closed to others (p0/screen.py makes
+        it so): another account must not be able to read the state or hand in a request."""
+        try:
+            st = os.lstat(folder)
+        except OSError:
+            return False
+        if not stat.S_ISDIR(st.st_mode):
+            return False
+        return not hasattr(os, "getuid") or (st.st_uid == os.getuid() and not st.st_mode & 0o077)
+
+    def remember(self, new):
+        self.matches.extend(new)
+
+    def matches_now(self, now):
+        return [{"id": m["id"], "ch": m["ch"], "strength_db": m["strength_db"],
+                 "age_s": round(max(0.0, now - m["seen"]), 2), "delay_s": m.get("delay_s", 0.0),
+                 **({"rule": m["rule"]} if m.get("rule") else {}),
+                 **({"rising": True} if m.get("rising") else {}), **({"call": True} if m.get("call") else {})}
+                for m in self.matches if now - m["seen"] <= SCREEN_MATCHES_S]
+
+    def write(self, doc, now):
+        """Never raises: the screen is a convenience, the push to the server and Bluetooth must go on."""
+        self.last = now
+        path = self.folder / "state.json"
+        tmp = self.folder / ".state.json.tmp"
+        try:
+            tmp.write_bytes(json.dumps(doc, separators=(",", ":"), allow_nan=False).encode("utf-8"))
+            os.replace(tmp, path)
+        except (OSError, ValueError) as exc:
+            self.failed += 1
+            if self.failed in (1, 100):
+                print(f"screen: state not written ({type(exc).__name__}: {exc})", flush=True)
+
+    def take_ops(self, now):
+        """The screen's requests, oldest first, each read once and removed. Only files of this user's."""
+        if not self.present:
+            return []
+        out = []
+        try:
+            found = sorted((self.folder / "ops").glob("*.json"), key=lambda f: f.stat().st_mtime_ns)[:16]
+        except OSError:
+            return []
+        for path in found:
+            try:
+                mine = not hasattr(os, "getuid") or path.stat().st_uid == os.getuid()
+                op = json.loads(path.read_bytes()) if mine else None
+            except (OSError, ValueError):
+                op = None
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            if not isinstance(op, dict) or not finite(op.get("mono")):
+                continue
+            waited = max(0.0, now - float(op.pop("mono")))
+            age = op.get("age_s", 0)
+            op["age_s"] = (float(age) if finite(age) and age >= 0 else 0.0) + waited
+            out.append(op)
+        return out
+
+
 class Pusher:
     """Sends the pushes on a thread of their own, one at a time.
 
@@ -1388,9 +1482,11 @@ class Pusher:
 
 
 class Publisher:
-    def __init__(self, send, heartbeat=HEARTBEAT, phone=None, bluetooth=None, ops_seen=None):
+    def __init__(self, send, heartbeat=HEARTBEAT, phone=None, bluetooth=None, ops_seen=None, screen=None):
         self.phone = phone
         self.bluetooth = bluetooth    # a BluetoothLink, or None
+        self.screen = screen          # a ScreenLink for the car computer's own screen (1.7), or None
+        self.screen_due = False       # an answer is new: the screen's next state goes at once
         self.ops_seen = ops_seen if ops_seen is not None else OpMemory()
         self.answers = OrderedDict()  # op id -> what the phone sees of it over Bluetooth (1.6.0)
         self.state_due = False        # an answer is new: the next state goes at once
@@ -1440,7 +1536,7 @@ class Publisher:
                 else:
                     self.answers[op_id].update(state=state, detail=str(detail)[:160], at=time.monotonic())
                     self.answers.move_to_end(op_id)
-                self.state_due = True
+                self.state_due = self.screen_due = True
         if secret:
             self.ops_seen.forget(op_id)
         else:
@@ -1454,7 +1550,7 @@ class Publisher:
             self.answers.move_to_end(op["id"])
             while len(self.answers) > 4 * BLUETOOTH_ANSWERS:
                 self.answers.popitem(last=False)
-            self.state_due = True
+            self.state_due = self.screen_due = True
         self.ops_seen.start(op["id"])
 
     def _answers(self, now_mono):
@@ -1563,6 +1659,8 @@ class Publisher:
         self.report_marks()                           # answers go out by Bluetooth too, not only with a push
         if self.bluetooth is not None:
             self._feed_bluetooth(now_mono, new, state)
+        if self.screen is not None:
+            self._feed_screen(now_mono, new, state)
         # After a failed push, try again within half a second rather than at the next keepalive.
         wait = RETRY_S if 0 < self.failures <= FAST_RETRIES else KEEPALIVE_S
         if not new and not changed and not self.owed and now_mono - self.last_push < wait:
@@ -1597,12 +1695,33 @@ class Publisher:
             self._feed_state(now_mono)
 
     def send_state_now(self):
-        """Before this process may end (power off, stop): the newest answers to a listening phone at once."""
+        """Before this process may end (power off, stop): the newest answers to a listening phone, and to the car
+        computer's own screen, at once."""
         link = self.bluetooth
         if link is not None and link.subscribed():
             now = time.monotonic()
             link.last_state, self.state_due = now, False
             self._feed_state(now)
+        if self.screen is not None and self.screen.active(time.monotonic()):
+            self.screen_due = True
+            self._feed_screen(time.monotonic(), [], self.heartbeat.state(time.monotonic())["state"])
+
+    def _feed_screen(self, now_mono, new, state):
+        """The car computer's own screen (p0/screen.py), while its service runs: the whole state the apps read,
+        with the last 20 s of matches, whenever something changes and twice a second. No network in between,
+        so a match is on the screen within the publisher's 50 ms loop."""
+        link = self.screen
+        if not link.active(now_mono):
+            return
+        link.remember(new)
+        changed = state != link.sent_detector
+        if not (new or changed or self.screen_due or now_mono - link.last >= SCREEN_EVERY_S):
+            return
+        link.sent_detector, self.screen_due = state, False
+        doc = self.bluetooth_state(now_mono)
+        doc["state"].update(source="screen", snapshot_age_s=0.0, matches=link.matches_now(now_mono))
+        doc["mono"] = now_mono
+        link.write(doc, now_mono)
 
     def _feed_state(self, now_mono):
         """The whole state, packed, as one line for the link. Too long for one line (the pipe takes 4 KB at
@@ -1690,7 +1809,7 @@ class Publisher:
             self._notify(
                 f"Receiver input has been very low for {windows * window_s / 60:.0f} min "
                 f"({windows} windows{level}).\n"
-                "Check the Airspy antenna and cable - a disconnected antenna looks like this. "
+                "Check the antenna and its cable - a disconnected antenna looks like this. "
                 "A genuinely quiet location can too.",
                 "TETRA receiver hears nothing", 1)
         elif not alarm and self.quiet_alarm:
@@ -1864,7 +1983,7 @@ def run(args):
     cfg = load_config(args.config)
     sender = Sender(cfg["url"], cfg["token"], take_commands=not args.once)
     pub = Publisher(sender, phone=phone_sender(), bluetooth=None if args.once else BluetoothLink(),
-                    ops_seen=None if args.once else OpMemory(OPS_SEEN))
+                    ops_seen=None if args.once else OpMemory(OPS_SEEN), screen=None if args.once else ScreenLink())
     if not args.once:
         pub.pusher = Pusher(sender)            # --once sends in line: its first step is its answer
     return run_publisher(args, sender, pub, cfg)
@@ -2063,6 +2182,9 @@ def handle_ops(sender, pub, cfg):
     link = getattr(pub, "bluetooth", None)
     for op in (link.take_ops() if link is not None else []):
         keep_going = run_op(op, pub, cfg, "bluetooth") and keep_going
+    screen = getattr(pub, "screen", None)
+    for op in (screen.take_ops(time.monotonic()) if screen is not None else []):
+        keep_going = run_op(op, pub, cfg, "screen") and keep_going
     return keep_going
 
 
@@ -2094,7 +2216,7 @@ def run_op(op, pub, cfg, route="server"):
     if seen == "running" and op.get("kind") != "mark":        # a sighting may be offered again: that is safe
         return True
     pub.taken(op)
-    if route == "bluetooth":
+    if route in ("bluetooth", "screen"):         # checked here as the server checks the ones it passes on
         problem = bluetooth_op_problem(op)
         if problem:
             pub.ack(op["id"], "failed", problem)
@@ -2118,7 +2240,8 @@ def run_op(op, pub, cfg, route="server"):
     elif kind == "stop":
         pub.ack(op["id"], "done", "Stopping the detector")
         pub.send_state_now()                    # the answer goes before this process is stopped with it
-        if run_stop_command({"action": "stop", "note": str(op.get("note") or "from the app, over Bluetooth")[:120]}, pub):
+        default = "from the car computer's screen" if route == "screen" else "from the app, over Bluetooth"
+        if run_stop_command({"action": "stop", "note": str(op.get("note") or default)[:120]}, pub):
             pub.ack(op["id"], "failed", "The car computer refused to stop the detector")
             return True
         return False

@@ -86,7 +86,7 @@ These are the parts we use. Equivalent parts should work too. **Where to buy the
 | **Storage** | 512 GB NVMe SSD | A good microSD card of 128 GB or more works too: since 1.5.1 the recordings are written in batches, so even a slow card keeps up with a busy band, and detection never waits for the storage. Recordings grow with every drive: ours collected about 155 GB in two months. Recording pauses when less than 5 GB is free |
 | **Case** | Argon case with NVMe slot | Any case with cooling. A car gets hot in summer |
 | **Power in the car** | [UGREEN Nexode 60 W car charger, EC602](https://www.amazon.nl/dp/B0DSBSBSGW), Pi on its built-in USB-C cable | It gives 3 A at 5 V. That was enough for our Pi 5 with the Airspy, an NVMe SSD and a 4G stick: no undervoltage during a whole drive (19 November 2026). Bigger car chargers don't help: almost all give 3 A at 5 V, and their extra watts are at 9 to 20 V, which the Pi doesn't use. A car charger that offers the Pi 5's own 5 V 5 A profile is very rare. If `setup.sh doctor` reports undervoltage, your setup draws more: use a 12 V to 5 V converter rated for 5 A with a fused lighter plug or a fused connection, and tell the Pi it can draw 5 A with `sudo rpi-eeprom-config --edit`, adding `PSU_MAX_CURRENT=5000` (only with a supply that really gives 5 A) |
-| **Receiver** | [Airspy Mini](https://itead.cc/product/airspy-mini/) | Its antenna socket is SMA. Other receivers aren't supported |
+| **Receiver** | [Airspy Mini](https://itead.cc/product/airspy-mini/) | Its antenna socket is SMA. Since 1.7.0 also the SDRplay RSP1B and RSP1A, and a pair of RTL-SDRs, each half of the band on one stick. Their code is tested against the receivers' own header files and stand-ins, but not yet with the hardware; see [RECEIVERS.md](docs/design/RECEIVERS.md) |
 | **Antenna** | [Motorola GMAE4258B](https://www.firecom.nl/merken/motorola/motorola-gmae4258b/), a hidden TETRA antenna for 380–410 MHz, stuck inside the front windscreen | Any antenna made for 380–400 MHz works. **An antenna on the outside of the car, such as a magnetic roof antenna, receives better** than one inside. Some windscreens have a metal coating that blocks radio signals. You may need an adapter to the Airspy's SMA socket |
 | **Internet in the car** | The iPhone's personal hotspot, or a ZTE MF833N 4G USB stick with its own SIM | Any hotspot or car Wi-Fi works and needs nothing extra. A 4G stick spares the phone's battery; ours needs one extra setup command on a Raspberry Pi 5, see [the optional step](#optional-a-4g-stick-instead-of-the-hotspot). A stick that Linux recognises by itself needs no setup at all. **With Bluetooth you can drive without it** (since 1.6.0); what you then miss is in [Bluetooth or the server?](#bluetooth-or-the-server) |
 | **Display server** | A hosted server from us, or your own | Needed with Bluetooth too, for the set-up. Ours: one command in the Discord, nothing to rent; see [step 2](#step-2-set-up-the-display-server). Your own: any Debian or Ubuntu machine with a public address that the car and phone can reach, such as a cheap VPS. A home computer works if you forward a port on your router |
@@ -262,6 +262,16 @@ Use both, which is the default: a match that comes both ways beeps once, and an 
 Without internet in the car you therefore miss the web page and anyone watching from elsewhere, the car computer's part of the drive report, and support packages (make those at home). Updates come when it starts with a network, such as your home Wi-Fi.
 
 [BLUETOOTH.md](docs/design/BLUETOOTH.md) explains how it works, the frames, the key and what each phone does.
+
+### Optional: a screen on the car computer
+
+A screen attached to the car computer (for example an HDMI touchscreen in a Pi case) can show the display page full screen from the moment the car powers it. It is served by the car computer itself: no server, internet or phone in between, so it is faster than a phone and works without signal. It opens in drive mode at every power-up, with one bar for the strongest channel or three for the three strongest, whichever was last chosen on it.
+
+```bash
+bash setup.sh car --screen          # off again: bash setup.sh car --no-screen
+```
+
+How it works, and what to watch for if the receiver goes in the same case: [CAR-SCREEN.md](docs/design/CAR-SCREEN.md).
 
 ## Step 4: Install the app
 
@@ -465,13 +475,16 @@ The public repository runs these tests by itself, on every push to `main` and ev
 
 | Command | What it covers |
 |---|---|
-| `python -B p0/preflight.py --offline --tests` | The detector: 258 tests. Before every detector start the car computer runs them only if its code changed since they last passed, and in any case every 20th start; otherwise a smoke test of a few seconds (`--tests-if-changed`) |
+| `python -B p0/preflight.py --offline --tests` | The detector: 347 tests. Before every detector start the car computer runs them only if its code changed since they last passed, and in any case every 20th start; otherwise a smoke test of a few seconds (`--tests-if-changed`) |
 | `python -m unittest display/test_hardening.py` | Server and car computer limits |
 | `python -m unittest display/test_app_backend.py` | What the app uses on the server |
 | `python -m unittest display/test_display.py` | Display logic |
 | `python -m unittest scripts/test_scorecard.py` | The scorecard |
 | `python -m unittest scripts/test_modem_link.py` | The 4G stick check, with a pretend stick |
 | `python -m unittest scripts/test_doctor.py` | `setup.sh doctor`, with a pretend machine |
+| `python3 scripts/test_install_rtlsdr.py` | The RTL-SDR pair's installer, in a sandbox (Linux) |
+| `python scripts/verify_rtlsdr.py --headers DIR`, `python scripts/verify_sdrplay.py --headers DIR` | The receivers' bindings against their own header files, which are not in this repository ([RECEIVERS.md](docs/design/RECEIVERS.md)) |
+| `python scripts/rtlsdr_fake_test.py LIB --detector`, `python scripts/sdrplay_fake_test.py LIB --detector` | The receiver code against a stand-in library written in C, built from `scripts/*_fake.c` |
 | `python -m unittest scripts/test_bluetooth_parity.py` | `shared/parity/ble-frames.json` is exactly what the car computer sends over Bluetooth |
 | `python -m unittest display/test_drive_report.py` | The drive report |
 | `python -m unittest display/test_display_browser.py` | The web page in a headless browser; needs `pip install playwright` and `playwright install chromium` |

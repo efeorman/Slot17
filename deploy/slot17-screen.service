@@ -1,0 +1,18 @@
+# The car computer's own screen: the display page, served to this computer only (p0/screen.py).
+# Installed by deploy/install-screen.sh. Independent of the detector, so the screen can say why the
+# detector isn't running. Never touches the receiver.
+[Unit]
+Description=Slot17: the display page for the car computer's own screen
+After=local-fs.target
+
+[Service]
+Type=simple
+User=__USER__
+ExecStart=__PYTHON__ -B __PROJECT__/p0/screen.py
+Restart=always
+RestartSec=2
+Nice=5
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

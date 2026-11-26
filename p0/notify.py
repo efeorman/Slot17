@@ -617,11 +617,35 @@ def airspy_present():
         return None
 
 
+def receiver_kind():
+    """The receiver setup chose; the Airspy when that can't be read (p0/receiver.py)."""
+    try:
+        import receiver
+        return receiver.configured()
+    except Exception:                                 # noqa: BLE001
+        return "airspy"
+
+
+def receiver_present(kind=None):
+    """Whether the set-up receiver is on USB: True, False, or None when that can't be read. The Airspy is found as
+    it always was (recover.find_airspy); any other kind by its USB ID, all of its devices (a pair of RTL-SDRs)."""
+    kind = kind or receiver_kind()
+    if kind == "airspy":
+        return airspy_present()
+    try:
+        import receiver
+        count = receiver.present(kind)
+        return None if count is None else count >= receiver.KINDS[kind].get("devices", 1)
+    except Exception:                                 # noqa: BLE001
+        return None
+
+
 def boot_message(info=None):
     import diagnostics
     info = network_info() if info is None else info
     host = diagnostics.host_health()
-    a = airspy_present()
+    kind = receiver_kind()
+    a = receiver_present(kind)
     lines = [f"host {info['hostname']}  ({platform.machine()})"]
     for ad in info["addresses"]:
         lines.append(f"ip   {ad}")
@@ -635,8 +659,8 @@ def boot_message(info=None):
     if p.get("raw"):
         lines.append(f"power {p['raw']}"
                      + ("  UNDERVOLTAGE" if p.get("undervoltage_now") else ""))
-    lines.append("airspy " + ({True: "present", False: "NOT FOUND",
-                               None: "unknown"}[a]))
+    lines.append(("airspy " if kind == "airspy" else f"{kind} ") + ({True: "present", False: "NOT FOUND",
+                                                                      None: "unknown"}[a]))
     lines.append("detector state not checked")
     return "\n".join(lines)
 

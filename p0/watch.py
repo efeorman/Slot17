@@ -13,7 +13,6 @@ identity, movement or distance is claimed. See README.md.
 """
 import argparse
 from collections import deque
-import ctypes
 import datetime as dt
 import os
 import signal
@@ -28,6 +27,7 @@ import paths
 import diagnostics
 import notify
 import failure
+import receiver as receivers
 import recording
 from version import provenance
 from detect import load_downlink_channels, BurstHistory
@@ -305,31 +305,48 @@ def count_drop(stats, ring, lost):
     gaps.append((ring.write, int(stats.dropped)))
 
 
-def make_callback(ring, stats):
-    def _cb(tp):
-        t = tp.contents
+class Sink:
+    """Where every receiver's samples go: the ring, with the session's start time and every loss as a gap.
+
+    Each receiver's callback calls these in this order, from the driver's own thread: first(n) with the
+    block's length, drop(lost) for samples the driver says it lost before this block, push(int16 I/Q) with
+    the block itself; and lost(count) when a block could not be read at all.
+    """
+
+    def __init__(self, ring, stats):
+        self.ring, self.stats = ring, stats
+
+    def first(self, n, delay_s=0.0):
+        """delay_s: how far a receiver's output lags its input (the RTL pair's join: 0.5 ms), so the first
+        sample is dated when it reached the antenna, not when it left the join (found in review, 24 November 2026)."""
+        stats = self.stats
+        if stats.capture_start_utc is None:
+            back = n / float(getattr(stats, "fs", 6_000_000)) + float(delay_s)
+            stats.capture_start_utc = time.time() - back
+            stats.capture_start_mono = time.monotonic() - back
+
+    def drop(self, lost):
+        count_drop(self.stats, self.ring, lost)
+
+    def push(self, iq):
+        self.ring.push(iq)
+
+    def lost(self, count):
+        """These samples are gone: mark the gap, like any other drop, so no window is treated as continuous
+        across it. `count` may be a function, read here, so a block that can't be read can't escape either."""
+        stats = self.stats
+        stats.callback_errors += 1
         try:
-            n = t.sample_count
-            if stats.capture_start_utc is None:
-                back = n / float(getattr(stats, "fs", 6_000_000))
-                stats.capture_start_utc = time.time() - back
-                stats.capture_start_mono = time.monotonic() - back
-            if t.dropped_samples:
-                count_drop(stats, ring, t.dropped_samples)
-            buf = ctypes.string_at(t.samples, n * BYTES_PER_SAMPLE)
-            ring.push(np.frombuffer(buf, dtype=np.int16))
-        except Exception:
-            # These samples are gone: mark the gap, like any other drop, so no window is treated as
-            # continuous across it.
-            stats.callback_errors += 1
-            try:
-                stats.dropped += t.sample_count
-                stats.discontinuities.append((ring.write, int(stats.dropped)))
-            except Exception:  # noqa: BLE001, S110 - nothing may escape into the driver's thread
-                pass
-        return 0
-    import airspy_ctypes as A
-    return A.SAMPLE_BLOCK_CB(_cb)
+            stats.dropped += count() if callable(count) else count
+            stats.discontinuities.append((self.ring.write, int(stats.dropped)))
+        except Exception:  # noqa: BLE001, S110 - nothing may escape into the driver's thread
+            pass
+
+
+def make_callback(ring, stats):
+    """The Airspy's block callback into this ring (receiver_airspy.py has it; kept here for its tests)."""
+    import receiver_airspy
+    return receiver_airspy.make_callback(Sink(ring, stats))
 
 
 def note_metadata_error(stats, what, exc):
@@ -630,6 +647,15 @@ def write_heartbeat(path, ctx, ring, now_t):
     data['host_health'] = ctx.host_sampler.latest if getattr(ctx, 'host_sampler', None) else None
     data['sample_rate_hz'] = getattr(ctx, 'fs', None)
     data['gain_indices'] = getattr(ctx, 'gain', None)
+    # The receiver's own counters (an RSP's overloads, gaps, ...); the Airspy has none, so its heartbeat is unchanged.
+    receiver_status = getattr(ctx, "receiver_status", None)
+    if receiver_status is not None:
+        try:
+            status = receiver_status()
+        except Exception as exc:              # noqa: BLE001 - a counter must not stop the liveness write
+            status = {"error": f"{type(exc).__name__}: {exc}"[:200]}
+        if status:
+            data["receiver"] = status
     data['threshold_db'] = getattr(ctx, 'threshold_db', None)
     data['analysis_backlog_s'] = (max(0, ring.write-getattr(st, 'last_sample_end', 0))/ctx.fs
                                   if getattr(ctx, 'fs', None) else None)
@@ -814,9 +840,18 @@ def main():
     duration_args.add_argument("--hours", type=float)
     duration_args.add_argument("--minutes", type=float)
     ap.add_argument("--rate", type=float, default=6.0, choices=(3.0, 6.0))
-    ap.add_argument("--lna", type=int, default=12, choices=range(15))
-    ap.add_argument("--mixer", type=int, default=12, choices=range(16))
-    ap.add_argument("--vga", type=int, default=12, choices=range(16))
+    ap.add_argument("--receiver", choices=sorted(receivers.KINDS),
+                    help="which receiver; by default the one setup.sh chose (receiver.py --show), else the Airspy Mini")
+    ap.add_argument("--lna", type=int, default=12, choices=range(15), help="Airspy: LNA gain")
+    ap.add_argument("--mixer", type=int, default=12, choices=range(16), help="Airspy: mixer gain")
+    ap.add_argument("--vga", type=int, default=12, choices=range(16), help="Airspy: VGA gain")
+    ap.add_argument("--lna-state", type=int, choices=range(10), help="RSP1A/RSP1B: LNA state, 0 is the most gain")
+    ap.add_argument("--if-gain-reduction", type=int, choices=range(20, 60), metavar="20-59",
+                    help="RSP1A/RSP1B: IF gain reduction in dB")
+    ap.add_argument("--sdrplay-transfer", choices=("isoch", "bulk"), default="isoch",
+                    help="RSP1A/RSP1B: USB transfer mode (the API's default is isoch)")
+    ap.add_argument("--rtl-gain", type=int, choices=range(0, 501), metavar="0-500",
+                    help="RTL-SDR pair: tuner gain in tenths of a dB (each stick uses the nearest it offers)")
     ap.add_argument("--sensitivity", choices=sorted(SENSITIVITY), default="highway")
     ap.add_argument("--threshold-db", type=float)
     ap.add_argument("--save-power", action="store_true")
@@ -858,8 +893,26 @@ def main():
     except RuntimeError as exc:
         print(exc, flush=True)
         return 1
-    import airspy_ctypes as A
     fs = int(args.rate * 1e6)
+    # The receiver setup.sh chose (receiver.py), loaded where libairspy always was: before the session starts.
+    try:
+        kind = args.receiver or receivers.configured()
+        gain = receivers.gain_for(kind)
+        sdrplay = kind in ("rsp1b", "rsp1a")
+        if kind == "airspy":
+            gain.update(lna=args.lna, mixer=args.mixer, vga=args.vga)
+        elif sdrplay:
+            gain.update({k: v for k, v in (("lna_state", args.lna_state),
+                                           ("if_gain_reduction_db", args.if_gain_reduction)) if v is not None})
+        elif kind == "rtlsdr2" and args.rtl_gain is not None:
+            gain["tuner_gain_db10"] = args.rtl_gain
+        backend = receivers.backend(kind)
+        extra = {"transfer": args.sdrplay_transfer} if sdrplay else {}
+        rx = backend.Receiver(kind, fs=fs, centre_hz=centre * 1e6, gain=gain, **extra)
+    except receivers.ReceiverError as exc:
+        print(f"Receiver: {exc}", flush=True)
+        instance_lock.close()
+        return failure.RECEIVER_UNAVAILABLE
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S-%fZ")
     outdir = os.path.join(paths.CAPTURES, f"{stamp}_{args.tag}_{centre:g}MHz")
     recorder = recording.Recorder(outdir).start()
@@ -871,7 +924,7 @@ def main():
               save_snippets=not args.no_snippets, save_power=args.save_power,
               log_candidates=args.log_candidates,
               recorder=recorder, trend=TrendTracker(), history=BurstHistory(),
-              gain=(args.lna, args.mixer, args.vga), stats=stats,
+              gain=rx.gain, stats=stats,
               events=deque(maxlen=256), verbose=True, confirm=not args.no_confirm,
               t_start=time.time(), t_start_mono=time.monotonic(), notifier=None,
               confirm_workers=args.check_threads)
@@ -883,8 +936,8 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(heartbeat)), exist_ok=True)
     session = {"schema_version": 2, "utc_start": ctx.t_start, "software": provenance(),
                "settings": vars(args), "centre_hz": centre * 1e6, "sample_rate_hz": fs,
-               "threshold_db": threshold, "gain": dict(zip(("lna", "mixer", "vga"), ctx.gain)),
-               "lna_agc": False, "mixer_agc": False, "rf_bias": False, "packing": False,
+               "threshold_db": threshold, "gain": rx.gain_record(), **rx.session_fields(),
+               "receiver": {"kind": kind, "name": receivers.name(kind)},
                "classification": "TETRA physical layer; vehicle identity and distance unknown"}
     recording.atomic_json(os.path.join(outdir, 'session.json'), session)
 
@@ -892,7 +945,7 @@ def main():
         recording.atomic_json(
             os.path.join(outdir, 'summary.json'),
             build_summary(final, stats=stats, ring=ring, ctx=ctx, recorder=recorder,
-                          started_mono=started_mono, receiver=receiver, failed=failed,
+                          started_mono=started_mono, receiver=rx.info, failed=failed,
                           failure_reason=failure_reason, recorder_drained=recorder_drained))
 
     ctx.host_sampler = diagnostics.HostSampler(recorder).start()
@@ -900,6 +953,7 @@ def main():
     marks = Marks(ctx, ring)
     print(f"Watching {centre:g} MHz at {args.rate:g} MSPS, threshold {threshold:g} dB")
     print(f"Session: {outdir}")
+    print(f"Receiver: {receivers.name(kind)}")
     print("RF alerts require TETRA training recognition; vehicle type and distance are unknown.", flush=True)
     if not args.no_notify and notify.configured():
         ctx.notifier = notify.Notifier(log=lambda m: print(m, flush=True))
@@ -910,29 +964,15 @@ def main():
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, lambda *_: _stop.set())
     worker = threading.Thread(target=analysis_worker, args=(ring, ctx), name="analysis", daemon=True)
-    cb = make_callback(ring, stats)
-    dev = ctypes.c_void_p()
-    initialized = opened = streaming = False
+    rx.bind(Sink(ring, stats))
+    ctx.receiver_status = rx.status
     failed = False
     failure_exit = 0
     failure_reason = None
-    receiver = None
     ready_announced = False
     try:
-        A.check(A.lib.airspy_init(), "airspy_init")
-        initialized = True
-        A.check(A.lib.airspy_open(ctypes.byref(dev)), "airspy_open")
-        opened = True
-        receiver = diagnostics.receiver_info(dev)
-        if fs not in A.samplerates(dev):
-            raise A.AirspyError(f"receiver does not advertise {fs} samples/s")
-        for name, value in (("sample_type", A.SAMPLE_INT16_IQ), ("samplerate", fs),
-                            ("lna_agc", 0), ("mixer_agc", 0), ("rf_bias", 0), ("packing", 0),
-                            ("lna_gain", args.lna), ("mixer_gain", args.mixer), ("vga_gain", args.vga)):
-            A.check(getattr(A.lib, "airspy_set_" + name)(dev, value), name)
-        A.check(A.lib.airspy_start_rx(dev, cb, None), "start_rx")
-        streaming = True
-        A.check(A.lib.airspy_set_freq(dev, int(centre * 1e6)), "set_freq")
+        rx.open()
+        rx.start()
         # Discard pre-tune samples before the worker starts.
         worker.start()
         last_in, last_windows = ring.write, 0
@@ -961,6 +1001,9 @@ def main():
                 last_in, last_advance = w, now
             elif now - last_advance > args.stall_timeout:
                 raise failure.StreamStall("receiver sample stream stalled")
+            fault = rx.fault()
+            if fault:
+                raise failure.StreamStall(fault)
             marks.poll()
             if now - last_hb >= 1:
                 last_hb = now
@@ -984,7 +1027,7 @@ def main():
             time.sleep(0.1)
     except Exception as exc:
         failed = True
-        failure_exit = failure.exit_code(exc, receiver_opened=opened)
+        failure_exit = failure.exit_code(exc, receiver_opened=rx.opened)
         stats.failure_category = failure.outcome(failure_exit)
         failure_reason = f'{type(exc).__name__}: {exc}'[:400]
         recorder.event({'schema_version': 1, 'event_type': 'runtime_failure',
@@ -1004,17 +1047,7 @@ def main():
             print("Analysis did not stop within deadline", flush=True)
         stats.worker_alive = False
         stats.stage = "failed" if failed else "stopped"
-        if streaming:
-            A.lib.airspy_stop_rx(dev)
-            deadline = time.monotonic() + 3
-            while A.lib.airspy_is_streaming(dev) == 1 and time.monotonic() < deadline:
-                time.sleep(.05)
-            # This board previously raced close/free_transfers after streaming.
-            # Leave its final device cleanup to process exit.
-        elif opened:
-            A.lib.airspy_close(dev)
-        if initialized and not streaming:
-            A.lib.airspy_exit()
+        rx.close()
         marks.finish()
         if ctx.notifier:
             ctx.notifier.stop(timeout=15)

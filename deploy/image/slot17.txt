@@ -18,6 +18,14 @@ hotspot_password=
 bluetooth=yes
 bluetooth_name=Slot17
 #
+# The receiver: airspy (Airspy Mini), rsp1b or rsp1a (SDRplay), rtlsdr2 (two RTL-SDRs). Empty: the one plugged in.
+receiver=
+#
+# An SDRplay receiver needs SDRplay's own driver, the SDRplay API, under SDRplay's licence (in the package at
+# https://www.sdrplay.com/software/SDRplay_RSP_API-Linux-3.15.2.run). Write accepted here only if you have read it
+# and accept it; the first start then installs it. Otherwise it isn't installed, and setup asks you later.
+sdrplay_licence=
+#
 # At the first start the car computer reads this, sets itself up (about 5 minutes) and then removes the
 # key and the password from this card. If something goes wrong, the reason is in slot17-setup.log,
 # next to this file. You can fill in what's missing and start the car computer again.

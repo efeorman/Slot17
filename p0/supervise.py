@@ -74,6 +74,15 @@ WEDGE_MIN_FAILURES = 2
 WEDGE_REMINDER_S = 900.0
 
 
+def receiver_label(kind):
+    """'Airspy' for the Airspy, as these messages always said; the receiver's name for the others."""
+    try:
+        import receiver
+        return receiver.short_name(kind)
+    except Exception:                                # noqa: BLE001 - a word in a message
+        return "Airspy"
+
+
 class HardwareNotifier:
     """Pushes 'the radio died' and 'the radio is back', and nothing else.
 
@@ -116,18 +125,20 @@ class HardwareNotifier:
         self._last_push = now
         try:
             import notify
-            present = notify.airspy_present()
+            kind = notify.receiver_kind()
+            present = notify.receiver_present(kind)
         except Exception:                            # noqa: BLE001
-            present = None
+            kind, present = "airspy", None
+        label = receiver_label(kind)
         where = {True: "It is on the USB bus but will not stream.",
                  False: "It has vanished from the USB bus entirely.",
                  None: "Its USB state could not be read."}[present]
-        msg = (f"The Airspy has stopped after {consecutive} consecutive "
+        msg = (f"The {label} has stopped after {consecutive} consecutive "
                f"failures.\n{where}\nOnly unplugging it and plugging it back in "
                f"clears this - software cannot. The detector is not receiving "
                f"until you do.")
-        return self._push(msg, "Airspy wedged" if first else
-                          "Airspy still wedged", priority=1)
+        return self._push(msg, f"{label} wedged" if first else
+                          f"{label} still wedged", priority=1)
 
     def on_streaming(self, now=None):
         """Called ONLY when samples are seen actually arriving. Proof, not hope."""
@@ -135,9 +146,14 @@ class HardwareNotifier:
             return False
         self.wedged = False
         self._last_push = time.monotonic() if now is None else now
+        try:
+            import notify
+            label = receiver_label(notify.receiver_kind())
+        except Exception:                            # noqa: BLE001
+            label = "Airspy"
         return self._push("Samples are arriving again - the detector is "
                           "receiving. No action needed.",
-                          "Airspy recovered", priority=0)
+                          f"{label} recovered", priority=0)
 
     def on_stopped(self, outcome):
         """A failure is not automatically proof of a firmware wedge."""

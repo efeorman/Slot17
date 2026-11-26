@@ -34,7 +34,7 @@ object SetupCheck {
         "server" -> "Check that this phone is online. With your own server: is it running, and is port 5732 open in its firewall?"
         "pi" -> "Is the car computer powered, and on your phone's hotspot? Its server address and key must match your server."
         "detector" -> "If it was stopped, it starts again at the next power-up. If it has a fault, the car computer's own check below says which."
-        "receiver" -> "Check the Airspy's USB cable and the antenna cable. Unplugging the Airspy for a moment can help when it hangs."
+        "receiver" -> "Check the receiver's USB cable and the antenna cable. Unplugging the receiver for a moment can help when it hangs."
         else -> "See the car computer's own check below."
     }
 
