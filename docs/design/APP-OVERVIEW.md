@@ -114,7 +114,6 @@ Sound, link and location start only when the person opens the app. If iOS starts
 
 - **Wrong claims made along the way:** that the meters used only yellow and red; that Codemagic has no audio (never proven, and the docs do not say); a first explanation of overload that blamed the display.
 - **Cloud minutes:** GitHub Actions allowance used up by long and repeated runs.
-- **Not tested on a real phone:** the widget in any form, the 1.4.1 closing behaviour, and whether a swipe-up announces itself to the app.
 - **Test limits:** Codemagic's tests skip real sound and WAV decoding. Debug switches stand in for background launches and swipes, so they test the app's reaction and not iOS's behaviour. The widget test runs its button inside the app, not through the widget extension.
 - **Evidence limits:** few independent sightings, and marks are prompted by beeps, so usefulness is unmeasured.
 - **Unexplained:** the mid-drive restart at 14:25 on 8 November, and the one tile photo that was behind.

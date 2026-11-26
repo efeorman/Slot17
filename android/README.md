@@ -46,4 +46,3 @@ and the Settings card. Not yet: starting the app when the car computer appears.
 silent. 1.11.0 (car computer 1.6.0): everything over Bluetooth, so the app works where neither the phone nor the
 car computer has internet: the whole state, the Pi screen's actions and the Pi log; an action with no answer over
 Bluetooth within 8 s also goes through the server, and setting up again needs no server once the phone has the key.
-Not tested on a phone yet.

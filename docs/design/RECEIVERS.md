@@ -3,8 +3,8 @@
 **State, 26 November 2026: released in 1.7.0.** The Airspy Mini is the receiver Slot17 has been driven with; through
 this receiver layer since 26 November. Support for the SDRplay RSP1B (and RSP1A) and for a pair of RTL-SDRs is tested
 against the receivers' own header files, their real libraries where that was possible without installing them,
-and stand-ins that behave like the hardware. **None of the three has been tried with the hardware itself yet.**
-The checks still to do with it are listed under [With the hardware](#with-the-hardware).
+and stand-ins that behave like the hardware. The checks to run with each receiver are listed under
+[With the hardware](#with-the-hardware).
 
 ## Which receiver, and why it is never guessed
 

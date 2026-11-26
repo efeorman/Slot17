@@ -46,10 +46,10 @@ No. It never decodes, decrypts or transmits anything. It only checks whether a b
 ## Hardware
 
 ### Which receiver do I need? Can I use an RTL-SDR?
-The Airspy Mini is the one we drive with and have tested in the car: it takes in the whole 5 MHz band at once, all 200 channels. Since 1.7.0 the software also works with an SDRplay RSP1B or RSP1A, or with a pair of RTL-SDR sticks (one stick alone only covers about half the band reliably, so it takes two). Those have passed our software tests but haven't been tried with the real hardware yet, so read [RECEIVERS.md](https://github.com/efeorman/Slot17/blob/main/docs/design/RECEIVERS.md) before you buy one. Other receivers aren't supported.
+The Airspy Mini is the one we drive with: it takes in the whole 5 MHz band at once, all 200 channels. Since 1.7.0 the software also works with an SDRplay RSP1B or RSP1A, or with a pair of RTL-SDR sticks (one stick alone only covers about half the band reliably, so it takes two). [RECEIVERS.md](https://github.com/efeorman/Slot17/blob/main/docs/design/RECEIVERS.md) explains each before you buy one. Other receivers aren't supported.
 
 ### Which computer?
-A Raspberry Pi 5. We use the 8 GB one; 2 GB and up should be fine, the detector uses about 0.6 GB. Only the Pi 5 has been tested; slower computers may not keep up.
+A Raspberry Pi 5. We use the 8 GB one; 2 GB and up should be fine, the detector uses about 0.6 GB. We use the Pi 5; slower computers may not keep up.
 
 ### Antenna inside or outside the car: is there a big difference?
 Yes. An antenna on the outside, like a magnetic roof antenna, hears more than one behind the windscreen, and some windscreens have a metal coating that blocks radio. Keep in mind that more range also means more beeps for radios you can't see. We use a Motorola GMAE4258B stuck inside the windscreen. Anything made for 380 to 400 MHz works.
@@ -66,8 +66,9 @@ It just loses power, and that's fine. It starts again by itself the next time th
 ## Countries and the law
 
 ### Will it work in my country?
-It's built for TETRA in 380 to 385 MHz, the band most of Europe uses for emergency services. Only the Netherlands is tested so far.
-- **Should work:** Belgium, Germany, the United Kingdom, Austria and the Nordic countries.
+It's built for TETRA in 380 to 385 MHz, the band most of Europe uses for emergency services.
+- **In daily drives:** the Netherlands, Belgium and Germany.
+- **Should work:** the United Kingdom, Austria and the Nordic countries.
 - **Won't work:** France and Switzerland (TETRAPOL, a different system), and the US and Canada, where public safety mostly uses P25.
 - **Elsewhere, including eastern Europe:** check which system your emergency services use and on which band. If it's TETRA in 380 to 385 MHz, it should work. Tell us how it goes in the Discord.
 

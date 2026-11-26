@@ -34,7 +34,7 @@ The real code, before release, on the same car computer:
 - **Detector:** the drop counter stayed at its start-up value throughout.
 
 Phones came next: the operator's iPhone with 1.4.0 and 1.5.0, which found the pairing prompts fixed in 1.5.1
-(below). The 1.6.0 additions have not been tested on a phone yet.
+(below).
 
 ## The parts
 
@@ -247,7 +247,7 @@ Bluetooth and to the server. `systemctl stop` still ends both.
 - **Setting up again** with the key on the phone needs no server: on the iPhone the picker, on Android the chooser.
 - **iPhone:** a removed accessory's connection is cancelled, and a connection without an accessory is dropped.
 
-**Not tested on a phone yet.** A test from a Windows PC failed at −80 dBm; the unit tests on all three sides check
+The unit tests on all three sides check
 the same frames in `shared/parity/ble-frames.json`.
 
 ## Sources

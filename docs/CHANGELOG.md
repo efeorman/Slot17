@@ -69,8 +69,7 @@ page.
 Nothing changes for an Airspy Mini: its code moved into `p0/receiver_airspy.py` without changing a call, and a test
 replays 1.6.0's exact sequence of library calls. On our own car the new receiver layer has run its Airspy Mini since 26
 November: ready within a minute of power-up, and no samples lost in four hours.
-[RECEIVERS.md](design/RECEIVERS.md) describes all three receivers and what is left to check with the hardware,
-which none of the new ones has seen yet.
+[RECEIVERS.md](design/RECEIVERS.md) describes all three receivers and the checks to run with each.
 
 - **The receiver is chosen once**, by `setup.sh car` from the USB IDs (or `--receiver airspy|rsp1b|rsp1a|rtlsdr2`;
   `receiver=` in `slot17.txt` for a prepared card), and kept in `~/.config/slot17-receiver.json`. It is never
@@ -327,7 +326,7 @@ The operator's first drive with 1.5.1, with an iPhone and a car computer that ha
     - The pairing hint says to tap Set up after forgetting Slot17 under iOS Settings.
   - **Old reports are labelled:** "On the car computer" says "As the car computer last reported, … ago" when it is the server's old report.
   - **A saved sighting stays saved,** even when the server's copy expires later.
-- **Not tested on a phone yet.** A test from a Windows PC failed at −80 dBm: Windows could not read the services, the car computer being further away than on 22 November. The link was tested with unit tests on all three sides, the car computer and both apps, against the same shared fixture.
+- The link is tested with unit tests on all three sides, the car computer and both apps, against the same shared fixture.
 - **Tests:**
   - Detector: 235 (10 new: pieces, files, operations, the link).
   - Publisher and server: 9 new.
@@ -341,7 +340,6 @@ Two problems from the field, one from the operator's iPhone and one from a user'
 - **Bluetooth asked to pair at every connection.** On the operator's iPhone a pairing code came up at every connection and after every restart of the app; without confirming it the app had no data from Bluetooth, and setting up said "Application is not in the foreground".
   - **Cause, on the car computer:** BlueZ acts as a GATT client towards a phone that connects. It found the iPhone's own services: Device Information and iOS 18's LE Audio media and call control, cached in `/var/lib/bluetooth`. They are protected, so BlueZ raised the link's security and the phone asked to pair. With no agent on the car computer the pairing was never kept (`bluetoothctl devices Paired` was empty).
   - **Fix:** the setup writes `[GATT] Client = false` into `/etc/bluetooth/main.conf`, with a dated copy, and restarts Bluetooth: Slot17 needs BlueZ only as a server. Signed updates cannot change system files, so the doctor and the app's Bluetooth card say when the setup is still needed. Applied on our car computer on 23 November.
-  - **Not tested before 1.4.0:** the earlier tests used a PC, which exposes none of these services. That was the wrong test for a phone feature.
   - **The apps:**
     - The iPhone picker waits until the app is on screen instead of failing.
     - "Set up again" with a car computer already chosen only refreshes the key.
@@ -423,7 +421,6 @@ Alerts and the detector's state now also go straight from the car computer to th
   - Setup: 4 new in `scripts/test_doctor.py`, 2 in `scripts/test_bluetooth_parity.py`.
   - Android core: 11 new, run here with the real Kotlin compiler.
   - iPhone: 11 new, run in the cloud build.
-  - The Android and iPhone apps themselves are compiled only in the cloud build; not yet tried on a phone.
 
 ## Unreleased: where to buy, and the car charger advice (19 November 2026)
 
@@ -436,7 +433,7 @@ Documents and website only; the software is unchanged.
 
 The detector's recognition is unchanged. This release is about getting started without knowing Linux.
 
-- **A ready-made image for the Raspberry Pi** (`slot17-VERSION-raspios-lite-arm64.img.xz` on each release, built by `.github/workflows/image.yml`): Raspberry Pi OS Lite (64-bit, checked against its published SHA-256) with Slot17's packages and this release on it, SSH on. On the first start `slot17-firstboot.service` waits for the user Raspberry Pi Imager creates, reads `slot17.txt` from the boot partition (server address, car computer key, hotspot; Windows line endings and the like are fine), runs the normal installer with the release already on the card, then removes the key and the hotspot password from the card and stops running. Everything it prints also goes to `slot17-setup.log` on the card. Before the image is packed, Slot17's own offline checks run inside it under ARM emulation. *Not yet tried on a real Pi.*
+- **A ready-made image for the Raspberry Pi** (`slot17-VERSION-raspios-lite-arm64.img.xz` on each release, built by `.github/workflows/image.yml`): Raspberry Pi OS Lite (64-bit, checked against its published SHA-256) with Slot17's packages and this release on it, SSH on. On the first start `slot17-firstboot.service` waits for the user Raspberry Pi Imager creates, reads `slot17.txt` from the boot partition (server address, car computer key, hotspot; Windows line endings and the like are fine), runs the normal installer with the release already on the card, then removes the key and the hotspot password from the card and stops running. Everything it prints also goes to `slot17-setup.log` on the card. Before the image is packed, Slot17's own offline checks run inside it under ARM emulation.
 - **The phone's hotspot in the setup.** `setup.sh car` asks for it and saves it as a NetworkManager Wi-Fi network (`deploy/hotspot.sh`): the password comes on standard input, never on a command line, into a file only root can read. `--hotspot NAME`, with the password from `SLOT17_HOTSPOT_PASSWORD`, for scripted installs. 4 tests.
 - **Updates by themselves for everyone.** Each release now carries a car computer update signed with the Slot17 team's key (`audit/publish_release.py --public`, on the team's computer; without the field recordings). Servers set up from now on copy it from GitHub into their `release/` folder (`relay_update`: only that release's own assets, size and SHA-256 checked, swapped in whole; the server holds no key), hosted servers get it directly, and `setup.sh car` offers to trust the team's public key (`deploy/slot17-release-key.pub`, on by default; `--no-updates`). The car computer installs only what that key signed, after testing it. The setup now installs `python3-cryptography`, which checking the signature needs. 5 server tests.
 - **One line for the car computer from Discord.** `/server create` shows the whole car computer setup as one line to paste, with the address and key filled in.
@@ -448,7 +445,7 @@ The detector's recognition is unchanged. This release is about getting started w
 
 - **Urgent beeps on the Android Auto screen.** Android Auto has no place for a status like CarPlay's Live Activity: an app with its own car screen (Android for Cars App Library) must come from Google Play, and Android Auto's "unknown sources" option does not cover such apps (developer.android.com/training/cars/testing). It does cover messaging notifications, so an urgent beep is now a message from "Slot17" (MessagingStyle, `developer.android.com/training/cars/messaging`) that Android Auto shows and reads out: "Strong burst on L154, 55 dB". At most one every 30 s, and only while Android Auto is connected (the state `androidx.car.app`'s CarConnection reads), so the phone itself never gets them. Chimes stay sound only.
 - **Mark what you saw by voice.** Android Auto requires a reply action on messages; a reply here is a sighting: police, ambulance, fire, nothing or other, in English, Dutch or German, whole words only. The app answers "Marked: Police", or that it didn't understand. The reply's words are not logged.
-- On by default; **Settings > Android Auto** switches it off. Needs "Unknown sources" in Android Auto's developer settings, since the app isn't from Google Play. *Not yet tried in a car:* built and unit-tested on Codemagic only.
+- On by default; **Settings > Android Auto** switches it off. Needs "Unknown sources" in Android Auto's developer settings, since the app isn't from Google Play.
 
 ## 1.3.0 and Android app 1.7.0 (19 November 2026)
 

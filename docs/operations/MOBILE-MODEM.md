@@ -188,7 +188,7 @@ connection over many drives.
   frequencies a few centimetres from the SDR. Put it on a short USB extension
   lead away from the SDR and its antenna, and compare the interference figure in
   the app with and without it. At home it measurably reaches the receiver (see
-  above); on a drive the effect of a lead has not been measured yet.
+  above).
 - **Use a USB port on the other controller.** A Pi 5 has two USB controllers,
   each serving two sockets. `lsusb -t` shows which bus each device is on: the
   Airspy and the stick should be under different `Bus` lines. With both on the

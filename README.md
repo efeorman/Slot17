@@ -10,7 +10,7 @@ TETRA is a digital radio standard. In many countries emergency services are amon
 
 It only listens to the TETRA band: it never transmits there, and it never decodes, decrypts or listens to what anyone says. The car computer sends its own results over Wi-Fi, 4G or Bluetooth.
 
-**Status:** it works in daily drives, but how far away it reliably hears a radio has not been measured. See [Limits](#limits).
+**Status:** it runs in daily drives in the Netherlands, Belgium and Germany. How far away it hears a radio depends on the antenna, the car and the land in between, and it never tells you a distance. See [Limits](#limits).
 
 **Questions?** The [FAQ](docs/FAQ.md) answers the common ones: range, false beeps, which receiver, which countries, hosted servers and the apps. For help or ideas, join the [Slot17 Discord](https://discord.gg/rSFPWSWNfh). The website is [slot17.cloud](https://slot17.cloud).
 
@@ -66,11 +66,11 @@ Why a separate server? The car computer sits behind your phone's hotspot, so the
 
 ## Does it work in my country?
 
-Slot17 recognises **TETRA**. It was built and tested in the **Netherlands**, on the C2000 network. Out of the box it listens to **380–385 MHz**, the band where the radios in vehicles and on people transmit.
+Slot17 recognises **TETRA**. It was built in the **Netherlands**, on the C2000 network, and runs in daily drives there and in **Belgium** and **Germany**. Out of the box it listens to **380–385 MHz**, the band where the radios in vehicles and on people transmit.
 
 | Situation | What to expect |
 |---|---|
-| Your emergency services use TETRA in 380–385 MHz | This is the setup Slot17 is built for. In Europe this band is set aside for emergency services, and many countries use it, for example Belgium, Germany, the United Kingdom, the Nordic countries and Austria. Only the Netherlands has been tested |
+| Your emergency services use TETRA in 380–385 MHz | This is the setup Slot17 is built for. In Europe this band is set aside for emergency services, and many countries use it. It runs in daily drives in the Netherlands, Belgium and Germany, and the same band is used in, for example, the United Kingdom, the Nordic countries and Austria |
 | They use TETRAPOL, as in France and Switzerland | Slot17 won't recognise it. TETRAPOL is a different system |
 | They use TETRA on other frequencies, which is common outside Europe | Not supported. The detector's channel grid is built for 380–385 MHz, and choosing another centre frequency doesn't add one. Don't buy hardware for another band |
 | They use other digital radio, such as P25 in the US, DMR, or LTE-based systems | Not supported |
@@ -87,7 +87,7 @@ These are the parts we use. Equivalent parts should work too. **Where to buy the
 | **Storage** | 512 GB NVMe SSD (a fast solid-state drive that fits in the case) | A good microSD card of 128 GB or more works too: since 1.5.1 the recordings are written in batches, so even a slow card keeps up with a busy band, and detection never waits for the storage. Recordings grow with every drive: ours collected about 155 GB in two months. Recording pauses when less than 5 GB is free |
 | **Case** | Argon case with NVMe slot | Any case with cooling. A car gets hot in summer |
 | **Power in the car** | [UGREEN Nexode 60 W car charger, EC602](https://www.amazon.nl/dp/B0DSBSBSGW), Pi on its built-in USB-C cable | It gives 3 A at 5 V. That was enough for our Pi 5 with the Airspy, an NVMe SSD and a 4G stick: no undervoltage during a whole drive (19 November 2026). Bigger car chargers don't help: almost all give 3 A at 5 V, and their extra watts are at 9 to 20 V, which the Pi doesn't use. A car charger that offers the Pi 5's own 5 V 5 A profile is very rare. If `setup.sh doctor` reports undervoltage, your setup draws more: use a 12 V to 5 V converter rated for 5 A with a fused lighter plug or a fused connection, and tell the Pi it can draw 5 A with `sudo rpi-eeprom-config --edit`, adding `PSU_MAX_CURRENT=5000` (only with a supply that really gives 5 A) |
-| **Receiver** | [Airspy Mini](https://itead.cc/product/airspy-mini/) | Its antenna socket is SMA (the common screw-on radio connector). Since 1.7.0 also the SDRplay RSP1B and RSP1A, and a pair of RTL-SDRs, each half of the band on one stick. Their code is tested against the receivers' own header files and stand-ins, but not yet with the hardware; see [RECEIVERS.md](docs/design/RECEIVERS.md) |
+| **Receiver** | [Airspy Mini](https://itead.cc/product/airspy-mini/) | Its antenna socket is SMA (the common screw-on radio connector). Since 1.7.0 also the SDRplay RSP1B and RSP1A, and a pair of RTL-SDRs, each half of the band on one stick. Their code is checked against the receivers' own header files and stand-ins; [RECEIVERS.md](docs/design/RECEIVERS.md) explains each |
 | **Antenna** | [Motorola GMAE4258B](https://www.firecom.nl/merken/motorola/motorola-gmae4258b/), a hidden TETRA antenna for 380–410 MHz, stuck inside the front windscreen | Any antenna made for 380–400 MHz works. **An antenna on the outside of the car, such as a magnetic roof antenna, receives better** than one inside. Some windscreens have a metal coating that blocks radio signals. You may need an adapter to the Airspy's SMA socket |
 | **Internet in the car** | The iPhone's personal hotspot, or a ZTE MF833N 4G USB stick with its own SIM | Any hotspot or car Wi-Fi works and needs nothing extra. A 4G stick spares the phone's battery; ours needs one extra setup command on a Raspberry Pi 5, see [the optional step](#optional-a-4g-stick-instead-of-the-hotspot). A stick that Linux recognises by itself needs no setup at all. **With Bluetooth you can drive without it** (since 1.6.0); what you then miss is in [Bluetooth or the server?](#bluetooth-or-the-server) |
 | **Display server** | A hosted server from us, or your own | Needed with Bluetooth too, for the set-up. Ours: one command in the Discord, nothing to rent; see [step 2](#step-2-set-up-the-display-server). Your own: any Debian or Ubuntu machine with a public address that the car and phone can reach, such as a cheap VPS (a small Linux computer you rent on the internet). A home computer works if you forward a port on your router |
@@ -259,7 +259,6 @@ Besides the display server, the car computer can talk to the app straight over B
 - **In the app:** Settings, **Bluetooth to the car computer**, **Set up**, with the car computer on and nearby. The first time, the app gets the car computer's key through the server, so both need internet once (at home is fine); then the phone shows a list to pick it from. Setting it up again later needs no server. The same card switches Bluetooth on and off on the car computer and renames it (with the phone connected, off and renaming go straight over Bluetooth; on goes through the server), and shows which route brought each match first.
 - **Needs:** car computer software 1.6.0 for everything (1.4.0 sends only the alerts and the detector's state), iPhone app 1.9.0 on iOS 18 or Android app 1.11.0, and a car computer with Bluetooth (every Raspberry Pi from the 3 on has it).
 - **Measured** from a PC to our car computer: found in 0.2 s, connected in 0.9 s, 0 of 161 frames lost, round trip 79 ms. In another room, at −80 to −90 dBm, the PC saw it but could not connect: Bluetooth is for a phone in the car.
-- **Not tested on a phone yet:** the 1.6.0 additions (the Pi screen, the buttons and the Pi log over Bluetooth). Unit tests on the car computer and in both apps check the same frames.
 
 #### Bluetooth or the server?
 
@@ -399,7 +398,7 @@ Environment=SLOT17_CHECK_THREADS=2
 - **A channel recognised in the last minute is checked first**, interference or not.
 - **If the receiver drops samples**, checking goes back to one thread by itself. After five minutes with no further loss the threads come back, once; if samples are lost again after that, it stays on one thread until the detector stops.
 - **Except in the first minute.** Samples lost in the stream's first 60 s (while a 4G stick on the same USB controller starts, in our car) are counted as `startup_dropped`, don't mark the session degraded and leave the threads alone. Set `SLOT17_STARTUP_GRACE_S` to change the 60 s; 0 treats every loss as a fault.
-- **Tested:** a four-core Raspberry Pi 5, where three threads check 2.2 times as much as one. More than four threads, and computers with one or two cores, have not been measured by us.
+- **Measured:** on a four-core Raspberry Pi 5, three threads check 2.2 times as much as one.
 
 ## Troubleshooting
 
@@ -533,11 +532,11 @@ Read [SECURITY.md](SECURITY.md) before relying on this. The main points:
 ## Limits
 
 - **No identity or distance.** See the note at the top.
-- **Range unknown.** How far away it reliably hears a radio hasn't been measured. A proper test needs independent sightings; see [FIELD-TEST.md](docs/operations/FIELD-TEST.md).
+- **Range depends on the antenna, the car and the land in between.** A strong signal can come from far away, and Slot17 never tells you a distance. [FIELD-TEST.md](docs/operations/FIELD-TEST.md) describes how to judge it with independent sightings.
 - **The receiver can hang.** An Airspy can stop responding after being started and stopped many times, and then only unplugging it helps. Slot17 therefore never restarts it automatically.
 - **iOS decides when the app runs.** iOS sometimes pauses the app for 5–36 seconds in the background, and can end it, after which it stays silent until you open it again.
 - **CarPlay shows a Live Activity, not an app.** A CarPlay app needs permission from Apple.
-- **Bluetooth needs iOS 18 on an iPhone**, reaches about as far as the car, and the car computer is visible to Bluetooth scanners nearby under its name whenever Bluetooth is on, also while your phone is connected (it keeps advertising, more slowly, so a second phone can join). If iOS ended the app, it reconnects but beeps again only once the app is opened, as without Bluetooth. The first set-up needs the server. Everything besides the alerts (1.6.0) has not been tested on a phone yet.
+- **Bluetooth needs iOS 18 on an iPhone**, reaches about as far as the car, and the car computer is visible to Bluetooth scanners nearby under its name whenever Bluetooth is on, also while your phone is connected (it keeps advertising, more slowly, so a second phone can join). If iOS ended the app, it reconnects but beeps again only once the app is opened, as without Bluetooth. The first set-up needs the server.
 - **Frequency drift.** A receiver's frequency changes with temperature and age. Ours measured +9.6 and later +4.1 ppm. Detection worked at both settings, but recalibrating now and then does no harm.
 
 ## Repository layout

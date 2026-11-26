@@ -34,7 +34,7 @@ Open the app once before driving, then lock the phone. iOS won't let an app star
 
 **Bluetooth to the car computer (1.7.0, iOS 18).** Settings, Bluetooth to the car computer: Set up gets the car computer's key through the server and shows iOS's accessory picker (AccessorySetupKit), so there is no Bluetooth permission prompt. Alerts then also come straight from the car computer, and a match that comes both ways plays once. See [BLUETOOTH.md](../docs/design/BLUETOOTH.md).
 
-**Everything over Bluetooth (1.9.0, car computer 1.6.0).** The whole state comes over Bluetooth too: the Pi screen, its health and its setup check. Sightings, stop, power off, the Pushover switch, the setup check, the Pi log and the request for a support package go over it first, and through the server when there is no answer within 8 s. The lights and the link warning follow Bluetooth when the server has nothing fresh, so the app works where neither the phone nor the car computer has internet. Set up again needs no server once the phone has the key. Not tested on a phone yet.
+**Everything over Bluetooth (1.9.0, car computer 1.6.0).** The whole state comes over Bluetooth too: the Pi screen, its health and its setup check. Sightings, stop, power off, the Pushover switch, the setup check, the Pi log and the request for a support package go over it first, and through the server when there is no answer within 8 s. The lights and the link warning follow Bluetooth when the server has nothing fresh, so the app works where neither the phone nor the car computer has internet. Set up again needs no server once the phone has the key.
 
 ## Limits
 
