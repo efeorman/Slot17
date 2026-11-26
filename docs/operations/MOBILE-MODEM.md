@@ -84,7 +84,7 @@ With the USB fix the stick is a network interface, but some things are left:
 `slot17-modem.timer` and:
 
 - keeps data roaming switched on, with the same command the stick's own page uses
-  (set `SLOT17_MODEM_ROAMING=leave` to stop that);
+  (to leave your own setting, run `sudo systemctl edit slot17-modem.service` and add `[Service]` and, on the next line, `Environment=SLOT17_MODEM_ROAMING=leave`);
 - asks the stick to connect when its session is down; after 2 minutes without a
   session it drops and redials; after 5 minutes it asks the stick to restart
   itself, which is the same as a replug (at most once every 15 minutes);

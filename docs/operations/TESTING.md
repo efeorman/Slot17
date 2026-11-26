@@ -14,7 +14,7 @@ python -B p0/preflight.py --offline --tests
 
 **Expected:** `OK` and `"offline_preflight_pass": true`, with `"errors": []`. Stop here if it fails, and keep the output. It refuses to run while a detector is running on the same machine, which is not a fault.
 
-The service runs this same check, with `--require-idle`, before every start. A failure prevents that start.
+Before every start the service runs it with `--tests-if-changed --require-idle`: the whole suite when the code changed since it last passed, and at every 20th start; otherwise a smoke test of a few seconds. A failure prevents that start.
 
 **Optional tools that need a recording:** `p0/validate_real.py` and one check in `p0/stress_test.py` need a real TETRA recording, `TETRA IQ.wav`, which isn't in this repository. Without it, `stress_test.py` reports that one check as failed and `validate_real.py` stops with a message saying where to put the file. Set `SLOT17_TETRA_WAV` to its path if you have one.
 

@@ -23,7 +23,7 @@ On the **Pi** screen, card **Support package**:
      takes at most 50 MB and deletes it after 30 days. **Take back** deletes it there sooner.
    - **Delete**: from your server, and from the team's inbox too if you sent it.
 
-The web page's settings list the packages with a **Download** link. It needs car computer software 1.5.0 and
+On the web page, **Logs**, then **Support packages**, lists them with a **Download** link. It needs car computer software 1.5.0 and
 the app 1.8.0 (iPhone) or 1.10.0 (Android). Signed updates bring it to the car computer by themselves.
 
 ## On the car computer

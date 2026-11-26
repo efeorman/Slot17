@@ -414,6 +414,24 @@ fi
 
 # --- 11. calibration ----------------------------------------------------------
 step "Calibrating the receiver (recommended once)"
+# Did the detector already use the receiver in this power-up? systemd keeps the monotonic time the service last
+# became active, 0 until it has run once since boot. The setup only runs with the detector stopped, so a re-run
+# (an update, Bluetooth or the screen switched later) came after an opening; until 26 November 2026 its default
+# answers calibrated or started it, a second opening (found in review).
+# systemd forgets the time of a stopped unit that nothing wants (a detector without autostart), so this boot's
+# journal of the service counts too.
+RAN_THIS_BOOT=0
+case "$(systemctl show "$SERVICE" -p ActiveEnterTimestampMonotonic --value 2>/dev/null || true)" in
+    ""|0) ;;
+    *) RAN_THIS_BOOT=1 ;;
+esac
+if [ "$RAN_THIS_BOOT" = 0 ] && [ -n "$(journalctl -b -u "$SERVICE" -q -n 1 --no-pager 2>/dev/null || true)" ]; then
+    RAN_THIS_BOOT=1
+fi
+if [ "$RAN_THIS_BOOT" = 1 ] && [ "$CALIBRATE" = ask ]; then
+    CALIBRATE=no
+    note "not calibrating: the detector has already used the receiver in this power-up, and a second opening can make it stop responding. To calibrate anyway, run the setup with --calibrate."
+fi
 if ! receiver_present; then
     note "no $(receiver_name "${RECEIVER:-airspy}") found on USB, so this is skipped. Plug it in and run: bash setup.sh car --calibrate --no-display --no-notify"
     CALIBRATE=no
@@ -424,8 +442,12 @@ if [ "$CALIBRATE" = ask ]; then
     ask_yes "Calibrate now?" y && CALIBRATE=yes || CALIBRATE=no
 fi
 RECEIVER_OPENED=0
+OPENED_BY="the detector has already used the receiver in this power-up"
+[ "$RAN_THIS_BOOT" = 1 ] && RECEIVER_OPENED=1
 if [ "$CALIBRATE" = yes ]; then
+    [ "$RAN_THIS_BOOT" = 1 ] && note "the detector has already used the receiver in this power-up: if it stops responding, unplug it, plug it back in and power-cycle the computer."
     RECEIVER_OPENED=1       # whether the capture worked or not, the receiver has been opened once this power-up
+    OPENED_BY="the calibration has just used the receiver"
     # A tag of its own, so calibration measures exactly this capture, never an older one from another receiver
     # (until 24 November 2026 it measured the newest files, whatever made them).
     CAL_TAG="downlink-calibration-$(date +%s)-$$"
@@ -447,7 +469,7 @@ step "Starting the detector"
 # review); now a calibration leaves the start to the next power-up, even when --start was given.
 if [ "$RECEIVER_OPENED" = 1 ] && [ "$START" != no ]; then
     START=no
-    note "not started now: the calibration has just used the receiver, and a second start in the same power-up can make it stop responding. $([ "$AUTOSTART" = 1 ] && echo "It starts by itself at the next power-up." || echo "After the next power-up, start it with: sudo systemctl start $SERVICE")"
+    note "not started now: $OPENED_BY, and a second start in the same power-up can make it stop responding. $([ "$AUTOSTART" = 1 ] && echo "It starts by itself at the next power-up." || echo "After the next power-up, start it with: sudo systemctl start $SERVICE")"
 fi
 if [ "$START" = ask ]; then
     if receiver_present; then

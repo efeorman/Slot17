@@ -2,6 +2,32 @@
 
 What changed, why, and what was tried and left out. Newest first. Figures come from our own car, receiver and drives; yours will differ.
 
+## Unreleased: the guides read as a newcomer, and three fixes they found (26 November 2026)
+
+Every guide was read as someone setting Slot17 up for the first time, and checked against the code, by two
+reviewers independently, then each finding was checked again before anything changed.
+
+- **The setup no longer opens the receiver twice in one power-up.** It runs only with the detector stopped, so a
+  re-run (an update, Bluetooth or the screen switched later) came after the detector had opened the receiver, and
+  its default answers then calibrated or started it again: the second opening this project avoids, because an
+  Airspy can stop responding. The setup now asks systemd whether the detector ran in this power-up (its last start
+  time, or this boot's journal for a detector without autostart). If so it neither calibrates nor starts by default;
+  an explicit `--calibrate` still works, with a warning. 4 new setup tests; each fails on the old script.
+- **The web page takes the server's sound levels**, as the apps do: the chime from 35 dB and the urgent beep and
+  call tone where `app-config.json` puts them, unless you set a level by hand in that browser. It chimed from its
+  own 22 dB. The car computer's own screen, which has no server settings, keeps the page's levels.
+- **The phone's status row** says "Car", on one line like its neighbours; it took two lines for "Car computer".
+- **The guides:** the server key before the image; Imager's current screens and what to do when it offers no
+  Customisation for the image; writing an NVMe SSD; `slot17.txt` is read only once (the first start's own note said
+  otherwise); `--no-calibrate --no-start` when changing a setting later; SSH for a beginner; Sideloadly on Windows;
+  the receivers of 1.7.0 in the FAQ; new keys on your own server; `sudo` for the server's own check; the car screen
+  needs the server once; where the app sends your route; data roaming with the 4G stick; other bands aren't
+  supported. New pictures of the web page and drive mode, and the build drawings with our 3 A charger.
+- **Not changed, written down:** the image's first start waits for the user Imager makes, so an Imager that offers
+  no Customisation for the file leaves the card waiting; the guides now say to use the manual steps then. A screen
+  on a car computer with no display server at all shows no data, because the part that feeds it comes with the
+  server connection.
+
 ## 1.7.1: the ready-made Raspberry Pi image again (26 November 2026)
 
 1.7.0's software, with its Raspberry Pi image. 1.7.0's image was not built: inside the image, under ARM emulation

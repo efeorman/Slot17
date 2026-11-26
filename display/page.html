@@ -374,6 +374,7 @@
   }
   /* The rail and the bottom tab bar: the short label, as in the phone design. */
   @media (max-width: 899px), (orientation: landscape) and (max-height: 620px) { .tab .long { display: none; } }
+  @media (max-width: 620px) { .light .long { display: none; } }   /* the phone's status row: one line each */
   @media (min-width: 2000px) { body { font-size: 17px; } }
   body.kiosk, body.kiosk * { cursor: none !important; -webkit-user-select: none; user-select: none; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
@@ -600,11 +601,12 @@
   // A provisional level from the 4 November drive, not a distance or a vehicle test.
   // Each recognised burst this strong gets one beep when it arrives; there is no hold
   // timer, so nothing sounds after the signal has stopped.
-  const URGENT_DB = 50;
+  let URGENT_DB = 50;            // the server's urgent_db replaces it (app-config.json), as in the apps
   const URGENT_MIN_GAP_MS = 1000;
   // A radio in a call (normal bursts on every frame) below the chime level gets the soft call tone.
   // Traffic on the channel, not a vehicle or a distance.
-  const CALL_DB = 18, CALL_GAP_CHANNEL_MS = 60000, CALL_GAP_ANY_MS = 15000;
+  let CALL_DB = 18;              // the server's call_db replaces it
+  const CALL_GAP_CHANNEL_MS = 60000, CALL_GAP_ANY_MS = 15000;
   const QUIET_ALARM_S = 60;      // the detector hearing nothing this long, if it does not say its own limit
   const QUIET_ALARM_WINDOWS = 40;// that minute in 1.5 s windows, for a car that says neither its limit nor its window length
   const QUIET_TONE_REPEAT_MS = 300000;
@@ -614,6 +616,23 @@
     set(c) { try { localStorage.setItem("s17cfg", JSON.stringify(c)); } catch (_) {} }
   };
   let cfg = store.get();
+  /* The server's levels (app-config.json, the same the apps take), except a level set by hand in this browser.
+     Until 1.7.2 the page kept its own 22 dB while the apps chimed from the server's 35. Settings saved before then
+     hold every value, so a red or yellow still at the old default counts as not set by hand. */
+  async function loadServerLevels() {
+    try {
+      const r = await fetch("/api/config", { cache: "no-store", signal: timeoutSignal(4000) });
+      if (!r.ok) return;
+      const rules = (await r.json())?.config?.rules || {};
+      const num = v => typeof v === "number" && Number.isFinite(v) && v > 0 && v < 100 ? v : null;
+      if (num(rules.urgent_db)) URGENT_DB = num(rules.urgent_db);
+      if (num(rules.call_db)) CALL_DB = num(rules.call_db);
+      if (num(rules.red_db) && !cfg.redByHand && cfg.red === DEFAULTS.red) cfg.red = num(rules.red_db);
+      if (num(rules.yellow_db) && !cfg.yellowByHand && cfg.yellow === DEFAULTS.yellow) cfg.yellow = num(rules.yellow_db);
+      if (cfg.yellow > cfg.red) cfg.yellow = cfg.red;
+      syncControls(); render();
+    } catch (_) { /* no server settings (the car computer's own screen, or offline): the page's own levels */ }
+  }
   // Once only: the operator found the old 30 % default too quiet at full phone volume, and
   // that value is saved in this browser. A level chosen after this is kept.
   if (cfg.soundRev !== 2) { cfg.vol = 100; cfg.soundRev = 2; store.set(cfg); }
@@ -1051,7 +1070,9 @@
   function renderLights() {
     const list = lightList();
     for (const box of [$("lights"), $("lightsLive")]) rows(box, list, ([name, tone, state]) => {
-      const p = el("span", "light " + tone); p.append(el("i"), el("b", null, name), el("em", null, state)); return p;
+      const b = el("b", null, name);
+      if (name === "Car computer") b.replaceChildren("Car", el("span", "long", " computer"));   // "Car" on a phone
+      const p = el("span", "light " + tone); p.append(el("i"), b, el("em", null, state)); return p;
     });
   }
 
@@ -1491,8 +1512,8 @@
     $("muteText").textContent = !cfg.sound ? "Sound off" : left > 0 ? `Muted · ${left} s` : "Mute 30 s";
     $("muteBtn").classList.toggle("muted", muted);
   }
-  $("redTh").addEventListener("input", e => { cfg.red = +e.target.value; if (cfg.yellow > cfg.red) cfg.yellow = cfg.red; store.set(cfg); syncControls(); render(); });
-  $("yelTh").addEventListener("input", e => { cfg.yellow = Math.min(+e.target.value, cfg.red); store.set(cfg); syncControls(); render(); });
+  $("redTh").addEventListener("input", e => { cfg.red = +e.target.value; cfg.redByHand = true; if (cfg.yellow > cfg.red) cfg.yellow = cfg.red; store.set(cfg); syncControls(); render(); });
+  $("yelTh").addEventListener("input", e => { cfg.yellow = Math.min(+e.target.value, cfg.red); cfg.yellowByHand = true; store.set(cfg); syncControls(); render(); });
   $("vol").addEventListener("input", e => { cfg.vol = +e.target.value; store.set(cfg); syncControls(); });
   $("testBtn").addEventListener("click", () => { unlockAudio(); chime(); });
   $("testUrgentBtn").addEventListener("click", () => { unlockAudio(); urgentBeep(); });
@@ -1720,6 +1741,7 @@
   syncControls();
   openStream();
   probe();                                                       // first state (and auth) at once
+  loadServerLevels();
   detectScreen();
   setInterval(() => { if (demo) accept(demoMessage()); watchdog(); render(); syncControls(); }, 250);
 })();

@@ -1,7 +1,7 @@
 # sim/native: stand-in receivers for running the real detector without hardware
 
-The first piece of the hardware-free test environment. It was designed with a second reviewer on
-24 November 2026; the plan is in the private archive's review record.
+The first piece of the hardware-free test environment: it lets the real detector run on generated samples,
+without receiver hardware.
 
 ## The Airspy stand-in (`airspy_fake.c`)
 

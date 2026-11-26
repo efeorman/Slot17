@@ -99,6 +99,9 @@ class BrowserTests(unittest.TestCase):
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         self.addCleanup(lambda: self.assertEqual(errors, []))
+        # No server sound levels unless a test gives them: the other tests check the page's own rules at its own
+        # 22 dB (the real server's app-config.json says 35). Routes added later win over this one.
+        page.route("**/api/config", lambda r: r.fulfill(status=404, body='{"error":"no settings"}'))
         for pattern, handler in (routes or {}).items():
             page.route(pattern, handler)
         page.goto(self.url + "/")
@@ -880,6 +883,44 @@ class BrowserTests(unittest.TestCase):
         page = self.open(self.scripted(message(1, [], [], state="stopped")), width=1920, height=1080)
         self.wait(page, self.TITLE, "Detector stopped")
         self.wait(page, "document.getElementById('mNoneTitle').textContent", "Detector stopped")
+
+    # Review of 26 November 2026: the README said the chime comes at 35 dB; the apps take that from the server, but
+    # the page kept its own 22 dB.
+    def config_route(self, rules):
+        return {"**/api/config": lambda r: r.fulfill(status=200, headers={"Content-Type": "application/json"},
+                                                      body=json.dumps({"version": "x", "config": {"rules": rules}}))}
+
+    def test_the_page_takes_the_servers_sound_levels_like_the_apps(self):
+        routes = dict(self.scripted(message(1, [], [])), **self.config_route({"red_db": 35, "yellow_db": 12, "urgent_db": 50}))
+        page = self.open(routes, width=1440, height=900)
+        self.wait(page, "document.getElementById('redOut').textContent", "35 dB")
+        page.reload()                                                   # settings saved by an older page: 22 is its default
+        page.evaluate("localStorage.setItem('s17cfg', JSON.stringify({red: 22, yellow: 12, sound: false}))")
+        page.reload()
+        page.click("#startBtn")
+        self.wait(page, "document.getElementById('redOut').textContent", "35 dB")
+
+    def test_a_level_set_by_hand_in_the_browser_stays(self):
+        routes = dict(self.scripted(message(1, [], [])), **self.config_route({"red_db": 35}))
+        page = self.open(routes, width=1440, height=900,
+                         init="localStorage.setItem('s17cfg', JSON.stringify({red: 22, redByHand: true}));")
+        time.sleep(0.8)
+        self.assertEqual(page.evaluate("document.getElementById('redOut').textContent"), "22 dB")
+        page = self.open(routes, width=1440, height=900, init="localStorage.setItem('s17cfg', JSON.stringify({red: 30}));")
+        time.sleep(0.8)
+        self.assertEqual(page.evaluate("document.getElementById('redOut').textContent"), "30 dB")   # not the old default
+
+    def test_the_phones_status_row_says_car_on_one_line_like_the_others(self):
+        # Seen in the docs review's new pictures, 26 November 2026: "Car computer" took two lines there.
+        page = self.open(self.scripted(message(1, [], [])), width=390, height=844)
+        self.wait(page, self.TITLE, "Detector running")
+        names = "[...document.querySelectorAll('#lightsLive .light b')].map(b => [b.innerText.trim(), b.getClientRects().length > 0 ? Math.round(b.getBoundingClientRect().height) : 0])"
+        got = page.evaluate(names)
+        self.assertEqual([n for n, _ in got][1], "Car", got)
+        self.assertEqual(len({h for _, h in got}), 1, got)                     # every name one line high
+        page = self.open(self.scripted(message(1, [], [])), width=1440, height=900)
+        self.wait(page, self.TITLE, "Detector running")
+        self.assertIn("Car computer", page.evaluate("document.getElementById('lights').innerText"))
 
     def test_the_rail_says_car_and_the_sidebar_car_computer(self):
         label = "document.querySelector('#carBtn > span').innerText.trim()"

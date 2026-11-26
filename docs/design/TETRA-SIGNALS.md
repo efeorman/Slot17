@@ -3,9 +3,14 @@
 *Update, 3 November 2026: the -2.1 kHz residual below led to a corrected calibration of about
 +4.09 ppm.*
 
-Research note, 13 September 2026. **Amended the same day** after an independent review
-(`research/tetra-reference/EXISTING-NOTE-REVIEW.md`); §11 lists what changed, and
-`research/tetra-reference/TETRA-REFERENCE.md` is the fuller, more conservative treatment. Written before any code change, to answer one
+*Read with care (26 November 2026): this note is from September 2026. Some early inferences in it were withdrawn
+later, in §11 and after: that a repeated or rising signal points to a vehicle approaching or to a crew, and that all
+detections are random access bursts (the detector also recognises normal bursts, which give the call tone). Successive
+bursts can come from different radios. None of the timing or strength patterns here established motion, direction, a
+crew or a particular sender.*
+
+Research note, 13 September 2026. **Amended the same day** after an independent review; §11 lists what changed.
+Written before any code change, to answer one
 operational question: **why does the detector report TETRA when no police, ambulance,
 handhaving or KMar vehicle is anywhere in sight, and what would actually make it more
 accurate?**
@@ -332,13 +337,12 @@ So: fit the ferrites and the filter for signal quality, but do not expect them t
 
 - [ETSI EN 300 392-2 V2.1.1 (2000-12)](https://www.etsi.org/deliver/etsi_en/300300_300399/30039202/02.01.01_60/en_30039202v020101p.pdf) - clauses 5, 6.4, 7.6, 9.3, 16.4, 16.7, 23.4.4, 23.5
 - [ETSI EN 300 392-2 V3.2.1 (2007-09)](https://www.etsi.org/deliver/etsi_en/300300_300399/30039202/03.02.01_60/en_30039202v030201p.pdf) - tables 9.2/9.4, equations 9.11/9.12 (burst layout and training words)
-- [EN 300 396-2 (TETRA Direct Mode)](https://www.etsi.org/deliver/etsi_en/300300_300399/30039602/01.04.00_40/en_30039602v010400o.pdf)
+- [ETSI EN 300 396-2 (TETRA Direct Mode: radios talking to each other without a mast)](https://www.etsi.org/deliver/etsi_en/300300_300399/30039602/01.04.00_40/en_30039602v010400o.pdf)
 - [C2000 - Nederlands Instituut Publieke Veiligheid](https://nipv.nl/onderzoek/c2000/) and [C2000 (Wikipedia NL)](https://nl.wikipedia.org/wiki/C2000) - users and organisations
 - [Techniek en toekomstbestendigheid C2000, Tweede Kamer 2025](https://www.tweedekamer.nl/downloads/document?id=2025D12295) and [c2000masten.nl](https://c2000masten.nl/) - number of masts
-- [TCCA: Direct Mode Operation](https://tcca.info/tetra/direct-mode-operation-dmo/)
 - Our own recordings from September 2026.
 
-*Checked 13 November 2026:* c2000masten.nl lists 609 masts and Dutch Wikipedia about 600, so the 615 used above holds. The 85 000 radios figure could not be confirmed again from these sources that day; the last official count found was about 65 000 programmed radios in 2006. The estimate of about 140 radios per average cell scales with it (about 107 at 65 000). The TCCA Direct Mode page linked above no longer exists.
+*Checked 13 November 2026:* c2000masten.nl lists 609 masts and Dutch Wikipedia about 600, so the 615 used above holds. The 85 000 radios figure could not be confirmed again from these sources that day; the last official count found was about 65 000 programmed radios in 2006. The estimate of about 140 radios per average cell scales with it (about 107 at 65 000).
 
 ---
 
@@ -362,4 +366,4 @@ argued with.
 **A finding of theirs that I verified and had missed:** at 6 MSPS centred on 382.5 MHz the
 channeliser yields **193 channel centres, indices 3-195 (380.0875-384.8875 MHz)**. Uplink
 channels **0-2 and 196-199 are never examined** - a 3.5 % blind spot at both band edges,
-reproduced locally by calling `channelise()`.
+reproduced locally by calling `channelise()`. *(Fixed in 1.2.6, 17 November 2026: all 200 channels are examined now, and 0-2 and 196-199 are flagged `band_edge`.)*

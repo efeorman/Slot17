@@ -43,7 +43,9 @@ else
         args+=(--server "$S17_SERVER" --pi-key "$S17_CAR_KEY")
     else
         echo "note: slot17.txt has no server address and car key. Slot17 works, but the app can't see it until you"
-        echo "      add them: put them in slot17.txt and start again, or run 'bash ~/Slot17/setup.sh car' over SSH."
+        echo "      add them. This setup runs only once, so writing them in slot17.txt later changes nothing. Log in"
+        echo "      over SSH instead and run: sudo systemctl stop tetra-detector.service"
+        echo "      then: bash ~/Slot17/setup.sh car --no-calibrate --no-start"
         args+=(--no-display)
     fi
     if [ -n "$S17_HOTSPOT_NAME" ] && [ -n "$S17_HOTSPOT_PASSWORD" ]; then

@@ -53,8 +53,9 @@ A channel can carry several radios. Timing and signal trend can't establish iden
 
 1. Set the new version in `VERSION`, `versions.json` and `p0/version.py`, add its paragraph to `docs/RELEASE-NOTES.md`, commit, and push: the **Tests** workflow runs by itself in the public repository.
 2. Build the app with the `full` workflow on Codemagic or GitHub Actions.
-3. Tag the commit, for example `git tag v1.0.1 && git push origin v1.0.1`. The **Release** workflow tests the setup on clean machines and runs every test again, and only then publishes `slot17.tar.gz`, `install.sh` and `SHA256SUMS`.
-4. Add the apps to the release as **Slot17.ipa** and **Slot17.apk**, and add their checksums to `SHA256SUMS`.
+3. Added a test that feeds samples at the real rate? Add its name to `REALTIME` in `scripts/build_image.sh`: the Pi image's checks run under emulation, about ten times slower than a Pi 5, and the Pi runs those tests at its first start instead.
+4. Tag the commit, for example `git tag v1.0.1 && git push origin v1.0.1`. The **Release** workflow tests the setup on clean machines and runs every test again, and only then publishes `slot17.tar.gz`, `install.sh` and `SHA256SUMS`.
+5. Add the apps to the release as **Slot17.ipa** and **Slot17.apk**, and add their checksums to `SHA256SUMS`.
 
 ## Deploying to a running system
 

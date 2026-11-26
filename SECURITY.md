@@ -36,6 +36,6 @@ These are accepted for the current private use. **Fix the first two before anyon
 
 - Run it as an ordinary user, never as root.
 - Keep `config.json` at mode `0600`.
-- If your link has been shared, make new keys: remove `/opt/slot17-display/config.json`, run `bash setup.sh server` again, then run `bash setup.sh car --server ADDRESS --pi-key NEW_KEY` on the car computer and paste the new link into the app. On a hosted server, `/server new-keys` in the Discord does this.
+- If your link has been shared, make new keys: `sudo rm /opt/slot17-display/config.json`, then `bash ~/Slot17/setup.sh server` again (running it with the old file there keeps the old keys). On the car computer, with the detector stopped, run `bash ~/Slot17/setup.sh car --server ADDRESS --pi-key NEW_KEY --no-calibrate --no-start`, and paste the new link into the app. On a hosted server, `/server new-keys` in the Discord does this.
 - Open only port 5732 for this service.
 - If you set up Bluetooth on 1.6.0 where strangers could have been in range, make a new Bluetooth key once you have 1.6.1: `python3 -B p0/bluetooth_config.py --new-key` on the car computer, then set each phone up again. In 1.6.0 the key also went out in the car computer's Bluetooth state for 5 minutes after a phone set up Bluetooth.

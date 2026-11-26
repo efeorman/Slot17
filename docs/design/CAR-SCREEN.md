@@ -18,7 +18,8 @@ flowchart LR
 ```
 
 - **Local, no internet.** The page and its data come from the car computer itself: no server, no network
-  and no phone in between. A recognised burst is on the screen within the publisher's 50 ms loop, faster
+  and no phone in between. Setting it up needs the car computer connected to a display server once, as for
+  Bluetooth: the publisher that feeds the screen is installed with that connection. A recognised burst is on the screen within the publisher's 50 ms loop, faster
   than on a phone, and it keeps working where there is no signal.
 - **The same page as a phone** (`display/page.html`): the cockpit (Live, Sightings, Car computer, Logs,
   Settings) and drive mode. One page to maintain, not a second program.
@@ -78,9 +79,9 @@ is not documented well enough to rely on yet.
   same. Measure the noise floor (Car computer, Health) with the screen on and off before closing the case,
   keep the Airspy and its antenna cable away from the screen's cable and electronics, and use a short USB
   extension so the receiver doesn't sit against the Pi.
-- **Power.** The screen takes its current from the Pi or from the same supply. This car's Pi already
-  reports undervoltage on a 3 A charger; a Pi 5 needs a supply that offers 5 V at 5 A, and more with a
-  screen.
+- **Power.** The screen takes its current from the Pi or from the same supply. Check for undervoltage
+  (`bash ~/Slot17/setup.sh doctor`, or the app's Pi screen) with the screen and everything else connected. If
+  it appears, use a 12 V to 5 V converter rated for 5 A (README, What you need).
 - **Heat.** A closed case in a car in summer gets hot. Keep the Pi's cooler, and watch the temperature in
   Car computer, Health.
 - **Sound.** Most small HDMI screens have no speaker and a Pi 5 has no headphone socket. The screen shows;

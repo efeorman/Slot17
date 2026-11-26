@@ -6,7 +6,7 @@ The display sits next to the detector, not inside it. The detector works without
 Pi: detector --heartbeat, events--> publisher --outbound HTTP--> server.py :5732 --live stream--> app or web page
 ```
 
-The publisher can only be started while the detector runs, and it stops with the detector. Nothing connects to the Pi, so a command can only travel back on a request the Pi already makes.
+The publisher can only be started while the detector runs. A stop from the app or web page ends both; if the detector stops by itself, the publisher stays, to report the fault and answer the app's requests. Nothing connects to the Pi, so a command can only travel back on a request the Pi already makes.
 
 ## How fresh is the data?
 
@@ -39,7 +39,7 @@ Levels are in dB above that channel's own noise floor. They're signal strength, 
 | `GET /api/state` | Viewer | The latest state |
 | `GET /api/stream` | Viewer | The live stream |
 | `POST /api/command` | Viewer | Stop the detector |
-| `POST /api/op` | Viewer | `mark` (a sighting), `logs` (ask the Pi for its log) or `poweroff`; each has a 32-hex id, so a repeat is harmless |
+| `POST /api/op` | Viewer | `mark` (a sighting), `logs` (ask the Pi for its log), `poweroff`, `notify` (the Pushover switch), `doctor` (the setup check), `bluetooth` and `support` (a support package); each has a 32-hex id, so a repeat is harmless. A client offers only what the car computer lists in its `features` |
 | `POST /api/app-log`, `POST /api/pi-log` | Viewer, Pi | Store a log of up to 1 MB. The server chooses the name, and keeps at most 200 files and 100 MB of each kind |
 | `GET /api/logs`, `GET /api/logs/NAME` | Viewer | List and read stored logs |
 | `GET /api/config` | Viewer | `{"version": ..., "config": ...}` from `app-config.json` |

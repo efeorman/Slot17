@@ -9,7 +9,7 @@ The questions we get most, with short answers. The [README](https://github.com/e
 ## The basics
 
 ### What is Slot17?
-A Raspberry Pi with an Airspy Mini receiver that listens to the TETRA band, 380 to 385 MHz. It looks for the training pattern that's inside every TETRA burst, and your phone shows signal bars and beeps when it picks up a strong one. It only receives.
+A Raspberry Pi with a radio receiver (we use an Airspy Mini) that listens to the TETRA band, 380 to 385 MHz. It looks for the training pattern that's inside every TETRA burst, and your phone shows signal bars and beeps when it picks up a strong one. It only receives.
 
 ### Is it a police detector?
 No. Police, ambulances, the fire brigade and a lot of others (in the Netherlands also KMar, Rijkswaterstaat, ProRail, customs and more) all use the same TETRA network. Slot17 can't tell them apart, and a vehicle whose radio stays quiet is invisible to it.
@@ -46,7 +46,7 @@ No. It never decodes, decrypts or transmits anything. It only checks whether a b
 ## Hardware
 
 ### Which receiver do I need? Can I use an RTL-SDR?
-An Airspy Mini. It takes in the whole 5 MHz band at once, all 200 channels. An RTL-SDR only does about half of that reliably, and the code only works with the Airspy. Other receivers aren't supported.
+The Airspy Mini is the one we drive with and have tested in the car: it takes in the whole 5 MHz band at once, all 200 channels. Since 1.7.0 the software also works with an SDRplay RSP1B or RSP1A, or with a pair of RTL-SDR sticks (one stick alone only covers about half the band reliably, so it takes two). Those have passed our software tests but haven't been tried with the real hardware yet, so read [RECEIVERS.md](https://github.com/efeorman/Slot17/blob/main/docs/design/RECEIVERS.md) before you buy one. Other receivers aren't supported.
 
 ### Which computer?
 A Raspberry Pi 5. We use the 8 GB one; 2 GB and up should be fine, the detector uses about 0.6 GB. Only the Pi 5 has been tested; slower computers may not keep up.
@@ -89,7 +89,7 @@ Ours is the easy way: type `/server create` in the Discord and you get your own 
 What your car computer and app send it: the latest state of the detector, and the drive data and logs you send after a drive. Only you have the keys. `/server info` shows how it's doing, `/server delete` removes everything straight away. The details are on [slot17.cloud/privacy.html](https://slot17.cloud/privacy.html).
 
 ### I lost my keys or shared them by accident
-Type `/server new-keys` in the Discord. The old link and car computer key stop working, so put the new ones in the app and on the car computer.
+On a hosted server, type `/server new-keys` in the Discord. The old link and car computer key stop working, so put the new ones in the app and on the car computer. On your own server, `bash ~/Slot17/setup.sh server --show` prints lost keys again. Shared them? Running the installer again keeps the old keys; [SECURITY.md](https://github.com/efeorman/Slot17/blob/main/SECURITY.md#running-a-server) says how to make new ones.
 
 ### How do I update?
 From 1.3.1 the car computer installs new versions by itself, if you said yes to that in its setup (the default). Otherwise run the same install line again; it keeps your keys, settings, calibration and recordings. The Android app updates itself from Settings, About; the iPhone app you install again the same way. See [Updating](https://github.com/efeorman/Slot17#updating).

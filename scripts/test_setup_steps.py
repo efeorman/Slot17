@@ -48,7 +48,8 @@ configured_receiver() { echo ""; }
 apt_install() { echo "apt_install $*" >> "$LOG"; }
 lsusb() { :; }
 sudo() { echo "sudo $*" >> "$LOG"; return 0; }
-journalctl() { :; }
+journalctl() { case "$*" in *"-b -u"*) [ -n "${JOURNAL_THIS_BOOT:-}" ] && echo "$JOURNAL_THIS_BOOT" ;; esac; return 0; }
+systemctl() { [ "$1" = show ] && echo "${ACTIVE_SINCE_BOOT:-0}"; return 0; }   # the service's last start, this boot
 bash() { echo "bash $*" >> "$LOG"; return "${DRIVER_RC:-0}"; }
 python3() {
     echo "python3 $*" >> "$LOG"
@@ -122,6 +123,29 @@ class OneOpeningPerSetup(Steps):
 
     def test_no_receiver_plugged_in_opens_nothing(self):
         captures, starts, _, out = self.calibrate_and_start(PLUGGED="0")
+        self.assertEqual((len(captures), len(starts)), (0, 0), out)
+
+    # Found in review on 26 November 2026: the setup runs only with the detector stopped, so a re-run in the same
+    # power-up (an update, Bluetooth or the screen switched later) came after an opening, and its defaults calibrated
+    # or started the receiver again.
+    def test_after_the_detector_ran_this_power_up_the_defaults_open_nothing(self):
+        captures, starts, _, out = self.calibrate_and_start(ACTIVE_SINCE_BOOT="81234567")
+        self.assertEqual((len(captures), len(starts)), (0, 0), out)
+        self.assertIn("already used the receiver in this power-up", out)
+        self.assertIn("starts by itself at the next power-up", out)
+
+    def test_a_detector_without_autostart_is_seen_in_this_boots_journal(self):
+        """systemd forgets a stopped unit nothing wants, so its activation time reads 0 again."""
+        captures, starts, _, out = self.calibrate_and_start(JOURNAL_THIS_BOOT="READY: first analysis window completed")
+        self.assertEqual((len(captures), len(starts)), (0, 0), out)
+
+    def test_after_it_ran_an_explicit_calibration_is_done_and_nothing_more(self):
+        captures, starts, _, out = self.calibrate_and_start(ACTIVE_SINCE_BOOT="81234567", CALIBRATE="yes", START="yes")
+        self.assertEqual((len(captures), len(starts)), (1, 0), out)
+        self.assertIn("if it stops responding", out)
+
+    def test_after_it_ran_an_explicit_start_waits_for_the_next_power_up(self):
+        captures, starts, _, out = self.calibrate_and_start(ACTIVE_SINCE_BOOT="81234567", CALIBRATE="no", START="yes")
         self.assertEqual((len(captures), len(starts)), (0, 0), out)
 
     def test_a_start_asked_for_still_needs_the_whole_receiver(self):

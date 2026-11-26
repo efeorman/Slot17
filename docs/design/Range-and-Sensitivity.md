@@ -62,7 +62,7 @@ outputs, not observed receiver sensitivity or guaranteed margin.
   sources and gains. No digital clipping does not exclude earlier analog overload.
 - Keep the present 193-channel usable mask until a passband measurement justifies
   widening it. At 382.5 MHz / 6 MSPS the nominal edge channels outside that mask
-  remain uncovered; extra nominal bandwidth is not automatically usable bandwidth.
+  remain uncovered; extra nominal bandwidth is not automatically usable bandwidth. *(Done in 1.2.6, 17 November 2026, after measuring this receiver's passband: all 200 channels are examined, the outermost seven flagged `band_edge`.)*
 - Capture missed sightings independently with `mark.py`. No candidate can mean
   silence, screening, coverage loss, RF impairment or software failure; the data
   must distinguish them before spending on a new receiver, LNA or SBC.

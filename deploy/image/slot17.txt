@@ -2,7 +2,8 @@
 # Open it with Notepad (Windows) or TextEdit (Mac). Lines starting with # are only notes.
 #
 # Your display server. From /server create in the Slot17 Discord (or your own server's setup):
-# the server address, like https://k7f2q.slot17.cloud, and the car computer key.
+# the server address, like https://k7f2q.slot17.cloud, and the car computer key. Fill in both now: this file
+# is read only until the first start has finished.
 server=
 car_key=
 #
@@ -28,4 +29,5 @@ sdrplay_licence=
 #
 # At the first start the car computer reads this, sets itself up (about 5 minutes) and then removes the
 # key and the password from this card. If something goes wrong, the reason is in slot17-setup.log,
-# next to this file. You can fill in what's missing and start the car computer again.
+# next to this file. If the setup stopped, fix what it says here and start the car computer again. Once it
+# has finished, this file isn't read again: change settings over SSH (README, step 3).

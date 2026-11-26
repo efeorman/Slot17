@@ -1,7 +1,7 @@
 # Shared app fixtures
 
 The iPhone app (`ios/`) and the Android app (`android/`) must make the same decision for the same
-input. These files are that input and the expected answer, and both apps' tests read them:
+input. These files are that input and the expected answer. The Android tests read all three; the iPhone tests read `ble-frames.json`, and test the other two rules with their own cases (reading these two files there too is still to do):
 
 | File | What it checks |
 |---|---|

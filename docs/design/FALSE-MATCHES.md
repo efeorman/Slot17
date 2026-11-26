@@ -29,7 +29,7 @@ detector and app say so; this report does not change it.
 
 ## 3. The release candidate 1.2.7 (coherent rule) against false matches
 
-The final validation (scripts in the private audit archive, `audit/signal-audit-20261117/`), with the finished code and the coherent rule on:
+The final validation, with the finished code and the coherent rule on:
 
 | Test | Examinations | Accepted |
 |---|---|---|
