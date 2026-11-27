@@ -608,6 +608,36 @@ class BrowserTests(unittest.TestCase):
         time.sleep(0.8)
         self.assertEqual(off.evaluate(self.TONE_COUNT), 0)
 
+    # -- aircraft channels (1.8.0): 190-199, a helicopter in the air -----------------------------------------------------
+    def test_an_aircraft_channel_shows_the_helicopter_mark_and_a_ground_one_does_not(self):
+        self.push({"v": 2, "seq": 1, "session": "air1", "detector": {"state": "running", "windows": 1},
+                   "channels": [channel(190, 40.0, 0.3, "air1/a"), channel(189, 30.0, 0.5, "air1/g")], "matches": []})
+        page = self.open()
+        self.wait(page, self.TITLE, "Detector running")
+        self.wait(page, "document.querySelectorAll('.meter[data-air]').length", 1)
+        first = page.evaluate("(() => { const m = document.querySelectorAll('.meter')[0]; return [m.querySelector('.ch').textContent,"
+                              " !!m.querySelector('.ch .air-glyph'), m.querySelector('.chip.air')?.textContent, m.hasAttribute('data-air')]; })()")
+        self.assertEqual(first, ["L190", True, "Aircraft", True])
+        second = page.evaluate("(() => { const m = document.querySelectorAll('.meter')[1]; return [m.querySelector('.ch').textContent,"
+                               " !!m.querySelector('.air-glyph'), m.hasAttribute('data-air')]; })()")
+        self.assertEqual(second, ["L189", False, False])
+        self.assertIn("aircraft", page.evaluate("document.querySelectorAll('.meter')[0].querySelector('.ch').getAttribute('aria-label')"))
+
+    def test_an_aircraft_chimes_by_default_and_says_so(self):
+        page = self.urgent_page("air2")
+        self.feed("air2", 2, 195, 40.0, "air2/a")
+        self.wait(page, self.TONE_COUNT, 2)
+        self.wait(page, "document.getElementById('alertTitle').textContent.includes('L195 · aircraft')", True)
+
+    def test_sound_for_aircraft_off_silences_only_the_aircraft_channels(self):
+        page = self.urgent_page("air3", init="localStorage.setItem('s17cfg', JSON.stringify({aircraft: false}));")
+        self.feed("air3", 2, 198, 60.0, "air3/a")
+        time.sleep(0.8)
+        self.assertEqual(page.evaluate(self.TONE_COUNT), 0)
+        self.assertEqual(page.evaluate("document.getElementById('airBtn').getAttribute('aria-checked')"), "false")
+        self.feed("air3", 3, 178, 40.0, "air3/g")                          # a ground channel still chimes
+        self.wait(page, self.TONE_COUNT, 2)
+
     def test_a_stopped_detector_never_plays_the_urgent_beep(self):
         page = self.urgent_page("u9")
         self.push({"v": 2, "seq": 2, "session": "u9", "detector": {"state": "stopped"},

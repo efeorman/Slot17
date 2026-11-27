@@ -110,7 +110,7 @@ class ConfigTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_missing_or_damaged_means_off(self):
-        self.assertEqual(config.load(self.path), {"on": False, "name": "Slot17", "key": None})
+        self.assertEqual(config.load(self.path), {"on": False, "name": "Slot17", "key": None, "code": None})
         for text in ("not json", "[true]", json.dumps({"on": True}), json.dumps({"on": True, "key": "abc"}),
                      json.dumps({"on": True, "key": "zz" * 32})):
             Path(self.path).write_text(text)
@@ -165,6 +165,91 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual((now["on"], now["name"], len(now["key"])), (True, "Car 2", 32))
         self.assertEqual(json.loads(out.getvalue())["key_id"], frames.key_id(now["key"]))
         self.assertNotIn(now["key"].hex(), out.getvalue())
+
+
+class PairingCodeTests(unittest.TestCase):
+    """Bluetooth without any server (27 November 2026): the key made from a pairing code the user carries over."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "slot17-bluetooth.json")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_the_code_is_never_in_what_may_be_shown(self):
+        """public() is what states, the doctor and support packages carry: the code is as good as the key."""
+        code = frames.format_code(bytes(range(16)))
+        shown = config.public({"on": True, "name": "Slot17", "key": frames.key_from_code(code), "code": code})
+        self.assertNotIn(code, repr(shown))
+        self.assertEqual(set(shown), {"on", "name", "key_id"})
+
+    def test_the_shared_examples(self):
+        # A signed update replaces p0/, tests/ and the publisher only. The updater tests a release in a copy of
+        # those, with no shared/ at all, and a car computer installed from an older version keeps that version's
+        # shared/, without pairing codes. A failed check there stops the detector from starting, so this test runs
+        # where shared/ is as new as the code (this repository, GitHub's tests) and skips elsewhere (1.8.0).
+        path = Path(__file__).resolve().parents[1] / "shared/parity/ble-frames.json"
+        if not path.is_file():
+            self.skipTest("no shared/ here: the updater's copy holds p0/, tests/ and the publisher only")
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        if not all(k in stored for k in ("pairing_codes", "pairing_codes_typed", "pairing_codes_refused")):
+            self.skipTest("this shared/ is older than pairing codes: signed updates never replace it")
+        for case in stored["pairing_codes"]:
+            self.assertEqual(frames.format_code(bytes.fromhex(case["bytes"])), case["code"])
+            self.assertEqual(frames.key_from_code(case["code"]).hex(), case["key"])
+            self.assertEqual(frames.key_id(frames.key_from_code(case["code"])), case["key_id"])
+        for case in stored["pairing_codes_typed"]:
+            self.assertEqual(frames.code_bytes(case["typed"]).hex(), case["bytes"])
+        for typed in stored["pairing_codes_refused"]:
+            with self.assertRaises(ValueError, msg=typed):
+                frames.code_bytes(typed)
+
+    def test_a_code_from_the_app_sets_the_key_and_is_kept_for_another_phone(self):
+        import contextlib
+        import io
+        code = frames.make_code()
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(config.main(["--path", self.path, "--code", code.lower().replace("-", " ")]), 0)
+        now = config.load(self.path)
+        self.assertTrue(now["on"])
+        self.assertEqual(now["key"], frames.key_from_code(code))
+        self.assertEqual(now["code"], code)
+        self.assertNotIn(now["key"].hex(), out.getvalue())
+        self.assertNotIn(code, out.getvalue())               # --code prints the public settings only
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(config.main(["--path", self.path, "--show-code"]), 0)
+        self.assertEqual(out.getvalue().strip(), code)
+
+    def test_a_code_made_here_and_a_typo_refused(self):
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(config.main(["--path", self.path, "--new-code", "--name", "Car 2"]), 0)
+        code = out.getvalue().strip()
+        now = config.load(self.path)
+        self.assertEqual((now["on"], now["name"], now["key"]), (True, "Car 2", frames.key_from_code(code)))
+        typo = code[:-1] + ("0" if code[-1] != "0" else "1")
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(config.main(["--path", self.path, "--code", typo]), 2)
+        self.assertIn("typing error", err.getvalue())
+        self.assertEqual(config.load(self.path)["key"], frames.key_from_code(code))
+
+    def test_a_random_key_has_no_code_and_a_new_key_drops_one(self):
+        import contextlib
+        import io
+        config.save(self.path, on=True)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(config.main(["--path", self.path, "--show-code"]), 1)
+        config.save(self.path, code=frames.make_code())
+        self.assertIsNotNone(config.load(self.path)["code"])
+        config.save(self.path, new_key=True)
+        self.assertIsNone(config.load(self.path)["code"])
+        # A stored code that doesn't make the stored key (edited by hand) is not offered to a phone.
+        data = json.loads(Path(self.path).read_text())
+        data["code"] = frames.make_code()
+        Path(self.path).write_text(json.dumps(data))
+        self.assertIsNone(config.load(self.path)["code"])
 
 
 class FakePeripheral:

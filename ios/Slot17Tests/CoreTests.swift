@@ -134,6 +134,16 @@ final class LinkTrackerTests: XCTestCase {
         t.applyProbe(message(seq: 1, mono: 1000, session: "one"), begin: 10, end: 10.1)
         XCTAssertEqual(t.accept(message(seq: 2, mono: 1001, session: "two"), now: 11), .freshAndNewScope)
     }
+
+    /// 1.8.0: with both routes fresh, Bluetooth's data comes straight from the car computer and goes first.
+    func testBluetoothGoesFirstWhileItsDataIsFresh() {
+        XCTAssertTrue(LinkTracker.bluetoothFirst(live: true, age: 1.2, serverFresh: true), "both fresh")
+        XCTAssertTrue(LinkTracker.bluetoothFirst(live: true, age: LinkTracker.bluetoothFirstWithin, serverFresh: true))
+        XCTAssertFalse(LinkTracker.bluetoothFirst(live: true, age: 6, serverFresh: true), "a stalled radio link")
+        XCTAssertTrue(LinkTracker.bluetoothFirst(live: true, age: 6, serverFresh: false), "nothing fresher")
+        XCTAssertFalse(LinkTracker.bluetoothFirst(live: false, age: 0.5, serverFresh: true), "no running detector over it")
+        XCTAssertFalse(LinkTracker.bluetoothFirst(live: false, age: 0.5, serverFresh: false))
+    }
 }
 
 final class StatusTests: XCTestCase {
@@ -148,6 +158,8 @@ final class StatusTests: XCTestCase {
 
     func testPlainWords() {
         XCTAssertEqual(StatusBuilder.headline(LinkTracker(), now: 1, lastDelay: nil, hasCredentials: false).title, "Not set up")
+        XCTAssertEqual(StatusBuilder.headline(LinkTracker(), now: 1, lastDelay: nil, hasCredentials: false, bluetoothSetUp: true).title,
+                       "Waiting for the car computer")
         XCTAssertEqual(StatusBuilder.headline(LinkTracker(), now: 1, lastDelay: nil, hasCredentials: true).title, "Connecting…")
         XCTAssertEqual(StatusBuilder.headline(tracked(detector: DetectorState(state: "running")), now: 10.2, lastDelay: 3.21, hasCredentials: true).detail,
                        "Delay up to 3.3 s after the burst")
@@ -157,6 +169,34 @@ final class StatusTests: XCTestCase {
                        "No data from the car")
     }
 
+    func testTheAircraftChannelsAre190To199() {
+        // ECC/DEC/(06)05: 384.750-385.000 MHz is channels 190-199 on the grid (1.8.0).
+        let air = (0..<200).filter { ch in let f = 380.0125 + Double(ch) * 0.025; return f >= 384.75 - 1e-9 && f < 385.0 }
+        XCTAssertEqual(air, (0..<200).filter { Aircraft.isAir($0) })
+        XCTAssertTrue(MeterRow(ch: 190, freqMHz: 384.7625, strength: 30, age: 1, hits60: 1, approxTime: false).air)
+        XCTAssertFalse(MeterRow(ch: 189, freqMHz: 384.7375, strength: 30, age: 1, hits60: 1, approxTime: false).air)
+        XCTAssertFalse(Aircraft.isAir(nil))
+    }
+
+    func testAircraftSoundOffSilencesOnlyTheAircraftChannels() {
+        var s = AlertSettings()
+        XCTAssertTrue(s.aircraftSound, "on by default: nothing changes unless the operator switches it off")
+        s.aircraftSound = false
+        let engine = AlertEngine()
+        var played: [SoundKind] = []
+        func run(_ ch: Int, _ id: String, _ now: Double) -> AlertDecision.Outcome? {
+            engine.ingest([MatchRow(id: id, ch: ch, strength: 40, age: 1)], frame: nil, channels: [], scope: "s")
+            return engine.flush(AlertEngine.Context(now: now, live: true, mayHold: false, scope: "s", settings: s, armed: true,
+                                                    audioProblem: nil, mutedUntil: -1, age: { $0.match.age },
+                                                    play: { played.append($0); return nil })).first?.outcome
+        }
+        XCTAssertEqual(run(190, "a", 100), .silent("an aircraft channel, and sound for aircraft is off"))
+        XCTAssertEqual(run(189, "g", 101), .played(.chime))
+        XCTAssertEqual(played, [.chime])
+        let saved = try! JSONEncoder().encode(s)
+        XCTAssertFalse(try! JSONDecoder().decode(AlertSettings.self, from: saved).aircraftSound, "the choice is kept")
+    }
+
     func testTheChainNamesTheBrokenLink() {
         let healthy = StatusBuilder.chain(tracked(detector: DetectorState(state: "running")), now: 10.2, hasCredentials: true)
         XCTAssertEqual(healthy.map(\.level), [.ok, .ok, .ok, .ok])
@@ -164,7 +204,7 @@ final class StatusTests: XCTestCase {
         let piSilent = StatusBuilder.chain(tracked(detector: DetectorState(state: "running"), carAge: 20), now: 10.2, hasCredentials: true)
         XCTAssertEqual(piSilent.map(\.level), [.ok, .bad, .idle, .idle])
 
-        let deaf = StatusBuilder.chain(tracked(detector: DetectorState(state: "running", quietWindows: 40)), now: 10.2, hasCredentials: true)
+        let deaf = StatusBuilder.chain(tracked(detector: DetectorState(state: "running", quietWindows: 240)), now: 10.2, hasCredentials: true)
         XCTAssertEqual(deaf[3].detail, "Hears nothing")
 
         let unreachable = StatusBuilder.chain(LinkTracker(), now: 1, hasCredentials: true)
@@ -188,8 +228,8 @@ final class StatusTests: XCTestCase {
 
     func testMeterColoursFollowWhatTheAppDoes() {
         var s = AlertSettings()
-        XCTAssertEqual(Meters.colour(22, s), .red)
-        XCTAssertEqual(Meters.colour(21.9, s), .yellow)
+        XCTAssertEqual(Meters.colour(35, s), .red, "the chime level is the server's 35 dB by default")
+        XCTAssertEqual(Meters.colour(34.9, s), .yellow)
         XCTAssertEqual(Meters.colour(11.9, s), .weak, "never green")
         XCTAssertEqual(Meters.colour(nil, s), .grey)
         XCTAssertFalse(Meters.isStrong(49.9, s))

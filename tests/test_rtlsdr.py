@@ -308,6 +308,17 @@ class Session(unittest.TestCase):
         self.assertTrue(rx.open()["same_serial"])
         rx.close()
 
+    def test_the_same_serial_with_nearby_ppm_shares_the_mean(self):
+        """Two good sticks out of the box, calibrated to 0 and 1 ppm: until 26 November 2026 every start refused
+        (found in review). Now both get the mean, which is at most 1.5 ppm off for either."""
+        for ppm, shared in (((0, 1), 0), ((-2, 1), 0), ((4, 6), 5)):
+            rx, lib = rx_with(sticks=(("00000001", 5), ("00000001", 5)), gain={"ppm_a": ppm[0], "ppm_b": ppm[1]})
+            info = rx.open()
+            self.assertEqual(info["shared_ppm"], shared)
+            self.assertEqual([st["ppm"] for st in info["sticks"]], [shared, shared])
+            self.assertEqual([c[2] for c in lib.calls if c[0] == "ppm"], [shared, shared])
+            rx.close()
+
     def test_a_tuner_that_cannot_reach_380_mhz(self):
         rx, lib = rx_with(sticks=(("00000001", 4), ("00000002", 5)))   # 4 = FC2580
         with self.assertRaises(receiver.ReceiverError) as e:
@@ -422,6 +433,27 @@ class Timing(unittest.TestCase):
         self.assertEqual(a.lost + b.lost, 0, "not counted as samples lost on USB")
         self.assertAlmostEqual(self.sink.dropped * 2_560_000 / 6_000_000, self.lost_by_the_join(a), delta=4)
         self.assertAlmostEqual(self.sink.dropped / 6_000_000, 0.015, delta=0.0005)
+
+    def test_a_start_skew_and_a_drift_on_the_other_stick_lose_nothing(self):
+        """B starts 12 ms after A, so A skips its first 12 ms; then B's crystal runs fast, so B skips too. Both
+        skips only take away samples a stick had in excess. Until 26 November 2026 the smaller of the two was
+        reported as dropped samples, which degraded the session and cut checking to one thread (found in review)."""
+        self.run_for(200.0, start=(0.0, 0.012), rate_ppm=(0.0, 60.0))
+        a, b = self.rx.sticks
+        self.assertGreaterEqual(self.rx.counters["realignments"], 2)
+        self.assertGreater(a.skipped, 0)
+        self.assertGreater(b.skipped, 0)
+        self.assertEqual(self.sink.dropped, 0)
+        self.assertEqual(self.rx.counters["joined_lost_samples"], 0)
+
+    def test_a_drift_that_changes_direction_loses_nothing(self):
+        """B fast while cold, then A fast once warm: each skips in its turn, and nothing is lost."""
+        self.run_for(100.0, rate_ppm=(0.0, 60.0))
+        self.run_for(200.0, rate_ppm=(60.0, 0.0))
+        a, b = self.rx.sticks
+        self.assertGreater(a.skipped, 0)
+        self.assertGreater(b.skipped, 0)
+        self.assertEqual(self.sink.dropped, 0)
 
     def test_drifting_clocks_are_realigned_without_any_loss(self):
         # B's crystal 60 ppm fast: 154 samples a second, past the 5 ms tolerance after about 83 s.
@@ -809,6 +841,21 @@ class PairCalibration(unittest.TestCase):
         self.assertIsNone(cal)
         self.assertIn("would want ppm_a = 12, ppm_b = -20", out)
         self.assertIn("Nothing written", out)
+
+    def test_two_sticks_with_one_serial_get_one_setting(self):
+        """Two sticks out of the box (both 00000001), 0.4 and 0.6 ppm off: saved as one setting, so the next start
+        works. Until 26 November 2026 they were saved as 0 and 1, and every start refused (found in review)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cap = self.capture(tmp, "20261126-100000", applied=(0, 0), error=(0.4, 0.6),
+                               serials=("00000001", "00000001"))
+            cal, settings, out = self.calibrate([cap])
+        self.assertEqual(settings["gain"]["ppm_a"], settings["gain"]["ppm_b"], out)
+        self.assertTrue(cal["rtl_pair"]["same_serial"])
+        self.assertIn("both get ppm", out)
+        lib = FakeRtl(sticks=(("00000001", 5), ("00000001", 5)))
+        rx = R.Receiver("rtlsdr2", gain=dict(receiver.KINDS["rtlsdr2"]["gain"], **settings["gain"]), lib=lib)
+        self.assertTrue(rx.open()["same_serial"])
+        rx.close()
 
     def test_an_older_pair_capture_never_overrides_the_airspy(self):
         """Found in review: an older pair capture among the files made calibration measure the pair, not the

@@ -1,9 +1,10 @@
 # Slot17: fill this in after flashing the card, save it, then put the card in the Raspberry Pi.
 # Open it with Notepad (Windows) or TextEdit (Mac). Lines starting with # are only notes.
 #
-# Your display server. From /server create in the Slot17 Discord (or your own server's setup):
-# the server address, like https://k7f2q.slot17.cloud, and the car computer key. Fill in both now: this file
-# is read only until the first start has finished.
+# Your display server, if you use one. From /server create in the Slot17 Discord (or your own server's
+# setup): the server address, like https://k7f2q.slot17.cloud, and the car computer key. Fill in both now: this
+# file is read only until the first start has finished. No server? Leave both empty and fill in
+# bluetooth_code below: the app then gets everything over Bluetooth in the car.
 server=
 car_key=
 #
@@ -18,6 +19,10 @@ hotspot_password=
 # yes or no, and the name phones show (up to 20 letters, digits, spaces, . - _).
 bluetooth=yes
 bluetooth_name=Slot17
+# Without a server: the pairing code the app makes under Settings, Bluetooth to the car computer, Without a
+# server, Make a pairing code (27 characters, like ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-234). It is removed from this card once
+# it is saved on the car computer. With a server, leave it empty.
+bluetooth_code=
 #
 # The receiver: airspy (Airspy Mini), rsp1b or rsp1a (SDRplay), rtlsdr2 (two RTL-SDRs). Empty: the one plugged in.
 receiver=

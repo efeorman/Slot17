@@ -65,6 +65,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import nl.slot17.app.AppModel
+import nl.slot17.core.Aircraft
 import nl.slot17.core.AlertRecord
 import nl.slot17.core.Fmt
 import nl.slot17.core.Format
@@ -80,7 +81,7 @@ fun LiveScreen(model: AppModel, editLink: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         StatusHeader(model)
-        if (!model.hasLink && !model.demo) SetupCard(model, editLink)
+        if (!model.hasLink && !model.demo && !model.bluetooth.paired) SetupCard(model, editLink)
         Box(Modifier.fillMaxWidth().background(C.panel, RoundedCornerShape(14.dp)).border(1.dp, C.line, RoundedCornerShape(14.dp)).padding(12.dp)) {
             ChainView(model)
         }
@@ -153,11 +154,13 @@ fun SegmentMeter(model: AppModel, row: MeterRow?, grey: Boolean, modifier: Modif
     val kind = Meters.colour(row?.strength, s)
     val colour = if (grey) C.grey else C.meter(kind, style)
     val strong = !grey && Meters.isStrong(row?.strength, s)
+    val air = !grey && row?.air == true
     val outline = C.hex(style.strongOutline) ?: Color.White
     val shown by animateFloatAsState(lit.toFloat(), tween(280), label = "segments")
     Column(modifier.alpha((row?.let { Meters.opacity(it.age) } ?: 0.45).toFloat())
         .background(C.panel, RoundedCornerShape(16.dp))
-        .border(if (strong) 3.dp else 1.dp, if (strong) outline else C.line, RoundedCornerShape(16.dp))
+        .border(if (strong) 3.dp else if (air) 2.dp else 1.dp,
+            if (strong) outline else if (air) C.blue.copy(alpha = 0.85f) else C.line, RoundedCornerShape(16.dp))
         .padding(vertical = 10.dp, horizontal = 6.dp)
         .semantics { contentDescription = spoken(row, strong, grey, style.strongBadge, style.frequentText) },
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -175,12 +178,18 @@ fun SegmentMeter(model: AppModel, row: MeterRow?, grey: Boolean, modifier: Modif
             }
         }
         if (row != null) {
-            Text("L${row.ch}", color = C.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // An aircraft's channel (1.8.0): the helicopter mark before the number.
+                if (air) Icon(AircraftIcon, null, tint = C.blue, modifier = Modifier.size(17.dp).padding(end = 3.dp))
+                Text("L${row.ch}", color = C.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
+            }
             Text(row.strength?.let { "${Fmt.fixed(it, 1)} dB" } ?: "strength n/a", color = C.text, fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold, maxLines = 1)
             Text("${Fmt.fixed(row.freqMHz, 4)} MHz", color = C.dim, fontSize = 11.sp, maxLines = 1)
             Text("${if (row.approxTime) "≈ " else ""}${Format.ago(row.age)} · ${row.hits60}×/min", color = C.dim, fontSize = 11.sp,
                 maxLines = 1, textAlign = TextAlign.Center)
+            if (air) Text(Aircraft.WORD.uppercase(), color = C.blue, fontSize = 10.sp, fontWeight = FontWeight.Black,
+                letterSpacing = 0.6.sp, maxLines = 1)
             if (row.call && !grey) Tag(Icons.Filled.PhoneInTalk, "In a call")
             else if (row.frequent && !grey) Tag(Icons.Filled.GraphicEq, style.frequentText)
             if (row.rising && !grey) Tag(Icons.Filled.NorthEast, "Rising")
@@ -193,6 +202,7 @@ fun SegmentMeter(model: AppModel, row: MeterRow?, grey: Boolean, modifier: Modif
 private fun spoken(row: MeterRow?, strong: Boolean, grey: Boolean, badge: String, frequent: String): String {
     row ?: return "No channel"
     val parts = mutableListOf("Channel L${row.ch}")
+    if (row.air && !grey) parts.add(Aircraft.SPOKEN)
     if (strong) parts.add(badge)
     parts.add(row.strength?.let { "${Fmt.fixed(it, 0)} decibels above the noise" } ?: "strength not available")
     parts.add((if (row.approxTime) "about " else "") + Format.ago(row.age).replace(" s ago", " seconds ago"))
@@ -286,11 +296,13 @@ fun LastSightingLine(model: AppModel) {
 object AlertText {
     fun title(a: AlertRecord): String {
         val db = AppModel.db(a.strength)
+        // An aircraft's channel says so (1.8.0).
+        val ch = if (Aircraft.isAir(a.channel)) "L${a.channel} · aircraft" else "L${a.channel}"
         return when (a.sound) {
-            SoundKind.URGENT -> "Urgent beep · L${a.channel} · $db"
-            SoundKind.CHIME -> "Chime · L${a.channel} · $db"
-            SoundKind.CALL -> "Call tone · L${a.channel} · $db"
-            else -> "Silent · L${a.channel} · $db"
+            SoundKind.URGENT -> "Urgent beep · $ch · $db"
+            SoundKind.CHIME -> "Chime · $ch · $db"
+            SoundKind.CALL -> "Call tone · $ch · $db"
+            else -> "Silent · $ch · $db"
         }
     }
 }
@@ -300,7 +312,8 @@ fun LastAlertCard(model: AppModel) {
     val last = model.alerts.firstOrNull { it.sound != null }
     Row(Modifier.fillMaxWidth().background(C.panel, RoundedCornerShape(12.dp)).border(1.dp, C.line, RoundedCornerShape(12.dp))
         .padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Filled.Notifications, null, tint = if (last?.sound == SoundKind.URGENT) C.red else C.dim)
+        if (last != null && Aircraft.isAir(last.channel)) Icon(AircraftIcon, null, tint = C.blue, modifier = Modifier.size(24.dp))
+        else Icon(Icons.Filled.Notifications, null, tint = if (last?.sound == SoundKind.URGENT) C.red else C.dim)
         Column(Modifier.padding(start = 10.dp)) {
             if (last != null) {
                 Text(AlertText.title(last), color = C.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -320,6 +333,7 @@ fun MoreChannels(model: AppModel) {
             Row(Modifier.alpha(Meters.opacity(row.age).toFloat()).background(C.panel, CircleShape).border(1.dp, C.line, CircleShape)
                 .padding(horizontal = 8.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(7.dp).background(C.meter(Meters.colour(row.strength, model.settings), model.style), CircleShape))
+                if (row.air) Icon(AircraftIcon, null, tint = C.blue, modifier = Modifier.padding(start = 4.dp).size(13.dp))
                 Text(" L${row.ch}", color = C.text, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 row.strength?.let { Text(" ${Fmt.fixed(it, 0)} dB", color = C.text, fontSize = 12.sp) }
                 Text(" ${Format.ago(row.age)}", color = C.dim, fontSize = 11.sp)
@@ -332,7 +346,7 @@ fun MoreChannels(model: AppModel) {
 @Composable
 fun SetupCard(model: AppModel, editLink: () -> Unit) {
     Card("Connect to your Pi") {
-        Text("Add the private link for your display server to start receiving. Your own server or a hosted one, both work the same.",
+        Text("Add the private link for your display server to start receiving. Your own server or a hosted one, both work the same. No server? Settings, Bluetooth to the car computer, Without a server: the app then gets everything straight from the car computer.",
             color = C.dim, fontSize = 14.sp)
         ActionButton("Add your private link", editLink, tint = C.blue, foreground = Color.Black)
         ActionButton("Try the demo", { model.switchDemo(true) })

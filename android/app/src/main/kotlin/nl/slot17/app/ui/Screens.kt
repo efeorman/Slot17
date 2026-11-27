@@ -49,6 +49,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import nl.slot17.app.AppModel
+import nl.slot17.core.Aircraft
 import nl.slot17.core.Fmt
 import nl.slot17.core.Format
 import nl.slot17.core.MarkSummary
@@ -289,7 +290,7 @@ private fun Confirm(title: String, text: String, action: String, ok: () -> Unit,
 
 @Composable
 private fun NetworkDetails(model: AppModel) {
-    val link = model.lastMessage?.state?.link
+    val link = model.piState?.link ?: model.lastMessage?.state?.link
     model.phoneRoundTripMS?.let { LabelledRow("Phone to server", "${Fmt.fixed(it, 0)} ms there and back") }
     link ?: return
     LabelledRow("Car computer uses", link.viaText)
@@ -319,7 +320,9 @@ fun LogsScreen(model: AppModel) {
                 val rows = model.alerts.filter { !onlySounds || it.sound != null }.take(300)
                 if (rows.isEmpty()) Hint("No alerts yet.")
                 for (a in rows) Column(Modifier.fillMaxWidth().background(C.panel, RoundedCornerShape(12.dp)).padding(12.dp)) {
-                    Row {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (Aircraft.isAir(a.channel)) Icon(AircraftIcon, null, tint = if (a.sound == null) C.dim else C.blue,
+                            modifier = Modifier.padding(end = 6.dp).size(17.dp))
                         Text(AlertText.title(a), color = C.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                         Text(SimpleDateFormat("HH:mm:ss", Locale.UK).format(Date(a.atMs)), color = C.dim, fontSize = 12.sp)
                     }

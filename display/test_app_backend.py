@@ -6,6 +6,7 @@ power anything off or touch a receiver: every command runner is replaced with a 
 import base64
 import http.client
 import json
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -319,6 +320,10 @@ class ReleaseNotice(Base):
         self.assertEqual(versions["software"], (root / "VERSION").read_text().strip())
         project = (root / "ios/project.yml").read_text(encoding="utf-8")
         self.assertIn(f'MARKETING_VERSION: "{versions["app"]}"', project)
+        # XcodeGen writes the Info.plists' own lines as given: 1.10.0's first build still said 1.9.0 (24).
+        self.assertEqual(project.count(f'CFBundleShortVersionString: "{versions["app"]}"'), 2)
+        build = re.search(r'CURRENT_PROJECT_VERSION: "(\d+)"', project).group(1)
+        self.assertEqual(project.count(f'CFBundleVersion: "{build}"'), 2)
         android = (root / "android/app/build.gradle.kts").read_text(encoding="utf-8")
         self.assertIn(f'versionName = "{versions["android"]}"', android)
 

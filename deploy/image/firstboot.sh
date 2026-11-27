@@ -41,10 +41,14 @@ else
     args=(car --yes --no-calibrate)
     if [ -n "$S17_SERVER" ] && [ -n "$S17_CAR_KEY" ]; then
         args+=(--server "$S17_SERVER" --pi-key "$S17_CAR_KEY")
+    elif [ -n "$S17_BLUETOOTH_CODE" ]; then
+        echo "no display server: the app reaches the car computer over Bluetooth, with the pairing code from slot17.txt"
+        args+=(--no-display)
     else
-        echo "note: slot17.txt has no server address and car key. Slot17 works, but the app can't see it until you"
-        echo "      add them. This setup runs only once, so writing them in slot17.txt later changes nothing. Log in"
-        echo "      over SSH instead and run: sudo systemctl stop tetra-detector.service"
+        echo "note: slot17.txt has no server address and car key, and no Bluetooth pairing code. Slot17 runs, but the"
+        echo "      app can't reach it until it has one of them. This setup runs only once, so writing them in"
+        echo "      slot17.txt later changes nothing. Log in over SSH instead and run:"
+        echo "      sudo systemctl stop tetra-detector.service"
         echo "      then: bash ~/Slot17/setup.sh car --no-calibrate --no-start"
         args+=(--no-display)
     fi
@@ -75,11 +79,13 @@ else
     # The installer runs as the normal user and uses sudo for a few steps: allow that for this run only.
     printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$user" > "$SUDOERS"
     chmod 440 "$SUDOERS"
-    runuser -u "$user" -- env HOME="$home" SLOT17_TARBALL="$OPT/slot17.tar.gz" \
-        SLOT17_HOTSPOT_PASSWORD="$S17_HOTSPOT_PASSWORD" bash "$OPT/install.sh" "${args[@]}"
+    # The hotspot password and pairing code go in the environment (runuser keeps it), not on env's command line,
+    # where the process list would show them for the whole install (found in review, 27 November 2026).
+    export SLOT17_HOTSPOT_PASSWORD="$S17_HOTSPOT_PASSWORD" SLOT17_BLUETOOTH_CODE="$S17_BLUETOOTH_CODE"
+    runuser -u "$user" -- env HOME="$home" SLOT17_TARBALL="$OPT/slot17.tar.gz" bash "$OPT/install.sh" "${args[@]}"
     rc=$?
     rm -f "$SUDOERS"
-    unset S17_CAR_KEY S17_HOTSPOT_PASSWORD
+    unset S17_CAR_KEY S17_HOTSPOT_PASSWORD S17_BLUETOOTH_CODE SLOT17_HOTSPOT_PASSWORD SLOT17_BLUETOOTH_CODE
 
     if [ "$rc" != 0 ]; then
         echo "== the setup stopped (code $rc). Fix what it says above, then start the car computer again."
@@ -91,8 +97,8 @@ fi
 
 # Finished only when the card no longer holds the secrets: firstboot_config.py reads the file back to check.
 if ! python3 "$OPT/firstboot_config.py" forget "$CONF"; then
-    echo "== the key and the hotspot password are saved on the car computer, but couldn't be removed from"
-    echo "   slot17.txt on this card. This is tried again at the next start; or delete those two lines yourself."
+    echo "== the key, the hotspot password and the pairing code are saved on the car computer, but couldn't be"
+    echo "   removed from slot17.txt on this card. This is tried again at the next start; or delete those lines yourself."
     exit 1
 fi
 mkdir -p "$(dirname "$DONE")"

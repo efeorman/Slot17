@@ -311,7 +311,8 @@ So: fit the ferrites and the filter for signal quality, but do not expect them t
   decoding it is both illegal and outside this project's design.
 - **Where.** No distance, no direction. One receiver, one antenna, no timing reference.
 - **Whether it is a vehicle.** A radio is a radio. Bars are not vehicles - one maker says
-  the same in its manual.
+  the same in its manual. The one exception is an aircraft in the air: since 1.8.0 a match on
+  the air-ground-air channels is marked as one (§12).
 - **Direct mode.** Radios talking directly to each other at a traffic check are invisible
   to us, which is precisely the scenario people most want covered.
 - **Silence.** A vehicle whose radio is idle and not registering transmits nothing. No
@@ -345,6 +346,36 @@ So: fit the ferrites and the filter for signal quality, but do not expect them t
 *Checked 13 November 2026:* c2000masten.nl lists 609 masts and Dutch Wikipedia about 600, so the 615 used above holds. The 85 000 radios figure could not be confirmed again from these sources that day; the last official count found was about 65 000 programmed radios in 2006. The estimate of about 140 radios per average cell scales with it (about 107 at 65 000).
 
 ---
+
+## 12. Aircraft channels (27 November 2026)
+
+**The rule.** ECC/DEC/(06)05 (CEPT, 2006) designates 384.800–385.000 / 394.800–395.000 MHz as
+the core bands for air-ground-air (AGA) use by emergency services, with 384.750–384.800 /
+394.750–394.800 MHz as extension bands: channels 192–199 and 190–191 on our grid. ETSI
+TR 102 300-6 (the TETRA AGA designers' guide) has an aircraft's radio hand over to an air cell
+before 500 ft (150 m), at no more than 30 dBm (1 W), and back to a ground cell well below
+500 ft. Germany's BDBOS says the same of its Luftfahrzeugfunkzellen.
+
+**Our data.** All 133 sessions on the car computer (6 September to 27 November): 13,171
+matches, 3,113 (24 %) on channels 190–199; channel 190 is the busiest channel of all.
+Air-channel episodes stayed audible over up to 26 km of driving, ground channels never past
+10 km, and their strength varied less. Against the ADS-B Exchange tracks of 18 Dutch police
+and trauma helicopters, minute by minute along the drives:
+
+| | minutes | a tracked helicopter flying within 20 km | within 30 km |
+|---|---|---|---|
+| With an air-channel match | 189 | 50 % | 74 % |
+| Without one | 774 | 4 % | 12 % |
+
+**What follows (1.8.0).** A match on channels 190–199 carries `air_channel: true` in the
+detector's events, and every display marks it with a helicopter and the word Aircraft. It
+changes nothing in detection: the label is a lookup on a match already recognised.
+
+**Limits.** A helicopter below about 150 m uses the ground channels and is not told apart. A
+quarter of the air-channel minutes had no tracked Dutch helicopter within 30 km (German or
+Belgian aircraft, fixed-wing aircraft, flights without a public track). The channel says
+"aircraft", not police or ambulance. Records: `audit/air-channels-20261127/` in the private
+archive.
 
 ## 11. Amendments after independent review (13 September 2026)
 

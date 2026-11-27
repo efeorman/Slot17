@@ -31,6 +31,8 @@ struct MeterRow: Identifiable, Equatable {
     /// A call pattern (normal bursts on every frame) on this channel in the last 10 s.
     var call: Bool = false
     var id: Int { ch }
+    /// An aircraft's channel (1.8.0): a radio in the air, not a vehicle on the road.
+    var air: Bool { Aircraft.isAir(ch) }
 }
 
 /// What a meter's colour means: what the app would do, never how near or what kind of vehicle.
@@ -153,10 +155,14 @@ enum StatusBuilder {
 
     /// `bluetooth` only when the server has nothing fresh from the car: then Bluetooth's word counts. Before 1.6.0
     /// the lights and the line read only the server, so on 23 November they said Pi silent while Bluetooth was live.
+    /// `bluetoothSetUp`: this phone has the car computer's Bluetooth key, so without a server it waits for that.
     static func headline(_ t: LinkTracker, now: Double, lastDelay: Double?, hasCredentials: Bool,
-                         bluetooth: BluetoothView? = nil) -> HeadlineStatus {
+                         bluetooth: BluetoothView? = nil, bluetoothSetUp: Bool = false) -> HeadlineStatus {
         if let b = bluetooth { return detectorLine(b.detector, lastDelay: lastDelay, demo: false, overBluetooth: true) }
-        if !hasCredentials { return .init(level: .idle, title: "Not set up", detail: "Add your private link in Settings") }
+        if !hasCredentials {
+            if bluetoothSetUp { return .init(level: .idle, title: "Waiting for the car computer", detail: "Over Bluetooth, once it is on and in range") }
+            return .init(level: .idle, title: "Not set up", detail: "Add your private link, or set up Bluetooth, in Settings")
+        }
         if t.authFailed { return .init(level: .bad, title: "Link not accepted", detail: "Check your private link in Settings") }
         guard let f = t.frame else { return .init(level: .idle, title: "Connecting…", detail: "Looking for the server") }
         let rx = t.sinceRx(now)

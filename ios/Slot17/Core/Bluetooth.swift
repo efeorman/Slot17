@@ -182,6 +182,7 @@ enum BluetoothFormat {
     /// A short public name for a key: the first 8 hex digits of its SHA-256.
     static func keyID(_ key: Data) -> String { String(hex(Array(SHA256.hash(data: key))).prefix(8)) }
 
+
     private static func count(_ r: inout Reader, _ body: Int, _ size: Int) throws -> Int {
         guard body >= 1 else { throw FrameError(why: "row count") }
         let n = Int(r.u8())
@@ -433,6 +434,9 @@ struct BluetoothFeed {
     /// Any checked frame lately, whatever the detector says: the car computer is there.
     func heard(_ now: Double) -> Bool { now - lastFrameAt <= LinkTracker.carStale }
 
+    /// Seconds since Bluetooth last brought the car's own data: a whole state, the status or the channels.
+    func dataAge(_ now: Double) -> Double { now - max(carStateAt, statusAt, channelsAt) }
+
     /// What the screens show when only Bluetooth brings data. From a 1.6.0 car computer its whole state, aged since
     /// it came; from an older one the last server state with Bluetooth's detector and channels on top.
     func piState(base: PiState?, now: Double) -> PiState? {
@@ -535,4 +539,75 @@ func hexData(_ text: String) -> Data? {
         index = next
     }
     return out
+}
+
+/// The pairing code for Bluetooth without any server (27 November 2026): 16 random bytes in Crockford's base32 (no
+/// I, L, O or U), one check character, in groups of four. Made on one side, typed on the other: never sent over the
+/// air. The key is the SHA-256 of a fixed label and the 16 bytes. The same as p0/bluetooth_frames.py, and
+/// shared/parity/ble-frames.json holds examples the car computer and both apps check.
+enum PairingCode {
+    static let alphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+    static let byteCount = 16
+    static let dataChars = 26
+    private static let label = Array("slot17-bluetooth-code-v1".utf8)
+    private static let checkLabel = Array("slot17-bluetooth-code-check-v1".utf8)
+
+    /// A new code, from the system's secure random numbers.
+    static func make() -> String {
+        var generator = SystemRandomNumberGenerator()
+        return format((0..<byteCount).map { _ in UInt8.random(in: 0...255, using: &generator) })
+    }
+
+    static func format(_ raw: [UInt8]) -> String {
+        precondition(raw.count == byteCount)
+        var chars: [Character] = []
+        for i in 0..<dataChars {          // 130 bits: the 128, then two zeros
+            var v = 0
+            for b in 0..<5 {
+                let bit = 5 * i + b
+                v = (v << 1) | (bit < 128 ? Int((raw[bit / 8] >> UInt8(7 - bit % 8)) & 1) : 0)
+            }
+            chars.append(alphabet[v])
+        }
+        chars.append(check(raw))
+        let text = String(chars)
+        return stride(from: 0, to: text.count, by: 4).map { start in
+            let from = text.index(text.startIndex, offsetBy: start)
+            return String(text[from..<text.index(from, offsetBy: min(4, text.count - start))])
+        }.joined(separator: "-")
+    }
+
+    private static func check(_ raw: [UInt8]) -> Character {
+        alphabet[Int(Array(SHA256.hash(data: checkLabel + raw))[0] >> 3)]
+    }
+
+    /// The 16 bytes of a code as typed (any case, spaces and dashes left out, O read as 0, I and L as 1), or nil
+    /// when it isn't one or has a typing error.
+    static func bytes(_ typed: String) -> [UInt8]? {
+        var text = Substring(typed.drop { $0.isWhitespace })
+        if text.lowercased().hasPrefix("bluetooth_code") {             // a line copied from slot17.txt
+            let rest = text.dropFirst("bluetooth_code".count).drop { $0.isWhitespace }
+            if rest.first == "=" || rest.first == ":" { text = rest.dropFirst() }
+        }
+        let clean: [Character] = text.uppercased().filter { !$0.isWhitespace && $0 != "-" }.map {
+            switch $0 { case "O": return "0"; case "I", "L": return "1"; default: return $0 }
+        }
+        guard clean.count == dataChars + 1 else { return nil }
+        var bits: [Int] = []
+        for c in clean.prefix(dataChars) {
+            guard let v = alphabet.firstIndex(of: c) else { return nil }
+            for b in (0..<5).reversed() { bits.append((v >> b) & 1) }
+        }
+        guard bits[128] == 0, bits[129] == 0 else { return nil }
+        var raw = [UInt8](repeating: 0, count: byteCount)
+        for i in 0..<128 where bits[i] == 1 { raw[i / 8] |= UInt8(1 << (7 - i % 8)) }
+        guard let last = clean.last, check(raw) == last else { return nil }
+        return raw
+    }
+
+    /// The link's key made from a code, or nil.
+    static func key(_ typed: String) -> Data? {
+        guard let raw = bytes(typed) else { return nil }
+        return Data(SHA256.hash(data: label + raw))
+    }
 }

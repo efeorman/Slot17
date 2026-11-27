@@ -87,7 +87,7 @@ struct RootView: View {
         switch model.tab {
         case .live:
             VStack(spacing: 0) {
-                if !model.hasLink && !model.demo {
+                if !model.hasLink && !model.demo && !model.bluetooth.paired {
                     SetupCard().padding(.horizontal, 16).padding(.top, 8)
                 }
                 LiveView(openDashboard: openDashboard)

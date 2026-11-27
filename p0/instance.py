@@ -12,7 +12,9 @@ def receiver_processes(proc_root='/proc'):
     """
     names = {b'watch.py', b'supervise.py', b'capture.py', b'stream.py', b'antenna.py',
              b'diagnostics.py', b'survey.py', b'calibrate.py', b'stability.py',
-             b'drop_probe.py', b'airspy_rx', b'airspy_info'}
+             b'drop_probe.py', b'airspy_rx', b'airspy_info',
+             # The RTL-SDR tools hold a stick too (found in review, 26 November 2026).
+             b'rtl_test', b'rtl_sdr', b'rtl_tcp', b'rtl_eeprom', b'rtl_fm', b'rtl_power'}
     found = []
     for path in Path(proc_root).glob('[0-9]*/cmdline'):
         if path.parent.name == str(os.getpid()):

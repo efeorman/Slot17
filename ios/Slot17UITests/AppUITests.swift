@@ -165,6 +165,12 @@ final class QuickDesignTests: Base {
         launch(["--fresh", "--demo", "--screenshot-values", "--no-audio"])
         waitFor(app.staticTexts["headline"], label: "Demo running")
         tab("Settings")
+        // 1.8.0: Sound for aircraft, on by default, with the helicopter and its words above the volume.
+        let aircraft = reveal(app.switches["setting-aircraft"].firstMatch)
+        XCTAssertEqual(aircraft.value as? String, "1", "Sound for aircraft is on by default")
+        reveal(app.sliders["Volume"].firstMatch)
+        sleep(1)
+        shot("15a-settings-aircraft")
         let pushover = reveal(app.switches["setting-pushover"])
         XCTAssertFalse(pushover.isEnabled, "the car's Pushover cannot be switched in demo mode")
         XCTAssertTrue(app.switches["setting-fault-notices"].exists)

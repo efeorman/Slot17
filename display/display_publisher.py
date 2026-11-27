@@ -91,7 +91,7 @@ POWEROFF_ARGV = ["sudo", "-n", "systemctl", "--no-block", "poweroff"]
 POWEROFF_MAX_AGE_S = 30.0
 # Whatever may hold a credential in a file or journal line. Over-redacting a log costs little.
 SECRET_TEXT = re.compile(r"(?i)((?:[a-z0-9_-]*(?:token|password|passwd|secret|api_?key|user_?key|viewer_?key|status_?key)|"
-                         r"authorization|cookie|pushover_user|[\"']user[\"']|\bkey)[\"']?)(\s*[:=]\s*[\"']?|\s+)(bearer\s+)?[^\s\"',;&}]+")
+                         r"authorization|cookie|pushover_user|(?:bluetooth|pairing)[_ -]?code|[\"']user[\"']|\bkey)[\"']?)(\s*[:=]\s*[\"']?|\s+)(bearer\s+)?[^\s\"',;&}]+")
 
 
 def finite(x):
@@ -518,8 +518,11 @@ def write_mark(session, op, wall=None):
     return True
 
 
+CODE_TEXT = re.compile(r"\b[0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4}){5}-[0-9A-HJKMNP-TV-Z]{3}\b")      # a Bluetooth pairing code (1.8.0)
+
+
 def redact(text):
-    return SECRET_TEXT.sub(lambda m: f"{m.group(1)}{m.group(2)}[removed]", text)
+    return CODE_TEXT.sub("[removed]", SECRET_TEXT.sub(lambda m: f"{m.group(1)}{m.group(2)}[removed]", text))
 
 
 def last_bytes(text, limit):
@@ -786,6 +789,27 @@ class Sender:
             raise PushRejected(f"server answered {resp.status}")
         if resp.getheader("Connection", "").lower() == "close":
             self.close()
+
+
+class LocalSender:
+    """No display server (27 November 2026, at the operator's request: Slot17 without any server). The publisher
+    still feeds Bluetooth and the car computer's own screen and carries out the operations they bring; what would
+    go to a server goes nowhere, and counts as delivered."""
+    host, port = "no display server", 0
+
+    def __init__(self):
+        self.pending_command = None
+        self.pending_ops = deque(maxlen=32)
+        self.stats = LinkStats()
+
+    def __call__(self, payload):
+        return None
+
+    def close(self):
+        pass
+
+
+NO_SERVER = "No display server on this car computer"
 
 
 def load_config(path=CONFIG):
@@ -1299,6 +1323,9 @@ def run_support(op, pub, cfg):
         return None
     if op.get("choice") not in SUPPORT_CHOICES or (op["choice"] != "quick" and not isinstance(op.get("session"), str)):
         pub.ack(op["id"], "failed", "Unknown package choice")
+        return None
+    if not (cfg or {}).get("url"):
+        pub.ack(op["id"], "failed", NO_SERVER + ": make one over SSH with python3 ~/Slot17/p0/support.py")
         return None
     return job.start(op, pub, cfg)
 
@@ -1980,8 +2007,11 @@ def publisher_lock(path):
 
 
 def run(args):
-    cfg = load_config(args.config)
-    sender = Sender(cfg["url"], cfg["token"], take_commands=not args.once)
+    # Without a server's settings, Bluetooth and the car computer's screen only (27 November 2026).
+    cfg = load_config(args.config) if args.config.exists() else None
+    if cfg is None and args.once:
+        raise SystemExit(f"{args.config} is missing: --once pushes to a display server")
+    sender = Sender(cfg["url"], cfg["token"], take_commands=not args.once) if cfg else LocalSender()
     pub = Publisher(sender, phone=phone_sender(), bluetooth=None if args.once else BluetoothLink(),
                     ops_seen=None if args.once else OpMemory(OPS_SEEN), screen=None if args.once else ScreenLink())
     if not args.once:
@@ -2085,6 +2115,11 @@ def upload_pi_log(op, pub, cfg, opener=None, collect=collect_pi_log):
         pub.ack(op["id"], "failed", "A log is already being sent")
         return None
 
+    if not (cfg or {}).get("url"):
+        pub.log_upload_busy.release()
+        pub.ack(op["id"], "failed", NO_SERVER + ": get the log over Bluetooth on the Pi screen")
+        return None
+
     def work():
         try:
             body = collect(pub.session_path(), pub.heartbeat.path)
@@ -2118,6 +2153,10 @@ DOCTOR_EVERY_S = 900.0
 DOCTOR_LIMIT_S = 25.0
 
 
+class DoctorFailed(Exception):
+    """The setup check ran but gave no verdicts: its exit status and last line, for the app."""
+
+
 class Doctor:
     """`setup.sh doctor --json` in the background: its verdicts go to the apps' setup check.
 
@@ -2133,11 +2172,19 @@ class Doctor:
         self.busy = False
         self.started = time.monotonic()
         self.last = None
+        self.lock = threading.Lock()
+        self.waiting = []           # answers owed when the running check ends
 
     def _run(self):
-        done = subprocess.run([sys.executable, "-B", str(self.root / "deploy/doctor.py"), "car", "--json"],
+        # p0/doctor.py, which signed updates replace. Until 1.8.0 this ran deploy/doctor.py, which they never
+        # replace: a car computer set up before 1.3.1 kept one without --json, and its check never answered.
+        done = subprocess.run([sys.executable, "-B", str(self.root / "p0/doctor.py"), "car", "--json"],
                               capture_output=True, text=True, timeout=DOCTOR_LIMIT_S)
-        return json.loads(done.stdout)
+        try:
+            return json.loads(done.stdout)
+        except ValueError:
+            last = (done.stderr.strip().splitlines() or ["no output"])[-1]
+            raise DoctorFailed(f"exit {done.returncode}, {last}"[:120]) from None
 
     def due(self, now):
         if self.busy:
@@ -2147,22 +2194,38 @@ class Doctor:
         return now - self.last >= DOCTOR_EVERY_S
 
     def start(self, now, then=None):
-        """Run it in the background; `then(ok, detail)` afterwards, for an op's answer."""
-        self.busy, self.last = True, now
+        """Run it in the background; `then(ok, detail)` afterwards, for an op's answer. Asked while a check runs
+        (the publisher's own every 15 minutes, or another phone's), the answer waits for that check: until 1.8.0
+        it was "the check is already running", a failure."""
+        with self.lock:
+            if then:
+                self.waiting.append(then)
+            if self.busy:
+                return
+            self.busy, self.last = True, now
 
         def work():
+            ok, detail = False, "doctor did not run"
             try:
                 found = self.run()
                 items = [list(map(str, row))[:3] for row in found["items"]][:16]
                 self.result, self.sent_at = {"items": items, "at": time.monotonic()}, None
                 problems = sum(1 for row in items if row[1] == "PROBLEM")
-                if then:
-                    then(True, f"{problems} problem(s)" if problems else "no problems")
+                ok, detail = True, f"{problems} problem(s)" if problems else "no problems"
+            except DoctorFailed as exc:
+                detail = f"the check gave no answer: {exc}"[:160]
             except Exception as exc:        # noqa: BLE001 - a check that fails is a detail, never a crash
-                if then:
-                    then(False, f"doctor did not run: {type(exc).__name__}")
+                detail = f"doctor did not run: {type(exc).__name__}"
             finally:
-                self.busy = False
+                # Everyone who asked meanwhile gets this check's answer; busy ends only with no one left.
+                while True:
+                    with self.lock:
+                        waiting, self.waiting = self.waiting, []
+                        if not waiting:
+                            self.busy = False
+                            break
+                    for answer in waiting:
+                        answer(ok, detail)
         threading.Thread(target=work, daemon=True, name="doctor").start()
 
     def for_push(self, now):
@@ -2247,9 +2310,9 @@ def run_op(op, pub, cfg, route="server"):
         return False
     elif kind == "doctor":
         doctor = getattr(pub, "doctor", None)
-        if doctor is None or doctor.busy:
-            pub.ack(op["id"], "failed", "the check is already running" if doctor else "not available")
-        else:
+        if doctor is None:
+            pub.ack(op["id"], "failed", "not available")
+        else:                                   # a check already running answers this request too
             doctor.start(time.monotonic(), then=lambda ok, detail, i=op["id"]: pub.ack(i, "done" if ok else "failed", detail))
     return True
 
@@ -2329,7 +2392,8 @@ def run_publisher(args, sender, pub, cfg=None):
         running = False
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    print(f"publishing to {sender.host}:{sender.port}", flush=True)
+    print(f"publishing to {sender.host}:{sender.port}" if not isinstance(sender, LocalSender)
+          else "no display server: Bluetooth and the car computer's own screen only", flush=True)
     said_stopped = False
     link_since = time.monotonic()
     synced = clock_synced()

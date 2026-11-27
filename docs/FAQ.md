@@ -37,6 +37,9 @@ No. A radio only transmits when it has something to say: when it's switched on, 
 ### Why does it beep when there's nothing in sight?
 One mast covers a big area (about 68 km² on average in the Netherlands) with on average around 140 radios in it, and radios in buildings, stations, parked cars and on people register too. It's a real TETRA burst, just not one next to you.
 
+### Does it see helicopters?
+Yes, when they're in the air. Police and ambulance helicopters above about 150 m use their own TETRA channels, set aside across Europe for emergency services' aircraft, and Slot17 marks a match on them (L190 to L199) with a helicopter and the word Aircraft. We checked our own drives against the public flight tracks of the Dutch police and trauma helicopters: in minutes with a match on those channels one of them was flying within 20 km half the time, against 4 % in other minutes. A helicopter that is landing or hovering low uses the normal channels, like a car. You can switch their sound off in Settings and still see them.
+
 ### Does it see a traffic check where radios talk to each other directly?
 No. Radios talking without a mast use Direct Mode, a different standard. Slot17 doesn't recognise it.
 
@@ -58,7 +61,7 @@ Yes. An antenna on the outside, like a magnetic roof antenna, hears more than on
 We use the UGREEN Nexode 60 W car charger (EC602). It gives 3 A at 5 V, which was enough for our Pi with the receiver, an SSD and a 4G stick. Bigger car chargers don't give the Pi more: their extra watts are at higher voltages. If Slot17 reports undervoltage, your setup needs more: use a 12 V to 5 V converter rated for 5 A, as the [README](https://github.com/efeorman/Slot17#what-you-need) explains. Where to buy the parts in your country, with prices and a total: [slot17.cloud/parts/](https://slot17.cloud/parts/).
 
 ### Do I need internet in the car?
-Not with Bluetooth on (since 1.6.0). The car computer then sends everything straight to the app, and the app's buttons work over it too. You still need internet once, at home is fine, to set Bluetooth up, and without it in the car you miss the web page, the car computer's part of the drive report and support packages; updates come when the car computer starts on your home Wi-Fi. Without Bluetooth, yes: the car computer reaches the server over your phone's hotspot, or a 4G USB stick with its own SIM, which saves your phone's battery (we use a ZTE MF833N). The [README](https://github.com/efeorman/Slot17#bluetooth-or-the-server) compares the two.
+Not with Bluetooth on (since 1.6.0). The car computer then sends everything straight to the app, and the app's buttons work over it too. Since 1.8.0 you don't even need a server or internet to set it up: a pairing code from the app does it. Without internet in the car you miss the web page, the car computer's part of the drive report and support packages; updates come when the car computer starts on your home Wi-Fi. Without Bluetooth, yes: the car computer reaches the server over your phone's hotspot, or a 4G USB stick with its own SIM, which saves your phone's battery (we use a ZTE MF833N). The [README](https://github.com/efeorman/Slot17#bluetooth-or-the-server) compares the two.
 
 ### What happens when I switch the car off?
 It just loses power, and that's fine. It starts again by itself the next time the car computer gets power. [POWER-LOSS.md](https://github.com/efeorman/Slot17/blob/main/docs/operations/POWER-LOSS.md) explains what that keeps.
@@ -80,8 +83,8 @@ It only receives, and it never decodes, decrypts or transmits anything. The rule
 ### Do I need to know Linux?
 No. Use the ready-made image: flash it with Raspberry Pi Imager, fill in one text file on the card, and start the Pi. [BUILD.md](https://github.com/efeorman/Slot17/blob/main/docs/BUILD.md) walks through it. Doing it by hand is one install line, and the [README](https://github.com/efeorman/Slot17#readme) goes step by step. Not used to it? [SETUP-WITH-AI.md](https://github.com/efeorman/Slot17/blob/main/docs/SETUP-WITH-AI.md) has a prompt that lets any AI chat assistant walk you through it.
 
-### Why does it need a server?
-The Pi sits behind your phone's hotspot, so your phone can't reach it over the internet. Both can reach a small server on the internet. With Bluetooth the phone also hears the Pi directly, without internet, but the server is still where the phone gets the Bluetooth key, and where the web page, updates, drive reports and support packages go through.
+### Does it need a server?
+Not since 1.8.0, if you use Bluetooth: the app makes a pairing code, you give it to the car computer once, and the phone then gets everything straight from it in the car ([README: Without a server](https://github.com/efeorman/Slot17#without-a-server)). A server is for the rest. The Pi sits behind your phone's hotspot, so your phone can't reach it over the internet, but both can reach a small server: that gives you the web page on any phone or computer, also from home, drive reports, support packages and the apps' notice of a new version. Updates for the car computer come without a server too, straight from GitHub, when it starts with internet.
 
 ### Your server or my own?
 Ours is the easy way: type `/server create` in the Discord and you get your own address on slot17.cloud with HTTPS and your own keys, linked to your Discord account. Want to keep everything yourself? Rent a cheap Linux VPS and run one command. Both work the same in the app. [Step 2 of the README](https://github.com/efeorman/Slot17#step-2-set-up-the-display-server) has both.

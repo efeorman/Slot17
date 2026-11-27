@@ -7,11 +7,15 @@ import kotlinx.serialization.Serializable
 /** Port of ios/Slot17/Core/AlertEngine.swift. Same defaults, same names, same rules. */
 @Serializable
 data class AlertSettings(
-    val red: Double = 22.0,
+    // As display/app-config.json, which the server sends: without a server these are what counts (27 November 2026:
+    // the app chimed from 22 dB there, the server's level being 35).
+    val red: Double = 35.0,
     val yellow: Double = 12.0,
     val sound: Boolean = true,
     val urgent: Boolean = true,
     val repeatNeeded: Boolean = false,
+    /** Sound for the aircraft channels (1.8.0); off, a helicopter in the air only shows on the meters. */
+    val aircraftSound: Boolean = true,
     val antennaWarning: Boolean = true,
     val linkLostTone: Boolean = true,
     val volume: Double = 1.0,
@@ -32,7 +36,7 @@ data class AlertSettings(
     val callGap: Double = 60.0,     // per channel
     val callAnyGap: Double = 15.0,  // between call tones; never holds back a chime or an urgent beep
     val linkLostAfter: Double = 30.0,
-    val receiverQuietWindows: Int = 40,
+    val receiverQuietWindows: Int = 240,
     val receiverToneRepeat: Double = 300.0,
     val summaryWindow: Double = 120.0,
     val trackEvery: Double = 10.0,
@@ -281,6 +285,7 @@ class AlertEngine {
         c.audioProblem?.let { return silent(it) }
         if (c.now < c.mutedUntil) return silent("muted by the speaker button")
         if (!s.sound) return silent("sound is switched off")
+        if (!s.aircraftSound && Aircraft.isAir(p.match.ch)) return silent("an aircraft channel, and sound for aircraft is off")
         if (!c.armed) return silent("sound is not armed")
 
         val kind: SoundKind

@@ -31,6 +31,8 @@ extension LiveTileState {
         }
     }
     var outlineColour: Color { hex(3, .white) }
+    /// The shown match is on an aircraft's channel (1.8.0).
+    var air: Bool { phase == .signal && Aircraft.isAir(channel) }
 
     /// One short phrase per phase, for places with no room for more.
     var phaseTitle: String {
@@ -239,6 +241,9 @@ struct LiveTileLockScreen: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if state.phase == .signal, let channel = state.channel {
+                if Aircraft.isAir(channel) && !isStale {
+                    HelicopterGlyph().fill(Aircraft.colour).frame(width: 22, height: 22).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 3 }
+                }
                 Text("L\(channel)")
                     .font(.system(size: 26, weight: .bold, design: .rounded))
                     .foregroundColor(isStale ? LiveTilePalette.dim : LiveTilePalette.text)
@@ -312,8 +317,12 @@ struct LiveTileLockScreen: View {
             LiveTileSoftwareLine(software: software).font(.caption)
         } else if let alert = state.lastAlert {
             HStack(spacing: 5) {
-                Image(systemName: "bell.fill")
-                    .foregroundColor(alert.urgent ? state.outlineColour : LiveTilePalette.dim)
+                if Aircraft.isAir(alert.channel) {
+                    HelicopterGlyph().fill(Aircraft.colour).frame(width: 14, height: 14)
+                } else {
+                    Image(systemName: "bell.fill")
+                        .foregroundColor(alert.urgent ? state.outlineColour : LiveTilePalette.dim)
+                }
                 Text(alert.urgent ? "Urgent" : "Chime").fontWeight(.semibold)
                 Text("L\(alert.channel)")
                 if let strength = alert.strength { Text("\(strength) dB") }
@@ -345,6 +354,9 @@ struct LiveTileSmall: View {
                 }
                 if state.phase == .signal, let channel = state.channel {
                     HStack(spacing: 4) {
+                        if Aircraft.isAir(channel) && !isStale {
+                            HelicopterGlyph().fill(Aircraft.colour).frame(width: 16, height: 16)
+                        }
                         Text("L\(channel)")
                             .font(.system(size: 20, weight: .bold, design: .rounded))
                             .contentTransition(.numericText())
@@ -398,7 +410,11 @@ struct LiveTileSmall: View {
                     LiveTileSoftwareLine(software: software).font(.system(size: 11, weight: .medium))
                 } else if let alert = state.lastAlert {
                     HStack(spacing: 4) {
-                        Image(systemName: "bell.fill")
+                        if Aircraft.isAir(alert.channel) {
+                            HelicopterGlyph().fill(Aircraft.colour).frame(width: 12, height: 12)
+                        } else {
+                            Image(systemName: "bell.fill")
+                        }
                         Text(alert.urgent ? "Urgent" : "Chime")
                         LiveTileClock(since: alert.at).frame(width: 36, alignment: .leading)
                     }
@@ -429,6 +445,9 @@ struct LiveTileIslandMark: View {
     var body: some View {
         if isStale {
             Image(systemName: "clock.badge.exclamationmark").foregroundColor(LiveTilePalette.caution)
+        } else if state.air {
+            // An aircraft's channel (1.8.0): the helicopter in the island.
+            HelicopterGlyph().fill(Aircraft.colour).frame(width: 18, height: 18)
         } else {
             Image(systemName: state.actionSymbol).foregroundColor(state.actionColour)
         }

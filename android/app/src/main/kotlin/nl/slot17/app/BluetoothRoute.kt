@@ -16,13 +16,18 @@ import nl.slot17.core.BluetoothState
 import nl.slot17.core.Level
 import nl.slot17.core.MatchRow
 import nl.slot17.core.OpStatus
+import nl.slot17.core.PairingCode
 import nl.slot17.core.PiState
 import nl.slot17.core.RouteStats
 import nl.slot17.core.hexBytes
 
-/** This phone's side of the Bluetooth route, saved between starts. The key is the car computer's frame key. */
+/** This phone's side of the Bluetooth route, saved between starts. The key is the car computer's frame key; [code]
+ *  is the pairing code it was made from, without a server (27 November 2026), shown again for another phone. */
 @Serializable
-data class PhoneBluetooth(val key: String? = null, val keyId: String? = null, val address: String? = null, val use: Boolean = true)
+data class PhoneBluetooth(
+    val key: String? = null, val keyId: String? = null, val address: String? = null, val use: Boolean = true,
+    val code: String? = null,
+)
 
 /**
  * The Bluetooth route as the app sees it: the car computer's switch and name (requests through the server, like
@@ -143,7 +148,7 @@ class BluetoothRoute(
      * that has the key skips step 1, so setting up again works in a car without internet.
      */
     fun startPairing() {
-        if (phone.key != null && phone.keyId != null && link.state != BluetoothLink.State.WRONG_CAR) {
+        if (phone.key != null && phone.keyId != null && (link.state != BluetoothLink.State.WRONG_CAR || phone.code != null)) {
             note("Bluetooth set-up started with the key this phone already has")
             if (phone.address != null) {
                 save(phone.copy(use = true))
@@ -191,8 +196,7 @@ class BluetoothRoute(
             pairing = ActionState(id, "The car computer's answer could not be read", Level.BAD)
             return
         }
-        save(phone.copy(key = key.toHex(), keyId = BluetoothFormat.keyId(key)))
-        feed.key = key
+        keep(key, code = null)                       // a key from the server comes from no code
         // Already chosen: the new key is all it needed (1.5.1). The chooser again only for a new car computer.
         if (phone.address != null && link.state != BluetoothLink.State.WRONG_CAR) {
             save(phone.copy(use = true))
@@ -202,6 +206,33 @@ class BluetoothRoute(
         }
         pairing = ActionState(id, "Choose the car computer in the list Android shows…", Level.IDLE, true)
         link.choose(show = { chooser = it }, chosen = ::chosen, failed = { pairing = ActionState(id, it, Level.BAD) })
+    }
+
+    // --- without a server (27 November 2026) --------------------------------------------------------
+
+    /** Makes a pairing code and this phone's key from it. The code goes to the car computer (slot17.txt, or the
+     *  setup); then Set up finds it, with no server and no internet. */
+    fun makeCode() {
+        val made = PairingCode.make()
+        keep(PairingCode.key(made) ?: return, made)
+        if (phone.address != null) { link.close(); start() }             // with the new key
+        pairing = ActionState(text = "Code made. Give it to the car computer (slot17.txt, or the setup), start it, then tap Set up.", level = Level.OK)
+        note("Bluetooth pairing code made on this phone")
+    }
+
+    /** Takes a pairing code the car computer's setup showed: null when it was taken (then Set up, as with a key from
+     *  the server), else why not. */
+    fun useCode(typed: String): String? {
+        val raw = PairingCode.bytes(typed) ?: return "That isn't the code: check it for a typing error"
+        val code = PairingCode.format(raw)
+        keep(PairingCode.key(code) ?: return "That isn't the code: check it for a typing error", code)
+        note("Bluetooth pairing code typed in")
+        return null
+    }
+
+    private fun keep(key: ByteArray, code: String?) {
+        save(phone.copy(key = key.toHex(), keyId = BluetoothFormat.keyId(key), code = code))
+        feed.key = key
     }
 
     /** The chooser's result, on Android 12L and lower (newer ones answer through the association itself). */
@@ -271,7 +302,9 @@ class BluetoothRoute(
             !paired -> "Not set up on this phone"
             !phone.use -> "Set up, switched off on this phone"
             link.state == BluetoothLink.State.NO_PERMISSION -> "Allow Nearby devices for Slot17 in Android's settings"
-            link.state == BluetoothLink.State.WRONG_CAR -> "A different car computer answered: set it up again"
+            link.state == BluetoothLink.State.WRONG_CAR ->
+                if (phone.code != null) "The car computer has another key: give it this phone's pairing code, then Set up again"
+                else "A different car computer answered: set it up again"
             link.state == BluetoothLink.State.CONNECTED ->
                 if (feed.heard(mono())) "Connected, last frame ${"%.0f".format(mono() - feed.lastFrameAt)} s ago" else "Connected"
             link.state == BluetoothLink.State.CONNECTING -> "Waiting for the car computer to be in range"

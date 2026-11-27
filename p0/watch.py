@@ -831,6 +831,26 @@ def _analysis_worker(ring, ctx):
                   f"{st.overflow} overflow, {st.dropped} dropped{extra}", flush=True)
 
 
+READY_WAIT_S = 30.0              # at power-up, how long a receiver may take to appear on USB
+
+
+def wait_for_receiver(kind, limit=READY_WAIT_S, present=None, clock=time.monotonic, sleep=time.sleep):
+    """Wait until every device this receiver needs is on USB, up to `limit` seconds; returns the seconds waited.
+
+    At a car's power-up a USB device can appear seconds late (our 4G stick needed four tries on 17 November 2026),
+    and the detector gets one attempt per power-up, so opening too early cost the whole drive (found in review,
+    26 November 2026). This only reads the USB list, which opens nothing (rule 3). When the list can't be read (not
+    Linux), or the time runs out, the receiver is opened as before and says what it found."""
+    present = present or receivers.present
+    need = receivers.KINDS[kind].get("devices", 1)
+    start = clock()
+    while True:
+        count = present(kind)
+        if count is None or count >= need or clock() - start >= limit or _stop.is_set():
+            return clock() - start
+        sleep(0.5)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Continuous receive-only TETRA physical-layer monitor")
     g = ap.add_mutually_exclusive_group()
@@ -852,6 +872,9 @@ def main():
                     help="RSP1A/RSP1B: USB transfer mode (the API's default is isoch)")
     ap.add_argument("--rtl-gain", type=int, choices=range(0, 501), metavar="0-500",
                     help="RTL-SDR pair: tuner gain in tenths of a dB (each stick uses the nearest it offers)")
+    ap.add_argument("--receiver-wait", type=float, default=0.0, metavar="SECONDS",
+                    help="wait up to this long for the receiver to appear on USB before opening it (supervise.py "
+                         "asks for 30 at power-up); reading the USB list opens nothing")
     ap.add_argument("--sensitivity", choices=sorted(SENSITIVITY), default="highway")
     ap.add_argument("--threshold-db", type=float)
     ap.add_argument("--save-power", action="store_true")
@@ -971,6 +994,9 @@ def main():
     failure_reason = None
     ready_announced = False
     try:
+        waited = wait_for_receiver(kind, limit=args.receiver_wait) if args.receiver_wait > 0 else 0.0
+        if waited >= 1.0:
+            print(f"Receiver: on USB after {waited:.1f} s", flush=True)
         rx.open()
         rx.start()
         # Discard pre-tune samples before the worker starts.

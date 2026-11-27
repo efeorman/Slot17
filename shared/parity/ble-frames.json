@@ -280,5 +280,59 @@
       "counter": 2,
       "accept": true
     }
+  ],
+  "pairing_codes": [
+    {
+      "bytes": "00000000000000000000000000000000",
+      "code": "0000-0000-0000-0000-0000-0000-00W",
+      "key": "c112d5698442b588bf09d4eb2590a2046424cd6e703fd9185e801f769f8d2460",
+      "key_id": "148ce64e"
+    },
+    {
+      "bytes": "000102030405060708090a0b0c0d0e0f",
+      "code": "000G-40R4-0M30-E209-185G-R38E-1W1",
+      "key": "c6c21da8b4398a797dda8f5075065b493d8b95010db7b352681c187a5d645da7",
+      "key_id": "1fa48667"
+    },
+    {
+      "bytes": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0",
+      "code": "ZZZF-VZ7V-ZBWZ-HXZP-YQTF-7WQH-Y0T",
+      "key": "5c600769ad492b45be8f91a60c51072825c14894ffba82d7e23e1abad9d0dc5d",
+      "key_id": "45a9ab3a"
+    },
+    {
+      "bytes": "7f3a9c11d02e45b8a6c3f00e91d25b47",
+      "code": "FWX9-R4EG-5S2V-H9P3-Y079-3MJV-8W8",
+      "key": "0e12be546816a1a77140c7df04285c84fb94706dd79b0fde8d52bbf8720d231e",
+      "key_id": "94a23956"
+    }
+  ],
+  "pairing_codes_typed": [
+    {
+      "typed": "000g 40r4 0m30 e209 185g r38e 1w1",
+      "bytes": "000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "typed": "000G40R40M30E209185GR38E1W1",
+      "bytes": "000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "typed": "OOOO-OOOO-OOOO-OOOO-OOOO-OOOO-OOW",
+      "bytes": "00000000000000000000000000000000"
+    },
+    {
+      "typed": "bluetooth_code=000G-40R4-0M30-E209-185G-R38E-1W1",
+      "bytes": "000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "typed": "000G\u00a040R4\u00a00M30\u00a0E209\u00a0185G\u00a0R38E\u00a01W1",
+      "bytes": "000102030405060708090a0b0c0d0e0f"
+    }
+  ],
+  "pairing_codes_refused": [
+    "000G-40R4-0M30-E209-185G-R38E-1W0",
+    "000G-40R4-0M30-E209-185G-R38E-1",
+    "000G-40R4-0M30-E209-185G-R38E-1W1A",
+    "U00G-40R4-0M30-E209-185G-R38E-1W1"
   ]
 }

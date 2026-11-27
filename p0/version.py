@@ -7,7 +7,7 @@ import platform
 RELEASE = "p0-2.0-rc3"
 # The software version people see (VERSION at the repository root; a test keeps the two equal). Signed
 # updates replace p0/ but not VERSION, so this is what the car computer reports to the app.
-SOFTWARE = "1.7.2"
+SOFTWARE = "1.8.0"
 
 
 @lru_cache(maxsize=1)

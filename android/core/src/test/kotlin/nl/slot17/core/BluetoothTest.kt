@@ -5,6 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -32,6 +33,29 @@ class BluetoothTest {
     }
 
     private fun JsonObject.num(k: String): Double? = this[k]?.jsonPrimitive?.doubleOrNull
+
+    /** The pairing code for Bluetooth without a server (27 November 2026), as the car computer makes it. */
+    @Test
+    fun pairingCodes() {
+        for (c in fixture["pairing_codes"]!!.jsonArray.map { it.jsonObject }) {
+            val raw = assertNotNull(hexBytes(c["bytes"]!!.jsonPrimitive.content))
+            val code = c["code"]!!.jsonPrimitive.content
+            assertEquals(code, PairingCode.format(raw))
+            val key = assertNotNull(PairingCode.key(code))
+            assertEquals(c["key"]!!.jsonPrimitive.content, key.hex())
+            assertEquals(c["key_id"]!!.jsonPrimitive.content, BluetoothFormat.keyId(key))
+        }
+        for (c in fixture["pairing_codes_typed"]!!.jsonArray.map { it.jsonObject }) {
+            val typed = c["typed"]!!.jsonPrimitive.content
+            assertEquals(c["bytes"]!!.jsonPrimitive.content, PairingCode.bytes(typed)?.hex(), typed)
+        }
+        for (typed in fixture["pairing_codes_refused"]!!.jsonArray.map { it.jsonPrimitive.content }) {
+            assertNull(PairingCode.bytes(typed), typed)
+        }
+        val made = PairingCode.make()
+        assertNotNull(PairingCode.key(made))
+        assertNotEquals(made, PairingCode.make())
+    }
 
     @Test
     fun status() {

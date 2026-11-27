@@ -2,11 +2,12 @@
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "deploy"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "p0"))       # p0/doctor.py from 1.8.0
 import doctor  # noqa: E402
 
 GOOD_HB = {"windows": 100, "samples_in": 6000000, "windows_started": 101, "ready": True, "degraded": False}
@@ -44,7 +45,16 @@ class Machine(doctor.Probe):
         key = " ".join(cmd[:2]) if cmd[0] == "systemctl" else cmd[0]
         if cmd[0] == sys.executable:
             return 0, "2.2.0 1.14.0"
-        return self.answers.get(key, (None, ""))
+        return self.answers.get(" ".join(cmd[:2]), self.answers.get(key, (None, "")))
+
+    def listdir(self, path):
+        prefix = str(path).rstrip("/\\") + os.sep
+        return sorted({k[len(prefix):].split(os.sep)[0] for k in self.files if k.startswith(prefix)})
+
+    def usb(self, name, ids, maker="", product=""):
+        d = doctor.USB_SYSFS / name
+        self.files[str(d / "idVendor")], self.files[str(d / "idProduct")] = ids.split(":")
+        self.files[str(d / "manufacturer")], self.files[str(d / "product")] = maker, product
 
     def read(self, path):
         value = self.files.get(str(path))
@@ -116,6 +126,18 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(rows["Detector"], doctor.NOTE)
         self.assertIn("receiver input very low", text)
         self.assertIn("Restarting does not help", text)
+
+    def test_no_server_with_bluetooth_is_fine(self):
+        """Slot17 without any server (27 November 2026): Bluetooth carries everything in the car."""
+        m = Machine()
+        m.files.pop(str(doctor.DISPLAY_CONFIG), None)
+        m.files[str(doctor.BLUETOOTH_SETTINGS)] = json.dumps({"on": True, "name": "Slot17", "key": "00" * 32})
+        m.answers["ip"] = (0, "")
+        rows = {name: level for name, level, _ in doctor.check_display(m) + doctor.check_network(m)}
+        self.assertEqual(rows, {"Display server": doctor.OK, "Internet": doctor.NOTE})
+        m.files[str(doctor.BLUETOOTH_SETTINGS)] = json.dumps({"on": False})
+        rows = {name: level for name, level, _ in doctor.check_display(m) + doctor.check_network(m)}
+        self.assertEqual(rows, {"Display server": doctor.PROBLEM, "Internet": doctor.PROBLEM})
 
     def test_unreachable_server_and_no_network(self):
         m = Machine(http=(None, "timed out"))
@@ -322,6 +344,43 @@ class ReceiverKinds(unittest.TestCase):
         m = self.rtl()
         m.files[str(doctor.DVB_MODULE)] = ""
         self.assertEqual(self.rows(m)["Television driver"][0], doctor.NOTE)
+
+    def test_an_rtl_sdr_blog_v4l_or_old_v4_needs_its_own_driver(self):
+        """Found in review, 26 November 2026: an older driver takes the V4L for an R820T, and tunes the V4 with the
+        wrong reference below librtlsdr 2.0.0."""
+        m = self.rtl()
+        m.usb("1-1", "0bda:2838", "RTLSDRBlog", "Blog V4L")
+        m.usb("1-2", "0bda:2838", "RTLSDRBlog", "Blog V4L")
+        m.answers["dpkg-query -W"] = (0, "2.0.2-2+b1")
+        self.assertEqual(self.rows(m)["RTL-SDR driver"][0], doctor.PROBLEM)
+        m.files[str(doctor.RTLSDR_BLOG_MARK)] = "aed0ea19f3a273370a13c9009b96313c75d54c7b"
+        self.assertEqual(self.rows(m)["RTL-SDR driver"][0], doctor.OK)
+        m = self.rtl()
+        m.usb("1-1", "0bda:2838", "RTLSDRBlog", "Blog V4")
+        m.answers["dpkg-query -W"] = (0, "0.6.0-4")
+        self.assertIn("V4 on librtlsdr 0.6.0-4", self.rows(m)["RTL-SDR driver"][1])
+        m.answers["dpkg-query -W"] = (0, "2.0.2-2+b1")
+        self.assertNotIn("RTL-SDR driver", self.rows(m))
+        m = self.rtl()
+        m.usb("1-1", "0bda:2838", "Realtek", "RTL2838UHIDIR")
+        self.assertNotIn("RTL-SDR driver", self.rows(m))
+
+    def test_a_pi_5s_usb_ports(self):
+        m = self.rtl()
+        m.files[str(doctor.PI_MODEL)] = "Raspberry Pi 5 Model B Rev 1.0"
+        m.usb("1-1", "0bda:2838")
+        m.usb("3-1", "0bda:2838")
+        m.usb("3-2", "19d2:1405", "ZTE", "MF833N")
+        m.answers["vcgencmd get_config"] = (0, "usb_max_current_enable=0")
+        rows = self.rows(m)
+        self.assertIn("shares a USB controller", rows["USB ports"][1])
+        self.assertIn("600 mA", rows["USB power"][1])
+        self.assertIn("before the 4G stick", rows["USB power"][1])
+        m.answers["vcgencmd get_config"] = (0, "usb_max_current_enable=1")
+        del m.files[str(doctor.USB_SYSFS / "3-2" / "idVendor")]
+        rows = self.rows(m)
+        self.assertNotIn("USB ports", rows)
+        self.assertNotIn("USB power", rows)
 
     def test_an_unknown_receiver_in_the_settings(self):
         m = Machine()

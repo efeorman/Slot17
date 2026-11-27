@@ -71,7 +71,7 @@ fi
 
 CONFIG="$(getent passwd "$RUN_USER" | cut -d: -f6)/.config/slot17-display.json"
 if [ ! -f "$CONFIG" ]; then
-    echo "note: $CONFIG does not exist yet; the publisher can't run until it does" >&2
+    echo "note: $CONFIG does not exist: the publisher feeds Bluetooth and the car computer's own screen only" >&2
 fi
 
 # The rules grant exactly /usr/bin/systemctl, so check that is what this machine uses.

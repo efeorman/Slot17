@@ -2,6 +2,118 @@
 
 What changed, why, and what was tried and left out. Newest first. Figures come from our own car, receiver and drives; yours will differ.
 
+## 1.8.0: helicopters marked, without any server, and the new receivers ready for their first drive (27 November 2026)
+
+**Aircraft.** A match on channels 190–199 is now marked as an aircraft, with a helicopter and the word Aircraft in
+blue: on the meters, in the alerts, in the iPhone's Live Activity and Dynamic Island, in Android's ongoing
+notification, on the web page and in drive mode, and on the car computer's own screen.
+- **Why those channels:** ECC/DEC/(06)05 sets 384.750–385.000 MHz aside for emergency services' aircraft, and above
+  about 150 m an aircraft's radio uses only them (ETSI TR 102 300-6).
+- **Checked against our drives:** 24 % of all matches were on those channels. Against the public flight tracks of 18
+  Dutch police and trauma helicopters, in minutes with such a match one was flying within 20 km half the time,
+  against 4 % in other minutes of the same drives (TETRA-SIGNALS.md §12).
+- **Sound for aircraft** in each app's and the web page's Settings switches their sound off (on by default). Both apps
+  and the page decide it the same way; shared scenarios check it.
+- **Nothing changes in detection:** the detector's events carry `air_channel`, a lookup on a match already recognised.
+- **Limits:** a helicopter low over the road uses the normal channels; the mark says aircraft, not who.
+- The demos' third channel is an aircraft's, so the mark shows there too.
+
+**Without a server.** Slot17 no longer needs a server, ours or anyone's: with Bluetooth, the app and the car
+computer work on their own.
+
+- **A pairing code instead of the server, for Bluetooth's key.** The app makes a code of 27 characters: 16 random
+  bytes in Crockford's base32 and a check character, in groups of four. Both sides make the key from it, and it
+  never goes over the air. It reaches the car computer in `slot17.txt` (`bluetooth_code=`, removed from the card
+  once saved), at the setup's new question, or with `setup.sh car --bluetooth-code CODE`; or the setup makes one to
+  type into the app. On the car computer, `bluetooth_config.py` takes `--code` (from standard input with `-`),
+  `--new-code` and `--show-code`. A typing error fails the check character at least 31 times in 32. Examples in
+  `shared/parity/ble-frames.json` are checked by the car computer and both apps.
+- **The publisher runs without a server.** It feeds Bluetooth and the car computer's own screen, and was installed
+  only with a server connection, so Bluetooth and the screen without one showed nothing. The setup installs it
+  for any of the three, once.
+- **Updates without a server** come straight from the newest GitHub release: the same signed files a server passes
+  on, checked the same way before anything is installed.
+- **The apps** (iPhone 1.10.0, Android 1.12.0): Settings, Bluetooth to the car computer, **Without a server**: make
+  a pairing code, copy or share it, or type one in. With Bluetooth set up and no private link, the start card,
+  the status line, the setup check, the Live Activity and the Pushover switch no longer ask for a link. On the
+  iPhone a request with no server and no Bluetooth said "Sending…" for good; it now says why it can't go. The
+  iPhone's Settings no longer says the server uses plain HTTP when there is no link or an https one.
+- **The apps' own defaults are the server's,** which counts once there is no server: the chime from 35 dB (it was
+  22) and the receiver warning after 240 quiet windows of 0.25 s, 60 s (it was 40, counted for the 1.5 s windows
+  of before). The shared alert scenarios follow; the one for Quiet mode keeps 22 to test the raise it was written
+  for.
+- `setup.sh doctor` takes no server with Bluetooth on as fine.
+- **What a server still adds:** the web page and watching from elsewhere, drive reports, the car computer's log
+  every ten minutes, support packages, and the apps' notice of a new version.
+- **A second review before release** found these, each checked and fixed with a test where one can run:
+  - after **Make a new pairing code**, an app could stay on "a different car computer answered" with no way back
+    without a server; with a code, Set up again now reconnects with it, and a new code asks first;
+  - the setup run again made a new key at Enter, and cut off every phone set up before; it now keeps the key, also
+    unattended;
+  - **Share** sent `bluetooth_code=…`, which the app's own field refused; it shares the code alone, and all three
+    take a line copied from `slot17.txt`, and on Android spaces that aren't plain ones;
+  - the iPhone's Info.plist still said 1.9.0 (24); a test now keeps it with the version;
+  - a pairing code on its own, or named, is removed from logs and support packages;
+  - the image's first start no longer lists the hotspot password and the code on a command line;
+  - without a server, the support card and the server's log list no longer show errors (the iPhone's was new in
+    this release), the support card says where packages go instead, the iPhone's Live Activity ends after
+    parking, and Android's connection card reads the car computer's report over Bluetooth;
+  - the updater reads at most 64 KB for a release's description, and refuses a download that lands anywhere but
+    https (a Wi-Fi's login page).
+- **Found before release** by running the updater's own check on the release: the pairing-code test read
+  `shared/`, which a signed update never brings, so every car computer would have refused 1.8.0; and a car
+  computer installed from 1.7.x keeps that version's `shared/`, without pairing codes. The test now runs where
+  `shared/` is as new as the code and skips elsewhere.
+- **Not done, written down:** the phone setting the car computer's clock over Bluetooth. Without internet a
+  Raspberry Pi keeps no time; detection works the same, but the times in its recordings are off (sightings keep
+  the phone's). Setting the clock would need root for the publisher, which is a decision of its own.
+
+**From the drive of 27 November.**
+- **The car computer's own setup check works again where it never answered.** The apps' Pi screen (Check the
+  car computer again) and support packages run the check through the publisher, which ran `deploy/doctor.py
+  car --json`. Signed updates never replace `deploy/`, and a car computer set up before 1.3.1 kept a doctor
+  without `--json`: each check stopped at once, over Bluetooth and through the server alike. The check is now
+  `p0/doctor.py`, which updates bring (`deploy/doctor.py` starts it, for `setup.sh doctor`). Asked while the
+  publisher's own 15-minute check runs, the app now gets that check's answer, not "the check is already
+  running"; a check that gives no verdicts says why (its exit status and last line).
+- **Bluetooth first.** The apps' meters and the iPhone's Live Activity take Bluetooth's data while it is at
+  most 4 s old: it comes straight from the car computer, so the server's copy can only be later. The server's
+  went first while it was under 8 s old, so a slow server route showed "Car data late" on the Live Activity
+  with Bluetooth connected. The server's is used when Bluetooth is off or has stalled.
+
+**The new receivers at their first drive.** The SDRplay and RTL-SDR code was checked against what the Airspy
+taught in the car, by a second review with every finding reproduced first, and fixed where a first drive would
+have failed:
+
+- **Power-up:** the detector waits up to 30 s for the receiver to appear on USB (reading the USB list opens
+  nothing), and for SDRplay's service to answer and list the RSP (up to 45 s). The detector's service starts after
+  `sdrplay.service`, which carries the RSP's USB traffic and now runs at a higher priority than the detector.
+  Until now the first answer counted, and the whole drive went without detection.
+- **Two RTL sticks with one serial** (most leave the factory as 00000001) share one correction, the mean, when theirs
+  are at most 3 ppm apart, and calibration saves one setting for both. Two good sticks measured at 0.4 and 0.6 ppm
+  were saved as 0 and 1, and every start refused.
+- **No phantom losses:** the pair's skips that only drop what one stick has in excess (its first milliseconds, a
+  faster crystal's drift) no longer count as lost samples. A start skew on one stick and drift on the other were
+  reported as dropped samples, which degraded the session and cut checking to one thread.
+- **The RTL-SDR Blog V4L** (R828S tuner, the V4's successor), and a V4 on a librtlsdr older than 2.0.0, get RTL-SDR
+  Blog's own driver built from source at a fixed commit (V1.4.0, checked after the download), which the detector
+  loads from `/usr/local`. An older driver takes the V4L for an R820T and may hear nothing.
+- **Overload:** an RTL stick's 8-bit clipping and the RSP's overload event now mark the window as saturating, which
+  the 16-bit stream never could show for them.
+- **The doctor** names a V4 or V4L without its driver, notes the Pi 5's shared 600 mA of USB current with an RTL
+  pair, and a 4G stick on the receiver's USB controller.
+- **Calibration:** the shipped `calibration.json` no longer holds our own Airspy's +4.09 ppm; a receiver runs at 0
+  until it is measured.
+- **A first start without internet:** the Pi image carries `librtlsdr0`, `rtl-sdr` and `file`, and package installs
+  skip apt when everything is there.
+- Smaller: an RSP held by another program says so; the check for other programs knows the RTL-SDR tools; the
+  setup's calibration capture gets the plugdev group at once; the installer's note on sticks with one serial says
+  when they share a correction.
+
+**Tests:** each fix has one that fails without it. 366 detector tests, 24 setup steps (9 new for Bluetooth and the
+screen without a server), 31 doctor, 80 publisher, 12 of 12 for the RTL installer in a sandbox on the Pi, 46 tests
+of the Android app's core (pairing codes, the defaults, Bluetooth only); the iPhone's are built with the app.
+
 ## 1.7.2: the guides read as a newcomer, and three fixes they found (26 November 2026)
 
 Every guide was read as someone setting Slot17 up for the first time, and checked against the code, by three

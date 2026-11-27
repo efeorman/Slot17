@@ -7,7 +7,8 @@ I/Q the detector already takes from the Airspy, handing over at 382.5 MHz, betwe
 
 Which stick is A: the one whose USB serial sorts first. Many sticks leave the factory with the same serial
 (00000001); then the order can change from boot to boot, which only matters when the two need different ppm
-corrections, and in that case the session refuses to start and says how to give them distinct serials.
+corrections. Then both get the mean of the two, as long as they are at most SAME_SERIAL_PPM apart; the session
+refuses to start only beyond that, and says how to give them distinct serials.
 
 Each stick, once per session as with the Airspy:
   sample rate, ppm correction (librtlsdr corrects the tuner and the sample rate from it), centre frequency,
@@ -47,6 +48,8 @@ MAX_BLOCKS = 100                 # ... and at most 200 ms in one go
 CHECK_S = 1.0                    # how often the timing is checked
 TIMING_WINDOW_S = 5.0            # earliest arrival over this long
 ALIGN_TOL_S = 0.005              # the halves may be this far apart before one is realigned
+DRIFT_STEP_S = 0.0025            # a gap that grew less than this since the previous check crept there: a crystal's drift
+SAME_SERIAL_PPM = 3              # two sticks with one serial share a ppm when theirs are at most this far apart
 LOSS_S = 0.020                   # a stick this much further behind than the other has lost samples
 SILENT_S = 3.0                   # a stick without a transfer this long while the other streams has stopped
 SETTLE_S = 1.0                   # a stick's first second isn't timed: its first transfers can come in a rush
@@ -74,6 +77,7 @@ class Stick:
         self.written = self.read = 0                 # bytes ever written and read
         self.skip = 0                                # samples still to skip (realignment)
         self.skipped = 0                             # samples skipped so far (realignment)
+        self.excused = 0                             # of those, samples it only had in excess: no loss (below)
         self.arrivals = deque()                      # (monotonic time, samples received by then), once settled
         self.first_arrival = self.last_arrival = None
         self.received = 0                            # samples received from USB
@@ -131,6 +135,7 @@ class Receiver:
         self._joiner = None
         self._started = False
         self._aligned = False
+        self._prev_err = None                        # the alignment gap at the previous check (samples)
         # Output samples already reported as lost (see _newly_lost).
         self._loss_reported = 0
         self._t_start = None
@@ -151,11 +156,20 @@ class Receiver:
             raise ReceiverError(f"{count} RTL-SDRs found; Slot17 uses exactly two. Unplug the others.")
         found = sorted(((L.usb_strings(lib, i), i) for i in range(count)), key=lambda x: (x[0][2], x[1]))
         serials = [s[2] for s, _ in found]
+        shared = None
         if serials[0] == serials[1] and self.ppm[0] != self.ppm[1]:
-            raise ReceiverError(
-                f"both RTL-SDRs have serial {serials[0]!r}, so which is A can change from one start to the next, "
-                f"and their ppm corrections ({self.ppm[0]}, {self.ppm[1]}) with it. Give one another serial, with "
-                "only that one plugged in: rtl_eeprom -s 00000002, then unplug it and plug it back in.")
+            # Which stick is A can change from one start to the next, and its ppm with it. Most sticks leave the
+            # factory as 00000001, and two good ones measure, say, 0 and 1 ppm: until 26 November 2026 that refused
+            # every start (found in review). Both get the mean, each then at most 1.5 ppm (600 Hz) off, which the
+            # recognition takes in its stride. Further apart, the mean would cost reception: then say what to do.
+            if abs(self.ppm[0] - self.ppm[1]) > SAME_SERIAL_PPM:
+                raise ReceiverError(
+                    f"both RTL-SDRs have serial {serials[0]!r}, so which is A can change from one start to the next, "
+                    f"and their ppm corrections ({self.ppm[0]}, {self.ppm[1]}) are too far apart to share. Give one "
+                    "another serial, with only that one plugged in: rtl_eeprom -s 00000002, then unplug it and plug "
+                    "it back in.")
+            shared = int(round((self.ppm[0] + self.ppm[1]) / 2))
+            self.ppm = (shared, shared)
         room = int(ROOM_S * self.rate) * 2
         self.sticks = [Stick(label, index, strings, room) for label, (strings, index) in zip("AB", found)]
         for st, centre, ppm in zip(self.sticks, self.stitcher.centres, self.ppm):
@@ -163,6 +177,8 @@ class Receiver:
         self.info = {"model": name(self.kind), "sticks": [st.describe() for st in self.sticks],
                      "sample_rates": [self.fs], "rate_per_stick": self.rate, "handover_hz": self.centre_hz,
                      "same_serial": serials[0] == serials[1]}
+        if shared is not None:
+            self.info["shared_ppm"] = shared
         return self.info
 
     def _configure(self, st, centre, ppm):
@@ -417,9 +433,22 @@ class Receiver:
             err = want - have
             self.counters["alignment_ms"] = round(err / self.rate * 1000, 2)
             if abs(err) > (ALIGN_TOL_S * self.rate if self._aligned else 64):
-                (a if err > 0 else b).skip += abs(err)
+                st = a if err > 0 else b
+                st.skip += abs(err)
+                # Skipping loses nothing when it only takes away samples the stick has in excess: its extra first
+                # milliseconds at the start, or what a faster crystal gives, which builds up so slowly that the
+                # gap creeps over the tolerance. A gap that appears at once (a stretch lost on USB, a reader that
+                # fell behind) costs the joined stream that stretch. Until 26 November 2026 both counted alike, so
+                # the start's skip on one stick and a drift's on the other made a loss that never happened, and
+                # the session degraded (found in review).
+                if not self._aligned or (self._prev_err is not None
+                                         and abs(err - self._prev_err) < DRIFT_STEP_S * self.rate):
+                    st.excused += abs(err)
                 if self._aligned:
                     self.counters["realignments"] += 1
+                self._prev_err = 0
+            else:
+                self._prev_err = err
             self._aligned = True
             lost = self._newly_lost()
         if lost > 0:
@@ -437,7 +466,8 @@ class Receiver:
         Until 24 November 2026 overflow was reported apart from the rest, first as the two sticks' sum (twice the
         time), then as the larger of their totals, which lost a later overflow of the other stick (both found in
         review). One rule now covers overflow, losses found from the timing and the gaps realignment makes."""
-        total = min(st.overflow_lost + st.skipped + st.skip + st.lost for st in self.sticks) * OUT_FS // self.rate
+        total = min(st.overflow_lost + st.skipped + st.skip + st.lost - st.excused for st in self.sticks) \
+            * OUT_FS // self.rate
         new = total - self._loss_reported
         if new <= 0:
             return 0

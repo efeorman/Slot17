@@ -126,9 +126,19 @@ server's last report.
 
 ## Keys and replays
 
-The key is 32 random bytes, made on the car computer the first time Bluetooth is switched on.
+The key is 32 random bytes, made on the car computer the first time Bluetooth is switched on, or, without a
+server (1.8.0), made from a pairing code.
 - **How it reaches the app:** over the display server, only in answer to the app's pairing request (the
   operation `bluetooth` with `pair`). It is never sent over Bluetooth, and never in a state.
+- **Or from a pairing code (1.8.0):** 16 random bytes, made by the app (or by the car computer's setup), written
+  as 26 characters of Crockford's base32 (no I, L, O or U; typed O counts as 0, I and L as 1) and one check
+  character, `SHA-256("slot17-bluetooth-code-check-v1" + bytes)[0] >> 3`, in groups of four. The key is
+  `SHA-256("slot17-bluetooth-code-v1" + bytes)`. The person carries the code over: `slot17.txt` on the image
+  (`bluetooth_code=`, removed from the card once saved), the setup's question or `--bluetooth-code`, or the
+  app's field. The car computer keeps it, so `bluetooth_config.py --show-code` shows it again for a second
+  phone. A typing error almost always fails the check character, and a code that passes with one gives a
+  different key, so the app sees the wrong `key_id` rather than a link. 128 bits are as hard to guess as the key
+  itself. `p0/bluetooth_frames.py` makes the examples in `shared/parity/ble-frames.json` that both apps check.
 - **What a state carries instead:** `key_id`, the first 8 hex digits of the key's SHA-256. An app checks it
   against `info` after connecting, so it notices a different car computer.
 
@@ -146,10 +156,10 @@ So a recording of the link, replayed later, cannot raise an alert.
 
 | Where | How |
 |---|---|
-| Setup | `bash ~/Slot17/setup.sh car` asks "Send alerts over Bluetooth too?", yes by default, and for the name (Enter keeps `Slot17`). `--bluetooth`, `--no-bluetooth` and `--bluetooth-name NAME` skip the questions. Skipped where there is no adapter, or no display server, which the app needs for the key |
+| Setup | `bash ~/Slot17/setup.sh car` asks "Send alerts over Bluetooth too?", yes by default, and for the name (Enter keeps `Slot17`). `--bluetooth`, `--no-bluetooth` and `--bluetooth-name NAME` skip the questions. Skipped where there is no adapter. Without a display server it asks for the app's pairing code, or makes one (1.8.0) |
 | Ready-made image | `bluetooth=yes` or `no`, and `bluetooth_name=`, in `slot17.txt` |
 | App, the car computer | Settings, Bluetooth to the car computer: the switch and Rename. With this phone connected, off and Rename go over Bluetooth at once; otherwise, and for on, through the server like the Pushover switch, where a change made while the car is off waits up to a day |
-| App, this phone | Set up (the key through the server, then the system's chooser), Use Bluetooth on this phone, Remove |
+| App, this phone | Set up (the key through the server, then the system's chooser), Use Bluetooth on this phone, Remove; without a server (1.8.0), Make a pairing code or type one in, then Set up |
 | By hand | `python3 -B ~/Slot17/p0/bluetooth_config.py --show`, `--on [--name N]`, `--off`, `--new-key` (every phone sets up again; the link takes it when the publisher restarts); `python3 -B p0/bluetooth_link.py adapter [--name N]` |
 | Doctor | A Bluetooth line: off (a note), on with a working adapter, or what is missing |
 
@@ -181,8 +191,6 @@ So a recording of the link, replayed later, cannot raise an alert.
 
 ## Not in this version
 
-- Bluetooth without any server: it needs another way to share the key. Once a phone has the key, though, setting it
-  up again needs no server (1.6.0).
 - Support packages are made on the car computer and go to the server; over Bluetooth only the request goes.
 - The web page: Safari has no Web Bluetooth.
 

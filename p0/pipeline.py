@@ -119,6 +119,25 @@ CONFIRM_SHARE = 2.0 / 3.0
 RECENT_MATCH_S = 60.0
 
 
+RTL_CLIPPING_SHARE = 1e-3         # an RTL stick with this share of its 8-bit samples at 0 or 255 is clipping
+
+
+def receiver_overload(sig, receiver_status):
+    """Add the receiver's own word on overload where the int16 stream can't show it (found in review, 26 November
+    2026): an RTL stick's 8-bit converter clipping (the join scales both halves well below the int16 rails), or the
+    RSP's overload event. Marks the window saturating, as a stream near its rails does."""
+    if receiver_status is None or sig.get("saturating") or sig.get("glitch_block"):
+        return
+    try:
+        st = receiver_status() or {}
+    except Exception:                        # noqa: BLE001 - a status that can't be read changes nothing
+        return
+    clipping = max(float(st.get("saturation_a") or 0), float(st.get("saturation_b") or 0))
+    if st.get("overload_now") or clipping >= RTL_CLIPPING_SHARE:
+        sig["saturating"] = True
+        sig["saturation_source"] = "receiver"
+
+
 def emit(ctx, event):
     writer = getattr(ctx, "recorder", None)
     if writer is not None:
@@ -289,6 +308,7 @@ def process_window(iq, ring, read_end, w_now, ctx, t_abs_s=0.0):
     window_id = f"w{window:08d}"
     st.stage = "channelisation"
     sig = diagnostics.signal_health(iq[::32], fs / 32, gain=getattr(ctx, "gain", None))
+    receiver_overload(sig, getattr(ctx, "receiver_status", None))
     if sig["glitch_block"]:
         st.glitches += 1
         raise ValueError("corrupt IQ block")

@@ -4,11 +4,16 @@
     python3 bluetooth_config.py --show             what is set (never the key itself)
     python3 bluetooth_config.py --on [--name N]    switch it on, and make a key if there is none
     python3 bluetooth_config.py --off
+    python3 bluetooth_config.py --code CODE        switch it on with the key made from the app's pairing code
+    python3 bluetooth_config.py --new-code         make a pairing code here, for typing into the app
+    python3 bluetooth_config.py --show-code        the pairing code again, for another phone
 
 `setup.sh car` and the app's switch both write this file; the publisher reads it. It lives in
 ~/.config, only its owner can read it, and every write replaces it whole, so a power cut leaves the
-old settings or the new ones. The key signs every frame (p0/bluetooth_frames.py); the app gets it
-over the link to the display server, never over Bluetooth.
+old settings or the new ones. The key signs every frame (p0/bluetooth_frames.py). It reaches the app
+in one of two ways, never over Bluetooth: through the display server once, or with no server at all
+as a pairing code the user carries from one side to the other (since 27 November 2026, at the
+operator's request: Slot17 without any server). Both sides make the key from the code the same way.
 """
 from __future__ import annotations
 
@@ -19,7 +24,7 @@ import re
 import secrets
 import sys
 
-from bluetooth_frames import KEY_BYTES, key_id
+from bluetooth_frames import KEY_BYTES, code_bytes, format_code, key_from_code, key_id, make_code
 
 PATH = os.path.expanduser("~/.config/slot17-bluetooth.json")
 DEFAULT_NAME = "Slot17"
@@ -49,21 +54,35 @@ def load(path: str | None = None) -> dict:
         key = None
     if key is not None and len(key) != KEY_BYTES:
         key = None
+    code = data.get("code") if isinstance(data.get("code"), str) else None
+    try:
+        if code is not None and key_from_code(code) != key:
+            code = None                      # a code that doesn't make this key would set a phone up wrong
+    except ValueError:
+        code = None
     return {"on": data.get("on") is True and key is not None,
-            "name": data["name"] if valid_name(data.get("name")) else DEFAULT_NAME, "key": key}
+            "name": data["name"] if valid_name(data.get("name")) else DEFAULT_NAME, "key": key, "code": code}
 
 
 def save(path: str | None = None, *, on: bool | None = None, name: str | None = None,
-         new_key: bool = False) -> dict:
+         new_key: bool = False, code: str | None = None) -> dict:
     """Change what is given, keep the rest, and make a key the first time (or a new one when asked: every phone
-    then needs setting up again). Returns the new settings."""
+    then needs setting up again). With a pairing code, the key is the one made from it, and the code is kept for
+    another phone. Returns the new settings."""
     path = path or PATH
     current = load(path)
     if name is not None and not valid_name(name):
         raise ValueError(f"not a usable name: 1 to {NAME_MAX} letters, digits, spaces, '.', '-' or '_'")
-    key = secrets.token_bytes(KEY_BYTES) if new_key or not current["key"] else current["key"]
+    if code is not None:
+        key, code = key_from_code(code), format_code(code_bytes(code))
+    elif new_key or not current["key"]:
+        key, code = secrets.token_bytes(KEY_BYTES), None
+    else:
+        key, code = current["key"], current["code"]
     data = {"on": current["on"] if on is None else bool(on), "name": current["name"] if name is None else name,
             "key": key.hex()}
+    if code is not None:
+        data["code"] = code
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     partial = f"{path}.{os.getpid()}.partial"
     fd = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -155,6 +174,14 @@ def main(argv=None) -> int:
     ap.add_argument("--new-key", action="store_true",
                     help="replace the key: every phone needs setting up again; the link uses it once the publisher "
                          "restarts (the next power-up, or: sudo systemctl restart tetra-display-publisher)")
+    group.add_argument("--code", metavar="CODE", help="switch the link on with the key made from this pairing code "
+                                                      "(the app makes it: Bluetooth to the car computer, Without a "
+                                                      "server); - reads it from standard input. The link uses it "
+                                                      "from the detector's next start")
+    group.add_argument("--new-code", action="store_true",
+                       help="make a pairing code here and switch the link on with it: type the code into the app. "
+                            "The link uses it from the detector's next start")
+    ap.add_argument("--show-code", action="store_true", help="print the pairing code, if the key was made from one")
     ap.add_argument("--path", default=PATH, help=argparse.SUPPRESS)
     ap.add_argument("--gatt-client-off", action="store_true",
                     help=f"as root: [GATT] Client = false in {MAIN_CONF}, so phones are not asked to pair")
@@ -168,7 +195,11 @@ def main(argv=None) -> int:
             return 1
         return 0
     try:
-        if args.on or args.off or args.name is not None or args.new_key:
+        if args.code is not None or args.new_code:
+            # "-": the code on standard input, so it never shows in the process list (setup passes it so).
+            code = sys.stdin.readline().strip() if args.code == "-" else args.code
+            settings = save(args.path, on=True, name=args.name, code=code if code is not None else make_code())
+        elif args.on or args.off or args.name is not None or args.new_key:
             settings = save(args.path, on=True if args.on else False if args.off else None, name=args.name,
                             new_key=args.new_key)
         else:
@@ -176,6 +207,13 @@ def main(argv=None) -> int:
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 2
+    if args.new_code or args.show_code:
+        if not settings["code"]:
+            print("this key wasn't made from a pairing code; make one with --new-code (every phone then needs "
+                  "setting up again)", file=sys.stderr)
+            return 1
+        print(settings["code"])
+        return 0
     print(json.dumps(public(settings)))
     return 0
 

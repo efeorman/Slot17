@@ -42,6 +42,45 @@ def bundle(key, seq, files, commit="abcdef1234567", manifest_files=None):
     return data, key.sign(data).hex()
 
 
+class NoServer(unittest.TestCase):
+    """Without a display server, the newest public release on GitHub (27 November 2026: Slot17 without any server)."""
+
+    def test_the_public_releases_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            u = update.Updater(Path(tmp), Path(tmp) / "key.pub", config=Path(tmp) / "slot17-display.json")
+            asked = []
+
+            class Answer:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+                def read(self, n):
+                    read.append(n)
+                    return b"{}"
+
+                def geturl(self):
+                    return landed[0]
+
+            read, landed = [], ["https://release-assets.githubusercontent.com/x"]
+
+            def urlopen(req, timeout):
+                asked.append((req.full_url, req.get_header("Authorization")))
+                return Answer()
+            with unittest.mock.patch.object(update.urllib.request, "urlopen", urlopen):
+                u._open("/api/release", 5)
+                u._open("/api/release/bundle", 5)
+                landed[0] = "http://192.168.1.1/login"        # a Wi-Fi's login page instead of GitHub
+                with self.assertRaises(OSError):
+                    u._open("/api/release", 5)
+        self.assertEqual(read, [update.RELEASE_JSON_MAX, update.MAX_BUNDLE + 1])
+        self.assertEqual(asked[:2], [(update.GITHUB_RELEASE + "slot17-update.json", None),
+                                 (update.GITHUB_RELEASE + "slot17-update.tar.gz", None)])
+        self.assertTrue(update.GITHUB_RELEASE.startswith("https://github.com/efeorman/Slot17/releases/latest/download/"))
+
+
 @unittest.skipUnless(Ed25519PrivateKey, "needs the cryptography package")
 class Base(unittest.TestCase):
     def setUp(self):

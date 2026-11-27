@@ -52,7 +52,7 @@ mount --bind "$mnt/etc/resolv.conf.slot17" "$mnt/etc/resolv.conf" 2>/dev/null ||
 echo "== Installing Slot17's packages (under ARM emulation, a few minutes)"
 chroot "$mnt" /usr/bin/env DEBIAN_FRONTEND=noninteractive bash -euo pipefail -c '
 apt-get update -qq
-apt-get install -y -qq --no-install-recommends python3 python3-numpy python3-scipy python3-psutil python3-cryptography usbutils airspy libairspy0 python-is-python3 curl >/dev/null
+apt-get install -y -qq --no-install-recommends python3 python3-numpy python3-scipy python3-psutil python3-cryptography usbutils airspy libairspy0 librtlsdr0 rtl-sdr file python-is-python3 curl >/dev/null
 apt-get clean
 '
 

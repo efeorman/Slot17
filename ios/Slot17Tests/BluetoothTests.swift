@@ -20,6 +20,27 @@ final class BluetoothTests: XCTestCase {
         return (try BluetoothFormat.decode(bytes, key: key), try XCTUnwrap(f["decoded"] as? [String: Any]))
     }
 
+    /// The pairing code for Bluetooth without a server (27 November 2026), as the car computer makes it.
+    func testPairingCodes() throws {
+        for case let c as [String: Any] in try XCTUnwrap(fixture["pairing_codes"] as? [Any]) {
+            let raw = try XCTUnwrap(hexData(try XCTUnwrap(c["bytes"] as? String)))
+            let code = try XCTUnwrap(c["code"] as? String)
+            XCTAssertEqual(PairingCode.format(Array(raw)), code)
+            XCTAssertEqual(BluetoothFormat.hex(try XCTUnwrap(PairingCode.key(code))), c["key"] as? String)
+            XCTAssertEqual(BluetoothFormat.keyID(try XCTUnwrap(PairingCode.key(code))), c["key_id"] as? String)
+        }
+        for case let c as [String: Any] in try XCTUnwrap(fixture["pairing_codes_typed"] as? [Any]) {
+            let typed = try XCTUnwrap(c["typed"] as? String)
+            XCTAssertEqual(PairingCode.bytes(typed).map { BluetoothFormat.hex($0) }, c["bytes"] as? String, typed)
+        }
+        for case let typed as String in try XCTUnwrap(fixture["pairing_codes_refused"] as? [Any]) {
+            XCTAssertNil(PairingCode.bytes(typed), typed)
+        }
+        let made = PairingCode.make()
+        XCTAssertNotNil(PairingCode.key(made))
+        XCTAssertNotEqual(made, PairingCode.make())
+    }
+
     func testStatus() throws {
         let (got, want) = try frame("status")
         guard case .status(let boot, let counter, let d) = got else { return XCTFail("not a status frame") }

@@ -52,6 +52,13 @@ need_normal_user() {
 apt_install() {
     step "Installing packages"
     echo "  $*"
+    # Everything already there (the Pi image has these): nothing to fetch, so a first start without internet goes on
+    # (found in review, 26 November 2026: apt-get update ran, and failed, even then).
+    local p missing=0
+    for p in "$@"; do
+        [ "$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null)" = "install ok installed" ] || missing=1
+    done
+    if [ "$missing" = 0 ]; then ok "already installed"; return 0; fi
     sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq || die "apt-get update failed. Is the internet connection working?"
     sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@" >/dev/null || die "installing packages failed."
     ok "packages installed"

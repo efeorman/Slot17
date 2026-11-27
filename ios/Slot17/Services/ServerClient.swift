@@ -5,7 +5,14 @@ import Foundation
 /// The operator has chosen plain HTTP to this server, so the key and all of this traffic travel
 /// unencrypted; that includes power off and stop.
 final class ServerClient: NSObject, URLSessionDataDelegate {
-    enum HTTPError: Error { case status(Int), noData }
+    enum HTTPError: LocalizedError {
+        case status(Int), noData, noLink
+        /// No link: until 27 November 2026 such a request never answered, and its button said "Sending…" for good.
+        var errorDescription: String? {
+            if case .noLink = self { return "no server is set up" }
+            return nil
+        }
+    }
 
     static func status(of error: Error) -> Int? {
         if case .status(let code)? = error as? HTTPError { return code }
@@ -123,21 +130,21 @@ final class ServerClient: NSObject, URLSessionDataDelegate {
 
     func send(path: String, json: [String: Any], done: @escaping (Result<Data, Error>) -> Void) {
         guard var request = request(path, method: "POST", timeout: 8),
-              let body = try? JSONSerialization.data(withJSONObject: json) else { return }
+              let body = try? JSONSerialization.data(withJSONObject: json) else { return noLink(done) }
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         perform(request, done)
     }
 
     func uploadLog(_ body: Data, done: @escaping (Result<Data, Error>) -> Void) {
-        guard var request = request("api/app-log", method: "POST", timeout: 60) else { return }
+        guard var request = request("api/app-log", method: "POST", timeout: 60) else { return noLink(done) }
         request.httpBody = body
         request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
         perform(request, done)
     }
 
     func listLogs(done: @escaping (Result<[ServerLogEntry], Error>) -> Void) {
-        guard let request = request("api/logs", timeout: 10) else { return }
+        guard let request = request("api/logs", timeout: 10) else { return noLink(done) }
         perform(request) { [decoder] result in
             done(result.flatMap { data -> Result<[ServerLogEntry], Error> in
                 Result(catching: { try decoder.decode(Listing.self, from: data).logs })
@@ -146,7 +153,7 @@ final class ServerClient: NSObject, URLSessionDataDelegate {
     }
 
     func fetchLog(_ name: String, done: @escaping (Result<String, Error>) -> Void) {
-        guard let request = request("api/logs/\(name)", timeout: 30) else { return }
+        guard let request = request("api/logs/\(name)", timeout: 30) else { return noLink(done) }
         perform(request) { result in
             done(result.map { String(decoding: $0, as: UTF8.self) })
         }
@@ -154,21 +161,25 @@ final class ServerClient: NSObject, URLSessionDataDelegate {
 
     /// The app's settings file from the server. 404 means the server has none: keep the defaults.
     func fetchConfig(done: @escaping (Result<Data, Error>) -> Void) {
-        guard let request = request("api/config", timeout: 10) else { return }
+        guard let request = request("api/config", timeout: 10) else { return noLink(done) }
         perform(request, done)
     }
 
     func fetchSound(_ name: String, done: @escaping (Result<Data, Error>) -> Void) {
-        guard let request = request("api/sounds/\(name)", timeout: 20) else { return }
+        guard let request = request("api/sounds/\(name)", timeout: 20) else { return noLink(done) }
         perform(request, done)
     }
 
     private struct Listing: Decodable { let logs: [ServerLogEntry] }
 
+    private func noLink<T>(_ done: @escaping (Result<T, Error>) -> Void) {
+        DispatchQueue.main.async { done(.failure(HTTPError.noLink)) }
+    }
+
     // MARK: Support packages (1.5.0)
 
     func listSupport(done: @escaping (Result<[SupportPackage], Error>) -> Void) {
-        guard let request = request("api/support", timeout: 10) else { return done(.failure(HTTPError.noData)) }
+        guard let request = request("api/support", timeout: 10) else { return noLink(done) }
         perform(request) { [decoder] result in
             done(result.flatMap { data -> Result<[SupportPackage], Error> in
                 Result(catching: { try decoder.decode(SupportListing.self, from: data).packages })

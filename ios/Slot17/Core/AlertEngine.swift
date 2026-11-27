@@ -1,7 +1,9 @@
 import Foundation
 
 struct AlertSettings: Codable, Equatable {
-    var red = 22.0
+    // As display/app-config.json, which the server sends: without a server these are what counts (27 November 2026:
+    // the app chimed from 22 dB there, the server's level being 35).
+    var red = 35.0
     var yellow = 12.0
     var sound = true
     var urgent = true
@@ -19,6 +21,8 @@ struct AlertSettings: Codable, Equatable {
     var channelGap = 30.0
     var maxAge = 10.0
     var quiet = false
+    /// Sound for the aircraft channels (1.8.0); off, a helicopter in the air only shows on the meters.
+    var aircraftSound = true
     var quietRed = 28.0
     var quietGap = 30.0
     /// The soft call tone: a call pattern from this strength up to the chime level.
@@ -26,7 +30,7 @@ struct AlertSettings: Codable, Equatable {
     var callGap = 60.0         // per channel
     var callAnyGap = 15.0      // between call tones; never holds back a chime or an urgent beep
     var linkLostAfter = 30.0
-    var receiverQuietWindows = 40    // 60 s of 1.5 s detector windows, as the Pi counts them
+    var receiverQuietWindows = 240   // 60 s of 0.25 s detector windows, as the Pi counts them
     var receiverToneRepeat = 300.0
     var summaryWindow = 120.0
     var trackEvery = 10.0
@@ -133,6 +137,7 @@ extension AlertSettings {
         faultNotices = try get(.faultNotices, d.faultNotices)
         callLevel = try get(.callLevel, d.callLevel); callGap = try get(.callGap, d.callGap)
         callAnyGap = try get(.callAnyGap, d.callAnyGap)
+        aircraftSound = try get(.aircraftSound, d.aircraftSound)
     }
 }
 
@@ -281,6 +286,7 @@ final class AlertEngine {
         if let problem = c.audioProblem { return silent(problem) }
         if c.now < c.mutedUntil { return silent("muted by the speaker button") }
         if !s.sound { return silent("sound is switched off") }
+        if !s.aircraftSound && Aircraft.isAir(p.match.ch) { return silent("an aircraft channel, and sound for aircraft is off") }
         if !c.armed { return silent("sound is not armed") }
 
         let kind: SoundKind

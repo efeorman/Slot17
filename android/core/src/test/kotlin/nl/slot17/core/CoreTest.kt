@@ -66,17 +66,38 @@ class LinkTrackerTest {
         assertTrue(t.carAge(100.6) < 1.0)
         assertFalse(t.live(100.6 + LinkTracker.LINK_LOST + 1), "nothing received for too long")
     }
+
+    /** 1.8.0: with both routes fresh, Bluetooth's data comes straight from the car computer and goes first. */
+    @Test fun bluetoothGoesFirstWhileItsDataIsFresh() {
+        assertTrue(LinkTracker.bluetoothFirst(true, 1.2, serverFresh = true), "both fresh")
+        assertTrue(LinkTracker.bluetoothFirst(true, LinkTracker.BLUETOOTH_FIRST_WITHIN, serverFresh = true))
+        assertFalse(LinkTracker.bluetoothFirst(true, 6.0, serverFresh = true), "a stalled radio link")
+        assertTrue(LinkTracker.bluetoothFirst(true, 6.0, serverFresh = false), "nothing fresher")
+        assertFalse(LinkTracker.bluetoothFirst(false, 0.5, serverFresh = true), "no running detector over it")
+        assertFalse(LinkTracker.bluetoothFirst(false, 0.5, serverFresh = false))
+    }
 }
 
 class StatusTest {
     private val s = AlertSettings()
+
+    @Test fun aircraftChannels() {
+        // ECC/DEC/(06)05: 384.750-385.000 MHz is channels 190-199 on the grid (1.8.0).
+        val air = (0 until 200).filter { ch -> (380.0125 + ch * 0.025).let { it >= 384.75 - 1e-9 && it < 385.0 } }
+        assertEquals(air, (0 until 200).filter { Aircraft.isAir(it) })
+        assertEquals(190..199, Aircraft.channels)
+        assertTrue(MeterRow(190, 384.7625, 30.0, 1.0, 1, false).air)
+        assertFalse(MeterRow(189, 384.7375, 30.0, 1.0, 1, false).air)
+        assertFalse(Aircraft.isAir(null))
+    }
 
     @Test fun meters() {
         assertEquals(0, Meters.level(null))
         assertEquals(1, Meters.level(6.5))
         assertEquals(9, Meters.level(49.9))
         assertEquals(10, Meters.level(50.0))
-        assertEquals(MeterColour.RED, Meters.colour(22.0, s))
+        assertEquals(MeterColour.RED, Meters.colour(35.0, s))
+        assertEquals(MeterColour.YELLOW, Meters.colour(34.9, s), "the chime level is the server's 35 dB by default")
         assertEquals(MeterColour.YELLOW, Meters.colour(12.0, s))
         assertEquals(MeterColour.WEAK, Meters.colour(11.9, s))
         assertEquals(MeterColour.YELLOW, Meters.colour(25.0, s.copy(quiet = true)))
@@ -97,6 +118,7 @@ class StatusTest {
     @Test fun headline() {
         val t = LinkTracker()
         assertEquals("Not set up", StatusBuilder.headline(t, 0.0, null, hasCredentials = false).title)
+        assertEquals("Waiting for the car computer", StatusBuilder.headline(t, 0.0, null, hasCredentials = false, bluetoothSetUp = true).title)
         assertEquals("Connecting…", StatusBuilder.headline(t, 0.0, null, true).title)
         t.accept(message(seq = 1, mono = 10.0), 100.0)
         t.applyProbe(message(seq = 2, mono = 10.5), begin = 100.4, end = 100.5)

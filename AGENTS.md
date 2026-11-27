@@ -59,7 +59,7 @@ bundle app changes into one run.
 |---|---|
 | `p0/` | The detector |
 | `display/` | Server, web page, the car computer's publisher, and their tests |
-| `deploy/` | Setup scripts, service files, `doctor.py` |
+| `deploy/` | Setup scripts, service files, `doctor.py` (starts `p0/doctor.py`, the setup check) |
 | `ios/` | The iPhone app, Live Activity and widgets |
 | `tests/` | Detector tests and small saved signals |
 | `docs/` | Changelog, design notes, operations guides |

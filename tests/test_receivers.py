@@ -173,8 +173,26 @@ class FakeSdrplay:
         self.stream_thread.start()
 
 
+class FakeTime:
+    """A clock that only moves when the code under test sleeps."""
+
+    def __init__(self):
+        self.t = 0.0
+        self.slept = 0.0
+
+    def clock(self):
+        return self.t
+
+    def sleep(self, s):
+        self.t += s
+        self.slept += s
+
+
 def rsp(lib=None, **kw):
     lib = lib or FakeSdrplay()
+    ft = FakeTime()
+    kw.setdefault("clock", ft.clock)
+    kw.setdefault("sleep", ft.sleep)
     rx = receiver_sdrplay.Receiver("rsp1b", fs=6_000_000, centre_hz=382.5e6,
                                    gain={"lna_state": 2, "if_gain_reduction_db": 40}, lib=lib, **kw)
     sink = Sink()
@@ -339,6 +357,55 @@ class AirspyUnchanged(unittest.TestCase):
 
 
 class SdrplaySession(unittest.TestCase):
+    def test_a_service_still_starting_is_waited_for(self):
+        """At a car's power-up SDRplay's service may not answer yet, then not list the receiver yet. Until 26
+        November 2026 the first answer counted, and the whole drive went without detection (found in review)."""
+        lib = FakeSdrplay()
+        answers = iter([S.SERVICE_NOT_RESPONDING, S.SERVICE_NOT_RESPONDING, 0])
+        lib.sdrplay_api_Open = lambda: lib._call("Open", next(answers))
+        listed = iter([(), (), lib.devices])
+        real = FakeSdrplay.sdrplay_api_GetDevices
+
+        def get_devices(devs, count, maxn):
+            lib.devices = next(listed)
+            return real(lib, devs, count, maxn)
+        lib.sdrplay_api_GetDevices = get_devices
+        ft = FakeTime()
+        rx, _, _ = rsp(lib, clock=ft.clock, sleep=ft.sleep)
+        self.assertEqual(rx.open()["model"], "RSP1B")
+        self.assertEqual(rx.counters["service_waits"], 4)
+        self.assertEqual(ft.slept, 4.0)
+        self.assertEqual(lib.calls.count("Open"), 3)
+        self.assertEqual(lib.calls.count("Lock"), lib.calls.count("Unlock"))
+        self.assertEqual(lib.calls.count("SelectDevice"), 1)
+        rx.close()
+
+    def test_a_service_that_never_answers_still_fails_in_the_end(self):
+        lib = FakeSdrplay(open_rc=S.SERVICE_NOT_RESPONDING)
+        ft = FakeTime()
+        rx, _, _ = rsp(lib, clock=ft.clock, sleep=ft.sleep)
+        with self.assertRaises(receiver.ReceiverError) as e:
+            rx.open()
+        self.assertIn("systemctl status sdrplay", str(e.exception))
+        self.assertGreaterEqual(ft.slept, receiver_sdrplay.SERVICE_WAIT_S)
+        rx.close()
+
+    def test_a_receiver_held_elsewhere_says_so(self):
+        lib = FakeSdrplay()
+        real = FakeSdrplay.sdrplay_api_GetDevices
+
+        def held(devs, count, maxn):
+            rc = real(lib, devs, count, maxn)
+            devs[0].valid = 0
+            return rc
+        lib.sdrplay_api_GetDevices = held
+        rx, _, _ = rsp(lib)
+        with self.assertRaises(receiver.ReceiverError) as e:
+            rx.open()
+        self.assertIn("held by another program", str(e.exception))
+        self.assertNotIn("SelectDevice", lib.calls)
+        rx.close()
+
     def test_sdrplays_order_and_every_setting(self):
         rx, lib, _ = rsp()
         info = rx.open()
@@ -703,6 +770,55 @@ class CalibrationCapture(unittest.TestCase):
 # Setup's own steps are tested in scripts/test_setup_steps.py, by running them. They were read here until the second
 # review (24 November 2026): tests/ is what the updater tests a release in, and its copy has no deploy/ folder, so
 # this module couldn't load there and every release with it would have been rejected (F13).
+
+
+class WaitForTheReceiver(unittest.TestCase):
+    """watch.wait_for_receiver: at power-up, until every device the receiver needs is on USB (found in review, 26
+    November 2026). It only reads the USB list."""
+
+    def test_a_late_second_stick_is_waited_for(self):
+        ft = FakeTime()
+        seen = iter([1, 1, 1, 2])
+        waited = watch.wait_for_receiver("rtlsdr2", limit=30, present=lambda k: next(seen),
+                                         clock=ft.clock, sleep=ft.sleep)
+        self.assertEqual(waited, 1.5)
+
+    def test_it_gives_up_at_the_limit_and_when_usb_cannot_be_read(self):
+        ft = FakeTime()
+        self.assertGreaterEqual(watch.wait_for_receiver("rsp1b", limit=5, present=lambda k: 0,
+                                                        clock=ft.clock, sleep=ft.sleep), 5)
+        ft = FakeTime()
+        self.assertEqual(watch.wait_for_receiver("airspy", limit=5, present=lambda k: None,
+                                                 clock=ft.clock, sleep=ft.sleep), 0.0)
+
+    def test_supervise_asks_for_the_wait_and_watch_alone_does_not(self):
+        import supervise
+        opts = types.SimpleNamespace(watch_args=["--band", "uplink"], heartbeat="hb", stall_timeout=15)
+        cmd = supervise.build_cmd(opts)
+        self.assertEqual(cmd[cmd.index("--receiver-wait") + 1], str(supervise.RECEIVER_WAIT_S))
+        opts.watch_args = ["--receiver-wait", "5"]
+        self.assertEqual(supervise.build_cmd(opts).count("--receiver-wait"), 1)
+
+
+class ReceiverOverload(unittest.TestCase):
+    """pipeline.receiver_overload: the receiver's own word on overload, where the int16 stream can't show it (found
+    in review, 26 November 2026: an RTL stick clipping 25 % of its samples left the window "not saturating")."""
+
+    def sig(self, status):
+        import pipeline
+        sig = {"saturating": False, "glitch_block": False}
+        pipeline.receiver_overload(sig, (lambda: status) if status is not None else None)
+        return sig
+
+    def test_an_rtl_stick_clipping_or_an_rsp_overload_marks_the_window(self):
+        self.assertTrue(self.sig({"saturation_a": 0.25, "saturation_b": 0.0})["saturating"])
+        self.assertEqual(self.sig({"saturation_a": 0.0, "saturation_b": 0.002})["saturation_source"], "receiver")
+        self.assertTrue(self.sig({"overload_now": True})["saturating"])
+
+    def test_a_clean_receiver_or_none_changes_nothing(self):
+        self.assertFalse(self.sig({"saturation_a": 0.0001, "saturation_b": 0.0, "overload_now": False})["saturating"])
+        self.assertFalse(self.sig(None)["saturating"])
+        self.assertFalse(self.sig({})["saturating"])
 
 
 class PresenceAndMessages(unittest.TestCase):

@@ -81,6 +81,7 @@ struct SegmentMeter: View {
     private func spoken(strong: Bool, style: DisplayStyle) -> String {
         guard let row else { return "No channel" }
         var parts = ["Channel L\(row.ch)"]
+        if row.air && !grey { parts.append(Aircraft.spoken) }
         if strong { parts.append(style.strongBadge) }
         parts.append(row.strength.map { String(format: "%.0f decibels above the noise", $0) } ?? "strength not available")
         parts.append((row.approxTime ? "about " : "") + Format.ago(row.age).replacingOccurrences(of: " s ago", with: " seconds ago"))
@@ -101,6 +102,7 @@ struct SegmentMeter: View {
         let kind = Meters.colour(row?.strength, settings)
         let colour = grey ? Theme.grey : Theme.colour(kind, style)
         let strong = !grey && Meters.isStrong(row?.strength, settings)
+        let airTile = !grey && row?.air == true
         // Dimmer at night: the screen's own brightness is the best sign of a dark car.
         let night = UIScreen.main.brightness < 0.3
         let outline = (Theme.hex(style.strongOutline) ?? .white).opacity(night ? 0.55 : 0.9)
@@ -134,7 +136,11 @@ struct SegmentMeter: View {
             }
             .frame(maxWidth: 74)
             if let row {
-                Text("L\(row.ch)").font(.headline.monospacedDigit()).foregroundColor(Theme.text)
+                HStack(spacing: 4) {
+                    // An aircraft's channel (1.8.0): the helicopter mark before the number.
+                    if row.air && !grey { HelicopterGlyph().fill(Aircraft.colour).frame(width: 17, height: 17) }
+                    Text("L\(row.ch)").font(.headline.monospacedDigit()).foregroundColor(Theme.text)
+                }
                 Text(row.strength.map { String(format: "%.1f dB", $0) } ?? "strength n/a")
                     .font(.subheadline.weight(.semibold).monospacedDigit()).foregroundColor(Theme.text)
                     .lineLimit(1).minimumScaleFactor(0.7)
@@ -144,6 +150,12 @@ struct SegmentMeter: View {
                     .lineLimit(1).minimumScaleFactor(0.7)
                 Text("\(row.approxTime ? "≈ " : "")\(Format.ago(row.age)) · \(row.hits60)×/min")
                     .font(.caption2.monospacedDigit()).foregroundColor(Theme.dim).lineLimit(1).minimumScaleFactor(0.7)
+                if row.air && !grey {
+                    Text(Aircraft.word.uppercased())
+                        .font(.caption2.weight(.heavy)).tracking(0.6).foregroundColor(Aircraft.colour)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                        .accessibilityIdentifier("meter-aircraft")
+                }
                 if row.call && !grey {
                     Label("In a call", systemImage: "phone.and.waveform")
                         .font(.caption2.weight(.semibold)).foregroundColor(Theme.text)
@@ -166,7 +178,8 @@ struct SegmentMeter: View {
         .padding(.horizontal, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.panel)
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(strong ? outline : Theme.line, lineWidth: strong ? 3 : 1))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(strong ? outline : (airTile ? Aircraft.colour.opacity(0.85) : Theme.line),
+                                                           lineWidth: strong ? 3 : (airTile ? 2 : 1)))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(outline.opacity(Double(pulse)), lineWidth: 3 + 6 * pulse))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .opacity(row.map { Meters.opacity($0.age) } ?? 0.45)
@@ -317,7 +330,11 @@ struct LastAlertCard: View {
     var body: some View {
         let last = model.alerts.first { $0.sound != nil }
         HStack(spacing: 10) {
-            Image(systemName: "bell.fill").foregroundColor(last?.sound == .urgent ? Theme.red : Theme.dim)
+            if let last, Aircraft.isAir(last.channel) {
+                HelicopterGlyph().fill(Aircraft.colour).frame(width: 18, height: 18)
+            } else {
+                Image(systemName: "bell.fill").foregroundColor(last?.sound == .urgent ? Theme.red : Theme.dim)
+            }
             if let last {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(AlertText.title(last)).font(.subheadline.weight(.semibold)).foregroundColor(Theme.text)
@@ -340,11 +357,13 @@ struct LastAlertCard: View {
 enum AlertText {
     static func title(_ a: AlertRecord) -> String {
         let db = a.strength.map { String(format: "%.1f dB", $0) } ?? "no strength"
+        // An aircraft's channel says so (1.8.0).
+        let ch = Aircraft.isAir(a.channel) ? "L\(a.channel) · aircraft" : "L\(a.channel)"
         switch a.sound {
-        case .urgent?: return "Urgent beep · L\(a.channel) · \(db)"
-        case .chime?: return "Chime · L\(a.channel) · \(db)"
-        case .call?: return "Call tone · L\(a.channel) · \(db)"
-        default: return "Silent · L\(a.channel) · \(db)"
+        case .urgent?: return "Urgent beep · \(ch) · \(db)"
+        case .chime?: return "Chime · \(ch) · \(db)"
+        case .call?: return "Call tone · \(ch) · \(db)"
+        default: return "Silent · \(ch) · \(db)"
         }
     }
 }
@@ -486,6 +505,7 @@ struct MoreChannels: View {
         let colour = Theme.colour(Meters.colour(row.strength, model.settings), model.style)
         return HStack(spacing: 4) {
             Circle().fill(colour).frame(width: 7, height: 7)
+            if row.air { HelicopterGlyph().fill(Aircraft.colour).frame(width: 13, height: 13) }
             Text("L\(row.ch)").font(.caption.weight(.bold).monospacedDigit()).foregroundColor(Theme.text)
             if let db = row.strength {
                 Text(String(format: "%.0f dB", db)).font(.caption.monospacedDigit()).foregroundColor(Theme.text)

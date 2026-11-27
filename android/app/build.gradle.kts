@@ -19,8 +19,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // The same numbers as the iPhone app, so update notices compare against one versions.json.
-        versionCode = 25
-        versionName = "1.11.0"
+        versionCode = 26
+        versionName = "1.12.0"
     }
 
     signingConfigs {

@@ -40,12 +40,15 @@ PACE_BYTES = 256 << 10               # pause briefly after this much, so the det
 PACE_S = 0.01
 # The same rule as display_publisher.SECRET_TEXT: over-redacting a log costs little.
 SECRET_TEXT = re.compile(r"(?i)((?:[a-z0-9_-]*(?:token|password|passwd|secret|api_?key|user_?key|viewer_?key|status_?key|psk)|"
-                         r"authorization|cookie|pushover_user|[\"']user[\"']|\bkey)[\"']?)(\s*[:=]\s*[\"']?|\s+)(bearer\s+)?[^\s\"',;&}]+")
+                         r"authorization|cookie|pushover_user|(?:bluetooth|pairing)[_ -]?code|[\"']user[\"']|\bkey)[\"']?)(\s*[:=]\s*[\"']?|\s+)(bearer\s+)?[^\s\"',;&}]+")
 SERVICES = ("tetra-detector.service", "tetra-display-publisher.service", "slot17-modem.service", "bluetooth.service")
 
 
+CODE_TEXT = re.compile(r"\b[0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4}){5}-[0-9A-HJKMNP-TV-Z]{3}\b")      # a Bluetooth pairing code (1.8.0)
+
+
 def redact(text: str) -> str:
-    return SECRET_TEXT.sub(lambda m: m.group(1) + m.group(2) + "[removed]", text)
+    return CODE_TEXT.sub("[removed]", SECRET_TEXT.sub(lambda m: m.group(1) + m.group(2) + "[removed]", text))
 
 
 def _json(path):
@@ -301,7 +304,7 @@ def make(out, session=None, window=None, everything=False, recordings=False, run
     rows = drives()
     if doctor is None:
         try:
-            doctor = json.loads(run([sys.executable, "-B", str(ROOT / "deploy/doctor.py"), "car", "--json"], timeout=40))
+            doctor = json.loads(run([sys.executable, "-B", str(ROOT / "p0/doctor.py"), "car", "--json"], timeout=40))
         except ValueError:
             doctor = None
     chosen = [r for r in rows if r["session"] == session] if session else []

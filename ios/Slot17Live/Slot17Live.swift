@@ -31,6 +31,9 @@ struct Slot17LiveActivity: Widget {
                 DynamicIslandExpandedRegion(.center) {
                     VStack(spacing: 2) {
                         HStack(spacing: 6) {
+                            if context.state.air && !context.isStale {
+                                HelicopterGlyph().fill(Aircraft.colour).frame(width: 17, height: 17)
+                            }
                             Text(context.state.phaseTitle).font(.headline)
                                 .contentTransition(.numericText())
                             if context.state.tone == .strong, !context.isStale { LiveTileBadge(state: context.state, small: true) }
@@ -59,7 +62,11 @@ struct Slot17LiveActivity: Widget {
                             .font(.caption.weight(.semibold)).foregroundColor(LiveTilePalette.caution)
                     } else if let alert = context.state.lastAlert {
                         HStack(spacing: 5) {
-                            Image(systemName: "bell.fill")
+                            if Aircraft.isAir(alert.channel) {
+                                HelicopterGlyph().fill(Aircraft.colour).frame(width: 14, height: 14)
+                            } else {
+                                Image(systemName: "bell.fill")
+                            }
                             Text(alert.urgent ? "Urgent" : "Chime").fontWeight(.semibold)
                             Text("L\(alert.channel)")
                             Spacer(minLength: 4)

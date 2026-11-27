@@ -30,6 +30,25 @@ service of SDRplay's) and its callbacks; their Python side was cut from 19 % to 
 RTL pair adds two Debian packages (under 1 MB), 40 MB of memory for the two sticks' waiting rooms, and 38 % of a
 core for joining the two halves (below).
 
+## At power-up, and before calibration (1.8.0)
+
+Checked on 27 November 2026 against what the Airspy taught in the car: a receiver isn't always ready the moment
+the detector starts, and until then the first try counted, so a whole drive could go without detection.
+
+- **Waiting for the receiver:** the detector waits up to 30 s for the chosen receiver to appear on USB
+  (`supervise.py` passes `--receiver-wait 30`; reading the USB list opens nothing). It is still one opening per
+  power-up.
+- **An RSP:** the detector also waits up to 45 s for SDRplay's service to answer and to list the receiver, and says
+  so when another program holds it. Its service starts after `sdrplay.service`, and that service, which carries the
+  RSP's USB traffic, runs at a higher priority than the detector (`Nice=-10`).
+- **Before calibration:** a receiver runs with no frequency correction (0 ppm) until it is calibrated. Until 1.7.2
+  the shipped `calibration.json` held our own Airspy's +4.09 ppm, which is wrong for any other receiver.
+- **Overload:** the receiver's own word counts. An RTL stick's 8-bit clipping (from 0.1 % of its samples at 0 or 255)
+  and the RSP's overload event mark the window as saturating, as the 16-bit stream near its limits does for the
+  Airspy. The joined RTL stream is scaled well below those limits, so it could never show it by itself.
+- **Without internet at the first start:** the Pi image carries `librtlsdr0`, `rtl-sdr` and `file`, and the setup
+  skips the package manager when everything is already installed.
+
 ## The Airspy Mini
 
 Unchanged. Its code moved from `watch.py` into `p0/receiver_airspy.py` without a change of order or setting:
@@ -114,16 +133,20 @@ the joined stream is 0.5 ms behind the sticks). The session's start is dated 0.5
 **Each stick, once per session:** sample rate, ppm correction (librtlsdr corrects the tuner and the sample rate
 from it), centre frequency, manual tuner gain (the nearest the tuner offers), the RTL2832's AGC off, bias-T
 off, buffers reset; then `rtlsdr_read_async` on a thread of its own. Stick A is the one whose USB serial sorts
-first. Many sticks share the factory serial 00000001; then which is A can change between starts. That only
-matters if they need different ppm corrections, and then the session refuses to start and says how to change a
-serial (`rtl_eeprom -s 00000002`, with only that stick plugged in; it writes to the stick, so it is yours to do).
+first. Many sticks share the factory serial 00000001; then which is A can change between starts. Up to 3 ppm apart,
+both sticks get the mean of their corrections, and calibration saves one setting for both (TCXO sticks are
+about 1 ppm apart; two measured at 0.4 and 0.6 ppm used to be saved as 0 and 1, and then every start refused).
+Further apart, the session refuses to start and says how to change a serial (`rtl_eeprom -s 00000002`, with only
+that stick plugged in; it writes to the stick, so it is yours to do).
 
 **Two crystals.** The two streams must not drift apart. Every USB transfer is timed when it arrives. The earliest
 arrivals over 5 s, less the samples counted, give each stick's start, and their difference is how far apart the
 halves are. Past 5 ms, one stick's waiting samples are skipped until they agree again. That is a
 **realignment**: counted in the status, not a fault. At a 2 ppm difference it happens every 40 minutes or
 so, and costs nothing: the faster crystal only has more samples. Skipped samples are still lost to the
-channels in that half; a burst under way there loses its part, as with any loss.
+channels in that half; a burst under way there loses its part, as with any loss. Skips that only drop what one
+stick has in excess (its first milliseconds before the other started, or a faster crystal's slow drift) are
+not counted as lost samples: until 1.8.0 they were, which degraded the session and cut checking to one thread.
 
 **Lost samples.** librtlsdr does not report them, so the same timing finds them.
 - **Finding them:** a stick whose arrivals fall 20 ms or more further behind than the other's has lost that many.
@@ -177,7 +200,10 @@ Calibration against the 25 kHz raster only works within about ±25 ppm. Sticks w
 V4: about 1 ppm) are well inside that; for cheaper sticks, measure the ppm first with `rtl_test -p`.
 
 **Drivers.** `deploy/install-rtlsdr.sh` installs Debian's `librtlsdr0` and `rtl-sdr` (2.0.2 on Debian 13; it
-knows the RTL-SDR Blog V4). Their udev rules give the sticks to the plugdev group, which the detector's service
+knows the RTL-SDR Blog V4). An RTL-SDR Blog V4L (R828S tuner, the V4's successor), or a V4 with a librtlsdr older
+than 2.0.0, gets RTL-SDR Blog's own driver instead: built from source at a fixed commit (tag V1.4.0, commit
+`aed0ea1`, checked after the download) into `/usr/local`, which the detector loads first. An older driver takes
+the V4L for an R820T and may hear nothing. `setup.sh doctor` names a V4 or V4L without its driver. Their udev rules give the sticks to the plugdev group, which the detector's service
 has. It blacklists Linux's DVB-T television drivers, which would otherwise take the sticks at power-up;
 librtlsdr also detaches them itself. It reads the sticks' serials from the USB bus, without opening them.
 
@@ -188,11 +214,11 @@ librtlsdr also detaches them itself. It reads the sticks' serials from the USB b
 | Every bound function against `rtl-sdr.h`: Debian 2.0.2's, identical to osmocom's own (`scripts/verify_rtlsdr.py`) | 19 of 19 agree |
 | The real library, 2.0.2-2+b1, unpacked on the Pi but not installed | exports all 19; loads through the bindings; counts 0 sticks; the receiver refuses cleanly |
 | A C stand-in, compiled against the real header with the Pi's gcc (`-Werror`), calling back from C (`scripts/rtlsdr_fake.c`, `rtlsdr_fake_test.py`) | 16 of 16 checks on the Pi and on Windows; below |
-| `tests/test_rtlsdr.py`: settings, errors, timing on a clock of the test's own (alignment, loss, busy computer, drift, silence, overflow at once and one after the other, odd-length transfers, the join's delay), the join against an independent reference, calibration per stick and which captures it takes, the whole detector | 40 tests |
+| `tests/test_rtlsdr.py`: settings, errors, timing on a clock of the test's own (alignment, loss, busy computer, drift, silence, overflow at once and one after the other, odd-length transfers, the join's delay), the join against an independent reference, calibration per stick and which captures it takes, the whole detector | 44 tests |
 | A second engineer's review (24 November 2026), in two rounds, each finding checked by reproducing it first: the join's block edges, the overflow counted twice and then once too few, calibration's choice of captures, the order of setup, the installers' checks, the doctor, the verifiers, a test the updater's copy couldn't load | fixed, each with a test that fails without the fix: `docs/CHANGELOG.md` |
-| Setup's own steps run in bash with stand-ins (`scripts/test_setup_steps.py`): one receiver opening per power-up, calibration of its own capture, the choice saved only after its driver | 11 tests; 9 fail on the branch's first version, and the other 2 are cases it already handled |
+| Setup's own steps run in bash with stand-ins (`scripts/test_setup_steps.py`): one receiver opening per power-up, calibration of its own capture, the choice saved only after its driver | 11 tests; 9 fail on the branch's first version, and the other 2 are cases it already handled (22 since 27 November 2026, with Bluetooth without a server) |
 | Deliberate faults (halves swapped, no comparison with the other stick, too low a loss threshold, never realigning, an odd transfer swapping I and Q): each must make a test fail | all caught |
-| `deploy/install-rtlsdr.sh` in a sandbox on the Pi (`scripts/test_install_rtlsdr.py`); its `--check` run for real, read-only | 7 of 7; ShellCheck clean |
+| `deploy/install-rtlsdr.sh` in a sandbox on the Pi (`scripts/test_install_rtlsdr.py`); its `--check` run for real, read-only | 7 of 7; ShellCheck clean. 12 of 12 on 27 November 2026, with the V4 and V4L driver build |
 
 The C stand-in's checks on the Pi:
 - Every setting reaches each stick, and A is the lower serial.
@@ -253,13 +279,19 @@ per receiver.
 7. The edges of each stick's reach: channels 0, 99, 100 and 199 against a channel in the middle of each half,
    and whether a strong signal just outside 380 or 385 MHz shows up inside.
 8. Power: two sticks draw about 0.6 A between them, besides the SSD and a 4G stick. If `setup.sh doctor`
-   reports undervoltage, a powered USB hub.
+   reports undervoltage, a powered USB hub. On a Pi 5 without a 5 V 5 A supply, the USB ports share 600 mA, and
+   the doctor says so; it also notes a 4G stick on the receivers' USB controller (each side's blue and black
+   port share one), which has cost samples at power-up.
 
 ## Limits
 
 - **The quiet-input fault** ("receiver input very low") compares the input with levels measured on the Airspy
   at its gain. For the other receivers there are no such levels yet, so it reports "unknown" and never raises
   that fault. Measuring them needs the hardware and an antenna.
+- **"Above the receiver alone"** on the apps' Pi screen compares the noise floor with
+  `floor_quiet_db` in the server's `app-config.json`, 82 dB, read on our Airspy. Another receiver's quiet floor
+  differs (an RTL pair's reads about 95 to 105 dB in a simulation), so that figure reads too high until you
+  read your own floor with the antenna hearing nothing and put it there (README: Noise floor).
 - **RTL pair:**
   - 8 bits per sample against the Airspy's 12.
   - Losses under 20 ms are not seen. The ones that are seen are reported up to 5 s late, and marked where they

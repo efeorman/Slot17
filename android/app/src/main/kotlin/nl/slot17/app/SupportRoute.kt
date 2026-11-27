@@ -53,6 +53,8 @@ class SupportRoute(
 
     val unavailable: String?
         get() {
+            // Made on the car computer and kept on the server: without one (1.8.0) there is nowhere to put it.
+            if (client.link == null) return "Support packages go through a server, and none is set up. On the car computer: python3 ~/Slot17/p0/support.py"
             val state = carState() ?: return "The car computer has not reported yet"
             if ("support" !in state.features.orEmpty()) return "The car computer needs software 1.5.0 for this"
             return null
@@ -82,6 +84,7 @@ class SupportRoute(
     }
 
     fun refresh() {
+        if (client.link == null) { packages = emptyList(); return }
         scope.launch {
             client.listSupport().onSuccess { packages = it }
                 .onFailure { fileAction = ActionState(text = "Could not list them: ${it.message}", level = Level.BAD) }

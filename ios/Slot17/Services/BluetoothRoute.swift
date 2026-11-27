@@ -8,6 +8,9 @@ import UIKit
 final class BluetoothRoute: ObservableObject {
     @Published private(set) var carAction = ActionState()
     @Published private(set) var pairing = ActionState()
+    /// The pairing code this phone's key was made from, without a server: shown for the car computer, or another
+    /// phone. Kept in the Keychain with the key.
+    @Published private(set) var code = Keychain.load(account: Keychain.bluetoothCodeAccount)
     @Published private(set) var wanted: Bool?
     /// Bluetooth on this phone: kept between starts.
     @Published private(set) var use = UserDefaults.standard.object(forKey: "slot17.bluetooth.use") as? Bool ?? true
@@ -133,7 +136,8 @@ final class BluetoothRoute: ObservableObject {
     /// on 23 November two set-ups in the car waited on the server until the car computer was home again.
     func startPairing() {
         guard phoneUnavailable == nil else { return }
-        if #available(iOS 18.0, *), feed.key != nil, keyID != nil, let link = link as? BluetoothLink, link.state != .wrongCar {
+        if #available(iOS 18.0, *), feed.key != nil, keyID != nil, let link = link as? BluetoothLink,
+           link.state != .wrongCar || code != nil {
             note("Bluetooth set-up started with the key this phone already has")
             setUse(true)
             if link.isSetUp {
@@ -184,15 +188,56 @@ final class BluetoothRoute: ObservableObject {
             pairing = .init(id: id, text: "The car computer's answer could not be read", level: .bad)
             return
         }
+        Keychain.delete(account: Keychain.bluetoothCodeAccount)     // a key from the server comes from no code
+        code = nil
+        keep(key)
+        connectOrPick(id)
+    }
+
+    // MARK: Without a server (27 November 2026)
+
+    /// Makes a pairing code and this phone's key from it. The code goes to the car computer (slot17.txt, or the
+    /// setup); then Set up finds the car computer, with no server and no internet.
+    func makeCode() {
+        let made = PairingCode.make()
+        guard let key = PairingCode.key(made) else { return }
+        keep(key, code: made)
+        if #available(iOS 18.0, *), let link = link as? BluetoothLink, link.isSetUp { link.reconnect() }   // with the new key
+        pairing = .init(text: "Code made. Give it to the car computer (slot17.txt, or the setup), start it, then tap Set up.", level: .ok)
+        note("Bluetooth pairing code made on this phone")
+    }
+
+    /// Takes a pairing code the car computer's setup showed. Returns why not, or nil when it was taken.
+    func useCode(_ typed: String) -> String? {
+        guard phoneUnavailable == nil else { return phoneUnavailable }
+        guard let key = PairingCode.key(typed), let raw = PairingCode.bytes(typed) else {
+            return "That isn't the code: check it for a typing error"
+        }
+        keep(key, code: PairingCode.format(raw))
+        note("Bluetooth pairing code typed in")
+        connectOrPick("bluetooth-code")
+        return nil
+    }
+
+    private func keep(_ key: Data, code made: String? = nil) {
         _ = Keychain.save(BluetoothFormat.hex(key), account: Keychain.bluetoothAccount)
+        if let made {
+            _ = Keychain.save(made, account: Keychain.bluetoothCodeAccount)
+            code = made
+        }
         keyID = BluetoothFormat.keyID(key)
         UserDefaults.standard.set(keyID, forKey: "slot17.bluetooth.keyID")
         feed.key = key
+        objectWillChange.send()
+        if #available(iOS 18.0, *), let link = link as? BluetoothLink { link.expectedKeyID = keyID }
+    }
+
+    private func connectOrPick(_ id: String) {
         guard #available(iOS 18.0, *), let link = link as? BluetoothLink else { return }
-        link.expectedKeyID = keyID
         setUse(true)
-        // Already chosen in the picker: the new key is all it needed (1.5.1). The picker again only for a new car.
-        if link.isSetUp && link.state != .wrongCar {
+        // Already chosen in the picker: the new key is all it needed (1.5.1). The picker again only for a new car;
+        // with a pairing code, the car computer chosen before is the one it was given to.
+        if link.isSetUp && (link.state != .wrongCar || code != nil) {
             pairing = .init(id: id, text: "Set up: connecting to the car computer", level: .ok)
             link.reconnect()
             return
@@ -227,8 +272,10 @@ final class BluetoothRoute: ObservableObject {
     func remove() {
         if #available(iOS 18.0, *), let link = link as? BluetoothLink { link.forget() }
         Keychain.delete(account: Keychain.bluetoothAccount)
+        Keychain.delete(account: Keychain.bluetoothCodeAccount)
         UserDefaults.standard.removeObject(forKey: "slot17.bluetooth.keyID")
         keyID = nil
+        code = nil
         feed.key = nil
         pairing = .init(text: "Removed from this phone", level: .ok)
         note("Bluetooth removed from this phone")
@@ -294,7 +341,9 @@ final class BluetoothRoute: ObservableObject {
         case .connected:
             return feed.heard(now) ? String(format: "Connected, last frame %.0f s ago", now - feed.lastFrameAt) : "Connected"
         case .connecting: return "Waiting for the car computer to be in range"
-        case .wrongCar: return "A different car computer answered: set it up again"
+        case .wrongCar:
+            return code != nil ? "The car computer has another key: give it this phone's pairing code, then Set up again"
+                               : "A different car computer answered: set it up again"
         case .bluetoothOff: return "Bluetooth is off on this phone"
         case .notSetUp: return "Not set up on this phone"
         case .off: return "Not connected"

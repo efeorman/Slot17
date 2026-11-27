@@ -33,7 +33,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,6 +46,14 @@ import nl.slot17.core.Level
 import nl.slot17.core.MeterColour
 
 /** The iPhone app's colours (ios/Slot17/UI/Theme.swift), so both apps look like one product. */
+/** The helicopter mark for an aircraft's channel (1.8.0), from core's Aircraft.GLYPH: the iPhone and the web page draw
+ *  the same path. White, so an Icon's tint colours it. */
+val AircraftIcon: ImageVector by lazy {
+    ImageVector.Builder("aircraft", 24.dp, 24.dp, 24f, 24f)
+        .addPath(addPathNodes(nl.slot17.core.Aircraft.GLYPH), fill = SolidColor(Color.White))
+        .build()
+}
+
 object C {
     val background = Color(0xFF0B0E13)
     val panel = Color(0xFF131821)

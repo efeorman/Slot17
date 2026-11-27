@@ -172,9 +172,13 @@ final class LiveTileBuilderTests: XCTestCase {
     }
 
     func testToneAndLevelMeanWhatTheMetersMean() {
+        // Written for a chime from 22 dB; the default is 35 since 27 November 2026, as the server's.
+        var from22 = AlertSettings()
+        from22.red = 22
         let cases: [(Double, LiveTileState.Tone, Int)] = [(55, .strong, 10), (30, .chime, 6), (15, .silent, 3), (9, .weak, 1)]
+        XCTAssertEqual(LiveTileBuilder.make(input(db: 30)).tone, .silent, "30 dB is below the default 35")
         for (db, tone, level) in cases {
-            let s = LiveTileBuilder.make(input(db: db))
+            let s = LiveTileBuilder.make(input(db: db, settings: from22))
             XCTAssertEqual(s.tone, tone, "\(db) dB")
             XCTAssertEqual(s.level, level, "\(db) dB")
             XCTAssertEqual(s.strength, Int(db))

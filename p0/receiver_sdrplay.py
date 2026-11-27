@@ -26,6 +26,7 @@ hardware and gap finding switches itself off, saying so in the status, rather th
 degraded.
 """
 import ctypes
+import time
 
 import numpy as np
 
@@ -38,6 +39,7 @@ CHECK_CALLBACKS = 200            # judge firstSampleNum over the first ~200 call
 SUSPECT_SHARE = 0.9              # ... and give up on it if this share of them looked like gaps
 FLUSH_SAMPLES = 16384            # interleave and hand to the ring every this many samples (2.7 ms at 6 MSPS)
 WAITING = 1 << 17                # room in the waiting arrays, samples per plane
+SERVICE_WAIT_S = 45.0            # at power-up: how long SDRplay's service may take to answer and find the receiver
 # Receivers whose Uninit failed: the API's thread may still call them, so their callbacks, buffers and sink stay
 # alive until the process ends (found in review, 24 November 2026).
 UNSTOPPED = []
@@ -47,7 +49,7 @@ class Receiver:
     """One SDRplay session: find the device, configure it, stream, and end it once."""
 
     def __init__(self, kind="rsp1b", fs=SAMPLE_RATE, centre_hz=382.5e6, gain=None, sink=None, lib=None,
-                 transfer="isoch"):
+                 transfer="isoch", clock=None, sleep=None):
         if kind not in WANTED_HW:
             raise ReceiverError(f"{kind!r} is not an SDRplay receiver this module drives")
         if int(fs) != SAMPLE_RATE:
@@ -65,6 +67,7 @@ class Receiver:
         if transfer not in ("isoch", "bulk"):
             raise ReceiverError(f"transfer mode {transfer!r} is neither isoch nor bulk")
         self.transfer = transfer
+        self.clock, self.sleep = clock or time.monotonic, sleep or time.sleep
         self.gain = (self.lna_state, self.gr_db)
         self.sink = sink
         # Loaded now, where the Airspy's library is loaded too: a missing API fails before the session starts.
@@ -91,7 +94,7 @@ class Receiver:
         self._closing = False                # set by close(): a callback after it hands nothing on
         self.counters = {"callbacks": 0, "gaps": 0, "lost_samples": 0, "resets": 0, "parameter_changes": 0,
                          "overloads": 0, "overload_now": False, "gain_events": 0, "samples_per_packet": None,
-                         "gap_detection": "on", "api_errors": [], "late_callbacks": 0}
+                         "gap_detection": "on", "api_errors": [], "late_callbacks": 0, "service_waits": 0}
         # Kept on the instance for the whole session: the API calls them from its own thread.
         self._stream_cb = S.StreamCallback(self._stream)
         self._event_cb = S.EventCallback(self._event)
@@ -121,32 +124,53 @@ class Receiver:
 
     def open(self):
         lib = self.lib
-        self._check(lib.sdrplay_api_Open(), "sdrplay_api_Open")
+        # At a car's power-up the detector can be quicker than SDRplay's service, which may not answer yet, or not
+        # have found the receiver yet. Asking again opens nothing, so both are waited for, up to SERVICE_WAIT_S.
+        # Until 26 November 2026 the first answer counted, and the whole drive went without detection (found in
+        # review).
+        deadline = self.clock() + SERVICE_WAIT_S
+        code = lib.sdrplay_api_Open()
+        while code == S.SERVICE_NOT_RESPONDING and self.clock() < deadline:
+            self.counters["service_waits"] += 1
+            self.sleep(1.0)
+            code = lib.sdrplay_api_Open()
+        self._check(code, "sdrplay_api_Open")
         self.api_open = True
         version = ctypes.c_float(0.0)
         self._check(lib.sdrplay_api_ApiVersion(ctypes.byref(version)), "sdrplay_api_ApiVersion")
         if abs(version.value - S.API_VERSION) > 1e-3:
             raise ReceiverError(f"SDRplay API {version.value:.2f} is installed; Slot17 was checked against "
                                 f"{S.API_VERSION:.2f} only. Install {S.API_VERSION:.2f}: bash setup.sh car --receiver {self.kind}")
-        self._check(lib.sdrplay_api_LockDeviceApi(), "sdrplay_api_LockDeviceApi")
-        try:
-            count = ctypes.c_uint(0)
-            self._check(lib.sdrplay_api_GetDevices(self.devs, ctypes.byref(count), S.MAX_DEVICES),
-                        "sdrplay_api_GetDevices")
-            found = [self.devs[i] for i in range(min(count.value, S.MAX_DEVICES))]
-            want = WANTED_HW[self.kind]
-            # One the API marks free (valid) first; another program may hold one of the same model.
-            mine = [d for d in found if d.hwVer == want]
-            pick = next((d for d in mine if d.valid), mine[0] if mine else None)
-            if pick is None:
-                seen = ", ".join(f"{S.HW_NAMES.get(d.hwVer, d.hwVer)} {d.SerNo.decode(errors='replace')}"
-                                 for d in found) or "no SDRplay receiver at all"
-                raise ReceiverError(f"no {name(self.kind)} found; the SDRplay API sees: {seen}")
-            self.device = pick               # a view into self.devs, as SDRplay's example uses &devs[i]
-            self._check(lib.sdrplay_api_SelectDevice(ctypes.byref(self.device)), "sdrplay_api_SelectDevice")
-            self.selected = self.opened = True
-        finally:
-            self._noted(lib.sdrplay_api_UnlockDeviceApi(), "sdrplay_api_UnlockDeviceApi")
+        while True:
+            self._check(lib.sdrplay_api_LockDeviceApi(), "sdrplay_api_LockDeviceApi")
+            try:
+                count = ctypes.c_uint(0)
+                self._check(lib.sdrplay_api_GetDevices(self.devs, ctypes.byref(count), S.MAX_DEVICES),
+                            "sdrplay_api_GetDevices")
+                found = [self.devs[i] for i in range(min(count.value, S.MAX_DEVICES))]
+                want = WANTED_HW[self.kind]
+                # One the API marks free (valid); another program may hold one of the same model.
+                mine = [d for d in found if d.hwVer == want]
+                pick = next((d for d in mine if d.valid), None)
+                if pick is None and self.clock() < deadline:
+                    pass                     # not found, or not free, yet: ask again below, after unlocking
+                elif pick is None and mine:
+                    raise ReceiverError(f"the {name(self.kind)} is held by another program, or SDRplay's service is "
+                                        "stuck: close other SDR programs, or run: sudo systemctl restart sdrplay")
+                elif pick is None:
+                    seen = ", ".join(f"{S.HW_NAMES.get(d.hwVer, d.hwVer)} {d.SerNo.decode(errors='replace')}"
+                                     for d in found) or "no SDRplay receiver at all"
+                    raise ReceiverError(f"no {name(self.kind)} found; the SDRplay API sees: {seen}")
+                else:
+                    self.device = pick       # a view into self.devs, as SDRplay's example uses &devs[i]
+                    self._check(lib.sdrplay_api_SelectDevice(ctypes.byref(self.device)), "sdrplay_api_SelectDevice")
+                    self.selected = self.opened = True
+            finally:
+                self._noted(lib.sdrplay_api_UnlockDeviceApi(), "sdrplay_api_UnlockDeviceApi")
+            if self.selected:
+                break
+            self.counters["service_waits"] += 1
+            self.sleep(1.0)
         params = ctypes.POINTER(S.DeviceParamsT)()
         self._check(lib.sdrplay_api_GetDeviceParams(self.device.dev, ctypes.byref(params)),
                     "sdrplay_api_GetDeviceParams")

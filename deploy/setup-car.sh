@@ -16,6 +16,8 @@
 #     --no-display          don't connect to a display server
 #     --bluetooth / --no-bluetooth  send alerts to the app over Bluetooth too, or not
 #     --bluetooth-name NAME         the name phones show for this car computer (default Slot17)
+#     --bluetooth-code CODE         the pairing code the app shows (Bluetooth without a server); or in
+#                                   SLOT17_BLUETOOTH_CODE, which keeps it out of the process list
 #     --notify / --no-notify        set up phone notifications through Pushover, or not
 #     --receiver KIND       airspy (Airspy Mini), rsp1b or rsp1a (SDRplay), rtlsdr2 (two RTL-SDRs);
 #                           without it: the one set up before, else the one found on USB
@@ -33,7 +35,8 @@ PROJECT="$(cd "$HERE/.." && pwd)"
 . "$HERE/common.sh"
 
 SERVER=""; PI_KEY=""; HOTSPOT=""; HOTSPOT_STEP=ask; UPDATES=ask; DISPLAY_LINK=ask; NOTIFY=ask; CALIBRATE=ask; START=ask
-BLUETOOTH=ask; BT_NAME=""; SCREEN=keep
+BLUETOOTH=ask; BT_NAME=""; SCREEN=keep; BT_CODE="${SLOT17_BLUETOOTH_CODE:-}"
+[ -z "$BT_CODE" ] || BLUETOOTH=yes
 RECEIVER=""; ACCEPT_SDRPLAY=0
 AUTOSTART=1; NO_SERVICES=0; CHECK=0
 while [ $# -gt 0 ]; do
@@ -49,6 +52,7 @@ while [ $# -gt 0 ]; do
         --bluetooth) BLUETOOTH=yes ;;
         --no-bluetooth) BLUETOOTH=no ;;
         --bluetooth-name) BT_NAME="$2"; [ "$BLUETOOTH" = no ] || BLUETOOTH=yes; shift ;;
+        --bluetooth-code) BT_CODE="$2"; BLUETOOTH=yes; shift ;;
         --screen) SCREEN=yes ;;
         --no-screen) SCREEN=no ;;
         --notify) NOTIFY=yes ;;
@@ -277,7 +281,8 @@ elif [ "$UPDATES" = no ]; then
     note "off. Update by running the install line again when the app says there's a new version."
 else
     if [ "$UPDATES" = ask ] && [ ! -f "$KEY_FILE" ]; then
-        echo "  The car computer can install new Slot17 versions by itself, at a start, from your server."
+        echo "  The car computer can install new Slot17 versions by itself, at a start: from your server, or"
+        echo "  from Slot17's GitHub releases without one, whenever it has internet."
         echo "  It only takes a version signed by the Slot17 team, and tests it before it replaces anything."
         ask_yes "Install updates by themselves (recommended)?" y && UPDATES=yes || UPDATES=no
     fi
@@ -286,9 +291,18 @@ else
     else
         mkdir -p "$(dirname "$KEY_FILE")"
         printf '%s\n' "$TEAM_KEY" > "$KEY_FILE"
-        ok "on: signed updates from your server install at the next start"
+        ok "on: signed updates install at the next start (from your server, or from GitHub without one)"
     fi
 fi
+
+# The publisher feeds the server, Bluetooth and the car computer's own screen; any of them installs it, once.
+PUBLISHER_DONE=0
+install_publisher() {
+    [ "$PUBLISHER_DONE" = 0 ] || return 0
+    sudo bash "$HERE/install-publisher.sh" --user "$RUN_USER" >/dev/null
+    ok "publisher installed; it runs whenever the detector runs. The phone can stop the detector and power off this computer, nothing else."
+    PUBLISHER_DONE=1
+}
 
 # --- 8. display server --------------------------------------------------------
 step "Connecting to your display server"
@@ -298,8 +312,9 @@ if [ "$DISPLAY_LINK" = ask ]; then
     elif [ "$YES" = 1 ]; then
         DISPLAY_LINK=no
     else
-        echo "  The phone app and web page get their data from a display server. Set that up first"
-        echo "  with: bash setup.sh server (on the server). It prints an address and a key for this step."
+        echo "  A display server lets the app and the web page reach this car computer over the internet, from"
+        echo "  anywhere. Without one, the app talks to it over Bluetooth in the car (set up with a pairing code)."
+        echo "  A server comes from /server create in the Discord, or bash setup.sh server on your own."
         ask_yes "Connect this car computer to a display server now?" y && DISPLAY_LINK=yes || DISPLAY_LINK=no
     fi
 fi
@@ -331,10 +346,9 @@ json.dump({"url": os.environ["SLOT17_URL"], "token": os.environ["SLOT17_TOKEN"]}
             note "the server didn't answer at $SERVER right now. Check the address and its firewall; the car computer keeps trying while it runs."
         fi
     fi
-    sudo bash "$HERE/install-publisher.sh" --user "$RUN_USER" >/dev/null
-    ok "publisher installed; it runs whenever the detector runs. The phone can stop the detector and power off this computer, nothing else."
+    install_publisher
 else
-    note "skipped. You can connect later by running the setup again."
+    note "skipped: no display server. The app can still use Bluetooth in the car. You can connect one later by running the setup again."
 fi
 
 # --- 9. Bluetooth -------------------------------------------------------------
@@ -343,15 +357,30 @@ if [ "$BLUETOOTH" != no ] && ! python3 -B "$PROJECT/p0/bluetooth_link.py" adapte
     note "no Bluetooth adapter found (or BlueZ isn't running), so this is skipped."
     BLUETOOTH=none
 fi
-if { [ "$BLUETOOTH" = ask ] || [ "$BLUETOOTH" = yes ]; } && [ "$DISPLAY_LINK" != yes ]; then
-    note "skipped: the app gets this car computer's Bluetooth key through the display server, so connect that first."
+# Without a display server, the app gets the link's key as a pairing code the person carries over (since 27
+# November 2026; before, Bluetooth needed a server to set up). Unattended with neither, there is no way to set a
+# phone up, so it is skipped with a word on how.
+# A key already here (a setup run again) is kept: phones set up with it go on working (found in review, 27 November).
+HAS_KEY=no
+if [ "$BLUETOOTH" != none ] && python3 -B "$BT_SETTINGS" --show 2>/dev/null \
+        | python3 -c 'import json, sys; sys.exit(0 if json.load(sys.stdin).get("key_id") else 1)' 2>/dev/null; then
+    HAS_KEY=yes
+fi
+if [ "$BLUETOOTH" = yes ] && [ "$DISPLAY_LINK" != yes ] && [ -z "$BT_CODE" ] && [ "$YES" = 1 ] && [ "$HAS_KEY" = no ]; then
+    note "skipped: without a display server, Bluetooth needs the pairing code the app shows (Settings, Bluetooth to the car computer, Without a server, Make a pairing code). Run the setup again with --bluetooth and type it in."
     BLUETOOTH=none
 fi
 if [ "$BLUETOOTH" = ask ]; then
-    echo "  Besides the display server, the car computer can talk to the Slot17 app straight over"
-    echo "  Bluetooth: faster, and the app then works in the car without internet. It is visible to"
-    echo "  Bluetooth scanners nearby, and a phone nearby can read what it sends (signed, not encrypted)."
-    ask_yes "Send alerts over Bluetooth too?" y && BLUETOOTH=yes || BLUETOOTH=no
+    if [ "$DISPLAY_LINK" = yes ]; then
+        echo "  Besides the display server, the car computer can talk to the Slot17 app straight over"
+        echo "  Bluetooth: faster, and the app then works in the car without internet."
+    else
+        echo "  Without a display server, Bluetooth is how the Slot17 app gets everything from this car computer,"
+        echo "  in the car, without internet."
+    fi
+    echo "  It is visible to Bluetooth scanners nearby, and a phone nearby can read what it sends (signed, not"
+    echo "  encrypted); only a phone with its key can change anything."
+    ask_yes "Use Bluetooth to the app?" y && BLUETOOTH=yes || BLUETOOTH=no
 fi
 if [ "$BLUETOOTH" = yes ]; then
     current="$(python3 -B "$BT_SETTINGS" --show | python3 -c 'import json, sys; print(json.load(sys.stdin)["name"])')"
@@ -360,11 +389,32 @@ if [ "$BLUETOOTH" = yes ]; then
         BT_NAME="$(ask_text "Name (Enter for $current):")"
         BT_NAME="${BT_NAME:-$current}"
     fi
-    if ! python3 -B "$BT_SETTINGS" --on --name "$BT_NAME" >/dev/null; then
+    if ! python3 -B "$BT_SETTINGS" --name "$BT_NAME" >/dev/null; then
         note "\"$BT_NAME\" can't be used as a name; using $current. Rename it in the app or with --bluetooth-name."
         BT_NAME="$current"
+    fi
+    MADE_CODE=""
+    USED_CODE=no
+    if [ "$DISPLAY_LINK" != yes ] && [ -z "$BT_CODE" ] && [ "$YES" != 1 ]; then
+        echo "  The app and this car computer share a key, made from a pairing code. In the app: Settings,"
+        echo "  Bluetooth to the car computer, Without a server, Make a pairing code: it shows a code to type here."
+        if [ "$HAS_KEY" = yes ]; then
+            BT_CODE="$(ask_text "Pairing code from the app (Enter keeps the key the phones already use):")"
+        else
+            BT_CODE="$(ask_text "Pairing code from the app (Enter to make one here and type it into the app):")"
+        fi
+    fi
+    if [ -n "$BT_CODE" ]; then
+        printf '%s\n' "$BT_CODE" | python3 -B "$BT_SETTINGS" --code - --name "$BT_NAME" >/dev/null \
+            || die "that pairing code has a typing error: check it against the one the app shows, then run the setup again."
+        ok "the key is the one made from the app's pairing code"
+        USED_CODE=yes
+    elif [ "$DISPLAY_LINK" != yes ] && [ "$HAS_KEY" = no ]; then
+        MADE_CODE="$(python3 -B "$BT_SETTINGS" --new-code --name "$BT_NAME")" || die "couldn't make a pairing code"
+    else
         python3 -B "$BT_SETTINGS" --on --name "$BT_NAME" >/dev/null
     fi
+    unset BT_CODE SLOT17_BLUETOOTH_CODE
     # BlueZ as a GATT client made phones ask to pair on every connection; Slot17 needs it only as a server.
     if [ -f /etc/bluetooth/main.conf ]; then
         if said="$(sudo python3 -B "$BT_SETTINGS" --gatt-client-off)"; then
@@ -378,7 +428,21 @@ if [ "$BLUETOOTH" = yes ]; then
     fi
     python3 -B "$PROJECT/p0/bluetooth_link.py" adapter --name "$BT_NAME" >/dev/null 2>&1 \
         || note "the adapter keeps its old name until the detector starts; then it takes \"$BT_NAME\"."
-    ok "on, shown as \"$BT_NAME\". In the app: Settings, Bluetooth to the car computer, Set up."
+    if [ -n "$MADE_CODE" ]; then
+        ok "on, shown as \"$BT_NAME\". In the app: Settings, Bluetooth to the car computer, Without a server,"
+        echo "  type this pairing code under Code from the car computer, then Use the code. It is shown again with:"
+        echo "  python3 ~/Slot17/p0/bluetooth_config.py --show-code"
+        echo
+        echo "      ${BOLD}$MADE_CODE${RESET}"
+        echo
+    elif [ "$USED_CODE" = yes ]; then
+        ok "on, shown as \"$BT_NAME\", with the key made from the app's pairing code. In the app: Settings, Bluetooth to the car computer, Set up."
+    elif [ "$DISPLAY_LINK" = yes ]; then
+        ok "on, shown as \"$BT_NAME\". In the app: Settings, Bluetooth to the car computer, Set up."
+    else
+        ok "on, shown as \"$BT_NAME\", with the key the phones already use."
+    fi
+    [ "$DISPLAY_LINK" = yes ] || install_publisher
 elif [ "$BLUETOOTH" = no ]; then
     if [ -f "$HOME/.config/slot17-bluetooth.json" ]; then
         python3 -B "$BT_SETTINGS" --off >/dev/null && ok "switched off"
@@ -406,11 +470,9 @@ fi
 # --- 10b. the car computer's own screen (only when asked) ----------------------
 if [ "$SCREEN" = yes ]; then
     step "The car computer's own screen"
-    # The screen's data comes from the publisher, which is installed with the display server connection (found in
-    # review, 26 November 2026: a screen set up without one opened and showed no data, with no word why).
-    if [ "$DISPLAY_LINK" != yes ] && [ ! -f "$DISPLAY_CONFIG" ]; then
-        note "the screen shows the detector's data once this car computer is connected to a display server: the part that feeds the screen comes with that connection. Run the setup again with --server ADDRESS --pi-key KEY (from step 2 of the README)."
-    fi
+    # The screen's data comes from the publisher; since 27 November 2026 it runs without a display server too
+    # (until then a screen set up without one showed no data).
+    install_publisher
     sudo bash "$HERE/install-screen.sh" --user "$RUN_USER"
 elif [ "$SCREEN" = no ] && [ -f /etc/systemd/system/slot17-kiosk.service ]; then
     step "The car computer's own screen"
@@ -457,13 +519,22 @@ if [ "$CALIBRATE" = yes ]; then
     # (until 24 November 2026 it measured the newest files, whatever made them).
     CAL_TAG="downlink-calibration-$(date +%s)-$$"
     CAL_DIR="$(python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import paths; print(paths.IQ_DIR)' "$PROJECT/p0")"
-    if python3 -B "$PROJECT/p0/capture.py" --freq 392.5 --secs 4 --rate 3 --lna 12 --mixer 12 --vga 12 \
-            --receiver "${RECEIVER:-airspy}" --tag "$CAL_TAG" >/dev/null 2>&1 \
+    CAPTURE=(python3 -B "$PROJECT/p0/capture.py" --freq 392.5 --secs 4 --rate 3 --lna 12 --mixer 12 --vga 12
+             --receiver "${RECEIVER:-airspy}" --tag "$CAL_TAG")
+    # Just added to plugdev by install-rtlsdr.sh, this shell doesn't have the group yet, so the sticks wouldn't
+    # open; sg gives it now (found in review, 26 November 2026).
+    if [ "${RECEIVER:-airspy}" = rtlsdr2 ] && ! id -nG | grep -qw plugdev \
+            && getent group plugdev 2>/dev/null | grep -qw "$RUN_USER"; then
+        run_capture() { sg plugdev -c "$(printf '%q ' "${CAPTURE[@]}")"; }
+    else
+        run_capture() { "${CAPTURE[@]}"; }
+    fi
+    if run_capture >/dev/null 2>&1 \
        && CAL_FILES=("$CAL_DIR"/*_"$CAL_TAG"_*.iq) && [ -f "${CAL_FILES[0]}" ] \
        && (cd "$PROJECT/p0" && python3 -B calibrate.py "${CAL_FILES[@]}" 2>&1 | tail -4); then
         ok "calibrated; saved in p0/calibration.local.json"
     else
-        note "calibration didn't work. Common reasons: no TETRA base stations in 390-395 MHz where you are, or the antenna isn't connected. The detector still runs, using the example calibration. If the receiver stops responding, unplug it and plug it back in."
+        note "calibration didn't work. Common reasons: no TETRA base stations in 390-395 MHz where you are, or the antenna isn't connected. The detector still runs, without a frequency correction. If the receiver stops responding, unplug it and plug it back in."
     fi
 fi
 

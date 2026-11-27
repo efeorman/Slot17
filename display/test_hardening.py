@@ -511,8 +511,12 @@ class Redaction(unittest.TestCase):
         for line in (f'"token": "{secret}"', f"token={secret}", f"Authorization: Bearer {secret}", f'"user": "{secret}"',
                      f"PUSHOVER_USER={secret}", f"GET /?key={secret} HTTP/1.1", f"Cookie: s17={secret}", f'"viewer_key":"{secret}"',
                      f'"pi_status_key": "{secret}"', f"password {secret}", f"X-Api-Key: {secret}", f"user_key={secret}",
-                     f"password='{secret}'", f"{{'token': '{secret}'}}", f"{{'user': '{secret}'}}"):
+                     f"password='{secret}'", f"{{'token': '{secret}'}}", f"{{'user': '{secret}'}}",
+                     # Bluetooth's pairing code (1.8.0) is as good as its key.
+                     f"bluetooth_code={secret}", f'"pairing code": "{secret}"', f"SLOT17_BLUETOOTH_CODE={secret}"):
             self.assertNotIn(secret, pub.redact(line), line)
+        code = "000G-40R4-0M30-E209-185G-R38E-1W1"      # on its own, as the setup prints it
+        self.assertNotIn(code, pub.redact(f"  type this pairing code:      {code}"))
 
     def test_ordinary_lines_stay_readable(self):
         line = "detector stop queued by operator command; windows 40"

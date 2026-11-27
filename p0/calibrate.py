@@ -141,7 +141,7 @@ def choose_captures(files, target):
     pair = None
     if target == "rtlsdr2" and groups[chosen[-1]][1] is not None:
         applied, handover = groups[chosen[-1]][1]
-        pair = {"files": chosen, "applied_ppm": applied, "handover_hz": handover}
+        pair = {"files": chosen, "applied_ppm": applied, "handover_hz": handover, "serials": list(newest[1])}
     return chosen, pair, [f for f in files if f not in chosen]
 
 
@@ -180,6 +180,23 @@ def calibrate_pair(pair, rows, settings=None):
         out["left_ppm"].append(round(setting - error, 3))       # it will read high by this much
         print(f"  stick {label}: {len(half)} carrier(s) read {m:+.2f} ppm with ppm {applied} set: "
               f"its crystal is {error:+.2f} ppm off, so ppm_{label.lower()} = {setting}")
+    # Two sticks with one serial can swap places between starts, so they share one setting: the mean of their
+    # errors (found in review, 26 November 2026: two good sticks measured 0.4 and 0.6 ppm, were saved as 0 and 1,
+    # and the next start refused). A pair whose errors are far apart is told how to give one another serial.
+    serials = pair.get("serials") or []
+    errors = [e for e in out["error_ppm"] if e is not None]
+    if len(serials) == 2 and serials[0] == serials[1] and errors and len(set(out["setting_ppm"])) > 1:
+        mean = float(np.mean(errors))
+        shared = int(round(mean))
+        out["setting_ppm"] = [shared, shared]
+        out["left_ppm"] = [round(shared - e, 3) if e is not None else None for e in out["error_ppm"]]
+        out["same_serial"] = True
+        print(f"  both sticks have serial {serials[0]!r}, so they can swap places between starts: both get "
+              f"ppm {shared}, the mean")
+        if len(errors) == 2 and abs(errors[0] - errors[1]) > 3:
+            print(f"  their crystals are {abs(errors[0] - errors[1]):.1f} ppm apart, which costs reception when "
+                  "they share one setting. Give one another serial (only that stick plugged in: rtl_eeprom -s "
+                  "00000002, then unplug it and plug it back in) and calibrate again")
     left = [x for x in out["left_ppm"] if x is not None]
     try:
         written = receiver.configured(settings) == "rtlsdr2"

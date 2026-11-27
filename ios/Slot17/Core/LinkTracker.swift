@@ -31,6 +31,14 @@ final class LinkTracker {
     static let clockRefresh = 10.0
     static let reopenAfter = 9.0
     static let clearAfter = 20.0
+    /// Bluetooth's data goes first, for the meters and the Live Activity, while it is at most this old: it comes
+    /// straight from the car computer, so the server's copy of the same data can only be later. Past this (a
+    /// radio link that stalled) the server's, while that is fresh. Until 1.8.0 the server's always went first,
+    /// and a slow server route showed "Car data late" with Bluetooth connected (27 November 2026).
+    static let bluetoothFirstWithin = 4.0
+    static func bluetoothFirst(live: Bool, age: Double, serverFresh: Bool) -> Bool {
+        live && (!serverFresh || age <= bluetoothFirstWithin)
+    }
 
     struct ClockSync { let boot: String; let upper: Double; let at: Double }
     enum Acceptance { case refused, repeated, fresh, freshAndNewScope }

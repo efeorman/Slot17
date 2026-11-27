@@ -23,6 +23,8 @@ final class SupportRoute: ObservableObject {
     var progress: String? { SupportWords.progress(carState()?.support) }
 
     var unavailable: String? {
+        // Made on the car computer and kept on the server: without one (1.8.0) there is nowhere to put it.
+        if client?.link == nil { return "Support packages go through a server, and none is set up. On the car computer: python3 ~/Slot17/p0/support.py" }
         guard let state = carState() else { return "The car computer has not reported yet" }
         if !(state.features ?? []).contains("support") { return "The car computer needs software 1.5.0 for this" }
         return nil
@@ -56,6 +58,7 @@ final class SupportRoute: ObservableObject {
     }
 
     func refresh() {
+        guard client?.link != nil else { packages = []; return }
         client?.listSupport { [weak self] result in
             switch result {
             case .success(let rows): self?.packages = rows

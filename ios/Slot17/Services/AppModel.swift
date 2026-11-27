@@ -46,6 +46,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var diagnostics: [(String, String)] = []
     @Published private(set) var hasLink = false
     @Published private(set) var linkHost = ""
+    /// The link is https: encrypted all the way (a hosted server), unlike the plain HTTP of an own server.
+    @Published private(set) var linkIsHttps = false
     @Published private(set) var banner = ""
     @Published private(set) var style = DisplayStyle()
     @Published private(set) var configStatus = "Built-in settings"
@@ -311,6 +313,7 @@ final class AppModel: ObservableObject {
         let link = Keychain.load().flatMap(ServerLink.parse)
         client.configure(link)
         hasLink = link != nil
+        linkIsHttps = link?.base.scheme?.lowercased() == "https"
         if let link, let host = link.base.host {
             linkHost = link.base.port.map { "\(host):\($0)" } ?? host
         } else {
@@ -677,11 +680,18 @@ final class AppModel: ObservableObject {
         let bluetoothLive = !demo && bluetooth.feed.live(now)
         var heardAt: Date?
         var burstID: String?
-        if let top = meters.first, let frame = tracker.frame,
+        if let top = meters.first, metersOverBluetooth,
+           let channel = bluetooth.feed.piState(base: nil, now: now)?.channels.first(where: { $0.ch == top.ch }) {
+            heardAt = Date().addingTimeInterval(-channel.age)       // aged since it came over Bluetooth
+            burstID = channel.burstID
+        } else if let top = meters.first, let frame = tracker.frame,
            let channel = frame.message.state?.channels.first(where: { $0.ch == top.ch }) {
             heardAt = Date().addingTimeInterval(-(channel.age + tracker.elapsed(frame, now)))
             burstID = channel.burstID
         }
+        // How late the car's data is, by the fresher route: a slow server never calls Bluetooth's data late.
+        var carAge: Double? = tracker.frame != nil ? tracker.carAge(now) : nil
+        if bluetoothLive { carAge = min(carAge ?? .infinity, bluetooth.feed.dataAge(now)) }
         return LiveTileBuilder.make(.init(
             linkLost: !carFresh && !bluetoothLive && !demo, detectorRunning: tracker.detectorActive || bluetoothLive || demo,
             receiverQuiet: receiverQuiet, top: meters.first,
@@ -691,7 +701,7 @@ final class AppModel: ObservableObject {
             topHeardAt: heardAt, topBurstID: burstID, previous: liveTile?.lastSent,
             software: softwareNote(now),
             othersActive: max(0, meters.count + moreChannels - 1),
-            carAge: tracker.frame != nil ? tracker.carAge(now) : nil))
+            carAge: carAge))
     }
 
     /// The tile's word about the car computer's software, for a few minutes after its state changes.
@@ -719,7 +729,7 @@ final class AppModel: ObservableObject {
     private func updateLiveTile(_ now: Double) {
         guard let liveTile else { return }
         defer { if liveTileStatus != liveTile.status { liveTileStatus = liveTile.status } }
-        let wanted = settings.liveActivity && (hasLink || demo) && audio.armed
+        let wanted = settings.liveActivity && (hasLink || demo || bluetooth.paired) && audio.armed
         guard wanted else {
             if liveTile.isRunning {
                 liveTile.end(final: endedTileState(now),
@@ -876,16 +886,18 @@ final class AppModel: ObservableObject {
     /// Once the car has been gone for 10 minutes, the drive is probably over: send its data once,
     /// so sightings and alerts can be analysed with their places without anyone remembering to.
     private func checkDriveEnded(_ now: Double) {
-        guard hasLink, !demo else { return }
+        guard !demo else { return }
         let carLive = tracker.frame != nil && tracker.carAge(now) <= LinkTracker.carStale || bluetooth.feed.live(now)
         if carLive {
             carGoneSince = nil
             driveUploadDoneThisStop = false
             return
         }
-        guard tracker.frame != nil, !driveUploadDoneThisStop else { return }
+        // Heard this time by either route; Bluetooth alone without a server (1.8.0), or the Live Activity never ended.
+        guard tracker.frame != nil || bluetooth.feed.lastFrameAt.isFinite else { return }
         let since = carGoneSince ?? now
         carGoneSince = since
+        guard hasLink, tracker.frame != nil, !driveUploadDoneThisStop else { return }
         // Soon: on 8 November iOS had suspended the app within minutes of parking, so a 10-minute
         // wait never arrived. What this misses is sent the next time the app opens.
         if now - since >= 180, now >= driveRetryAt, !driveUpload.busy, hasNewDriveData {
@@ -1026,7 +1038,7 @@ final class AppModel: ObservableObject {
         // nothing changed; this runs four times a second, so only real changes are assigned.
         let view = bluetoothView(now)
         let newHeadline = StatusBuilder.headline(tracker, now: now, lastDelay: engine.lastDelay, hasCredentials: hasLink || demo,
-                                                 bluetooth: view)
+                                                 bluetooth: view, bluetoothSetUp: bluetooth.paired)
         if newHeadline != headline { headline = newHeadline }
         let newChain = StatusBuilder.chain(tracker, now: now, hasCredentials: hasLink || demo,
                                            quietWindows: StatusBuilder.quietLimit(view?.detector ?? tracker.frame?.message.state?.detector, settings),
@@ -1036,7 +1048,10 @@ final class AppModel: ObservableObject {
         let state = tracker.frame?.message.state
         let carFresh = tracker.frame != nil && tracker.clockReady(now) && tracker.carAge(now) <= LinkTracker.carStale
             && tracker.sinceRx(now) <= LinkTracker.linkLost
-        let overBluetooth = !carFresh && bluetooth.feed.live(now)
+        // Bluetooth first while its data is fresh: it comes straight from the car computer (1.8.0).
+        let overBluetooth = LinkTracker.bluetoothFirst(live: !demo && bluetooth.feed.live(now),
+                                                       age: bluetooth.feed.dataAge(now), serverFresh: carFresh)
+        metersOverBluetooth = overBluetooth
         let bars = carFresh && tracker.detectorActive || overBluetooth
         if bars != showBars { showBars = bars }
         var rows: [MeterRow] = []
@@ -1379,6 +1394,8 @@ final class AppModel: ObservableObject {
     static let bluetoothAnswerWait = 8.0
     /// Operations sent over Bluetooth and not yet heard of, for that fallback.
     private var bluetoothSent: [String: (json: [String: Any], at: Double)] = [:]
+    /// The meters show Bluetooth's data (LinkTracker.bluetoothFirst), so the Live Activity dates its burst by it.
+    private var metersOverBluetooth = false
 
     private func sendOp(kind: String, fields: [String: Any] = [:], update apply: @escaping (ActionState) -> Void) {
         let id = Sighting.newID()
@@ -1391,10 +1408,14 @@ final class AppModel: ObservableObject {
             return
         }
         client.send(path: "api/op", json: json) { result in
-            if case .failure(let error) = result {
-                apply(.init(id: id, text: "Could not reach the server: \(error.localizedDescription)", level: .bad))
-            }
+            if case .failure(let error) = result { apply(.init(id: id, text: Self.notSent(error), level: .bad)) }
         }
+    }
+
+    /// Why an operation didn't go: without a server (1.8.0) only Bluetooth carries it.
+    static func notSent(_ error: Error) -> String {
+        if case .noLink? = error as? ServerClient.HTTPError { return "Not sent: Bluetooth isn't connected, and no server is set up" }
+        return "Could not reach the server: \(error.localizedDescription)"
     }
 
     /// Straight to the car computer when Bluetooth can carry it: no server, no internet needed (1.6.0).
@@ -1477,7 +1498,7 @@ final class AppModel: ObservableObject {
     /// keeps the request until the next drive.
     var pushoverUnavailable: String? {
         if demo { return "Not available in demo mode" }
-        if !hasLink { return "Add the private link first" }
+        if !hasLink && !bluetooth.canSendOps { return "Add the private link first, or connect over Bluetooth" }
         guard let state = carStateNow else { return "The car computer has not reported yet" }
         if !(state.features ?? []).contains("notify") { return "The car computer needs software 1.2.9 or later for this" }
         if state.notify?.configured == false { return "Pushover is not set up on the car computer" }
@@ -1492,7 +1513,8 @@ final class AppModel: ObservableObject {
 
     /// The Pi screen's setup check: this phone's side, then the car computer's own.
     var setupRows: [CheckRow] {
-        SetupCheck.phone(hasLink: hasLink || demo, chain: chain, notifications: noticePermission, armed: audio.armed, sound: settings.sound)
+        SetupCheck.phone(hasLink: hasLink || demo, chain: chain, notifications: noticePermission, armed: audio.armed, sound: settings.sound,
+                         bluetooth: bluetooth.paired)
     }
     var carRows: [CheckRow] { SetupCheck.car(piState?.doctor) }
 
@@ -1518,7 +1540,7 @@ final class AppModel: ObservableObject {
         stopAction = .init(id: "stop", text: "Sending…", level: .idle, busy: true)
         client.send(path: "api/command", json: ["action": "stop", "note": "from the iPhone app"]) { [weak self] result in
             if case .failure(let error) = result {
-                self?.stopAction = .init(id: "stop", text: "Could not reach the server: \(error.localizedDescription)", level: .bad)
+                self?.stopAction = .init(id: "stop", text: Self.notSent(error), level: .bad)
             }
         }
     }
@@ -1654,6 +1676,11 @@ final class AppModel: ObservableObject {
 
     func refreshServerLogs() {
         loadPhonePiLogs()
+        guard hasLink else {             // without a server: the Pi logs that came over Bluetooth, nothing to ask for
+            serverLogs = []
+            serverLogsNote = ""
+            return
+        }
         client.listLogs { [weak self] result in
             switch result {
             case .success(let logs):
@@ -1713,7 +1740,7 @@ final class AppModel: ObservableObject {
                                activity: "active"),
                     ChannelRow(ch: 60, freqMHz: 381.5125, strength: isScreenshot ? 9.8 : 14.2, age: 9, hits60: 3,
                                approxTime: false),
-                    ChannelRow(ch: 119, freqMHz: 382.9875, strength: nil, age: 31, hits60: 1, approxTime: true),
+                    ChannelRow(ch: 194, freqMHz: 384.8625, strength: 26, age: 4, hits60: 2, approxTime: false),   // an aircraft's (1.8.0)
                 ],
                 matches: isScreenshot ? [] : matches, features: [],
                 pi: PiHealth(uptime: 1240, temperature: 52.4, load: 1.8, diskFreeGB: 96.2, memFreeMB: 6120,

@@ -3,6 +3,9 @@ package nl.slot17.app.ui
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipDescription
+import android.os.PersistableBundle
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -29,6 +32,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,6 +46,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -87,6 +94,11 @@ fun SettingsScreen(model: AppModel, editLink: () -> Unit) {
             ToggleRow("Sound", s.sound) { v -> model.updateSettings { it.copy(sound = v) } }
             ToggleRow("Urgent beep from ${Fmt.fixed(s.urgentLevel, 0)} dB", s.urgent) { v -> model.updateSettings { it.copy(urgent = v) } }
             Hint("Strong signal only. Not police, not a distance, and a quiet radio gives no beep.")
+            ToggleRow("Sound for aircraft", s.aircraftSound) { v -> model.updateSettings { it.copy(aircraftSound = v) } }
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(AircraftIcon, null, tint = C.blue, modifier = Modifier.padding(end = 6.dp).size(15.dp))
+                Hint("Police and ambulance helicopters in the air use their own channels, L190 to L199, and show with this mark. Off: they still show, without a sound. A helicopter low over the road uses the normal channels.")
+            }
             Column {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Volume", color = C.text, fontSize = 16.sp)
@@ -273,8 +285,16 @@ private fun BluetoothCard(bt: BluetoothRoute, @Suppress("UNUSED_PARAMETER") nowM
     }
     var name by remember { mutableStateOf("") }
     var nameProblem by remember { mutableStateOf<String?>(null) }
+    var typedCode by remember { mutableStateOf("") }
+    var codeProblem by remember { mutableStateOf<String?>(null) }
+    var confirmNewCode by remember { mutableStateOf(false) }
+    val setUp = {
+        val asked = Build.VERSION.SDK_INT >= 31 &&
+            context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        if (asked) permission.launch(Manifest.permission.BLUETOOTH_CONNECT) else bt.startPairing()
+    }
     Card("Bluetooth to the car computer") {
-        Hint("Everything also comes straight from the car computer over Bluetooth: alerts, its state, the Pi screen. With this phone connected, sightings, stop, power off, the Pi log and the other actions go over Bluetooth too, so it all works without internet. Switching Bluetooth on and support packages go through the server.")
+        Hint("Everything also comes straight from the car computer over Bluetooth: alerts, its state, the Pi screen. With this phone connected, sightings, stop, power off, the Pi log and the other actions go over Bluetooth too, so it all works without internet. Switching Bluetooth on and support packages go through the server; without a server, set Bluetooth up with a pairing code, below.")
         ToggleRow("Bluetooth on the car computer", bt.shownOn,
             enabled = (bt.unavailable == null || bt.overBluetooth) && !bt.carAction.busy) { bt.setOnCar(it) }
         LabelledRow("On the car computer", BluetoothWords.car(bt.onCar))
@@ -296,13 +316,45 @@ private fun BluetoothCard(bt: BluetoothRoute, @Suppress("UNUSED_PARAMETER") nowM
         Rule()
         LabelledRow("This phone", bt.phoneText)
         if (bt.paired) ToggleRow("Use Bluetooth on this phone", bt.phone.use) { bt.setUse(it) }
-        ActionButton(if (bt.paired) "Set up again" else "Set up", onClick = {
-            val asked = Build.VERSION.SDK_INT >= 31 &&
-                context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
-            if (asked) permission.launch(Manifest.permission.BLUETOOTH_CONNECT) else bt.startPairing()
-        }, enabled = bt.setUpUnavailable == null && !bt.pairing.busy)
+        ActionButton(if (bt.paired) "Set up again" else "Set up", onClick = setUp,
+            enabled = bt.setUpUnavailable == null && !bt.pairing.busy)
         if (bt.paired) ActionButton("Remove from this phone", onClick = { bt.remove() })
         ActionNote(bt.pairing)
+        Rule()
+        Text("Without a server", color = C.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Hint("This phone and the car computer share a key made from a pairing code. Make one here and write it in slot17.txt on the car computer's card (bluetooth_code=) before its first start, or type it at the setup's question (bash ~/Slot17/setup.sh car --bluetooth). Or type in the code the car computer's setup showed. The code never goes over the air; a new code replaces this phone's key, so the car computer then needs it too.")
+        bt.phone.code?.let { code ->
+            Text(code, color = C.text, fontSize = 18.sp, fontFamily = FontFamily.Monospace)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ActionButton("Copy", onClick = {
+                    val clip = ClipData.newPlainText("Slot17 pairing code", code)
+                    clip.description.extras = PersistableBundle().apply { putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) }
+                    context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip)
+                }, modifier = Modifier.weight(1f))
+                ActionButton("Share", onClick = {
+                    val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, code)
+                    context.startActivity(Intent.createChooser(send, "Share the pairing code"))
+                }, modifier = Modifier.weight(1f))
+            }
+        }
+        ActionButton(if (bt.phone.code == null) "Make a pairing code" else "Make a new pairing code",
+            onClick = { if (bt.phone.code != null || bt.paired) confirmNewCode = true else bt.makeCode() }, enabled = !bt.pairing.busy)
+        if (confirmNewCode) AlertDialog(onDismissRequest = { confirmNewCode = false }, containerColor = C.panel,
+            title = { Text("Make a new pairing code?") },
+            text = { Text("This phone's key is replaced. The car computer and any other phone then need the new code.") },
+            confirmButton = { TextButton({ bt.makeCode(); confirmNewCode = false }) { Text("Make a new code", color = C.red) } },
+            dismissButton = { TextButton({ confirmNewCode = false }) { Text("Cancel") } })
+        OutlinedTextField(value = typedCode, onValueChange = { typedCode = it.take(64); codeProblem = null },
+            label = { Text("Code from the car computer") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false))
+        ActionButton("Use the code", onClick = {
+            codeProblem = bt.useCode(typedCode)
+            if (codeProblem == null) {
+                typedCode = ""
+                setUp()
+            }
+        }, enabled = typedCode.isNotBlank() && !bt.pairing.busy)
+        codeProblem?.let { Hint(it, C.red) }
         val s = bt.stats
         if (s.bluetoothFirst + s.serverFirst + s.bluetoothOnly > 0) {
             Rule()
@@ -311,6 +363,6 @@ private fun BluetoothCard(bt: BluetoothRoute, @Suppress("UNUSED_PARAMETER") nowM
             s.medianLead?.let { LabelledRow("Bluetooth ahead by", "%.2f s, median".format(it)) }
             LabelledRow("Only over Bluetooth", "${s.bluetoothOnly}")
         }
-        Hint("Setting up needs the car computer on and nearby, and Location on while Android looks for it. Android asks once to allow Nearby devices. The car computer's key comes through the server once, never over Bluetooth; after that, setting up again needs no internet.")
+        Hint("Setting up needs the car computer on and nearby, and Location on while Android looks for it. Android asks once to allow Nearby devices. The car computer's key comes through the server once, or from a pairing code without one, never over Bluetooth; after that, setting up again needs no internet.")
     }
 }

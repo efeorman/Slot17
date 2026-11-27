@@ -25,7 +25,10 @@ data class MeterRow(
     val rising: Boolean = false,
     /** A call pattern on this channel in the last 10 s. */
     val call: Boolean = false,
-)
+) {
+    /** An aircraft's channel (1.8.0): a radio in the air, not a vehicle on the road. */
+    val air: Boolean get() = Aircraft.isAir(ch)
+}
 
 /** What a meter's colour means: what the app would do, never how near or what vehicle. */
 enum class MeterColour { WEAK, YELLOW, RED, GREY }
@@ -144,10 +147,14 @@ object StatusBuilder {
      * [bluetooth] only when the server has nothing fresh from the car: then Bluetooth's word counts. Before 1.6.0
      * the lights and the line read only the server, so on 23 November they said Pi silent while Bluetooth was live.
      */
+    /** [bluetoothSetUp]: this phone has the car computer's Bluetooth key, so without a server it waits for that. */
     fun headline(t: LinkTracker, now: Double, lastDelay: Double?, hasCredentials: Boolean,
-                 bluetooth: BluetoothView? = null): HeadlineStatus {
+                 bluetooth: BluetoothView? = null, bluetoothSetUp: Boolean = false): HeadlineStatus {
         if (bluetooth != null) return detectorLine(bluetooth.detector, lastDelay, demo = false, overBluetooth = true)
-        if (!hasCredentials) return HeadlineStatus(Level.IDLE, "Not set up", "Add your private link in Settings")
+        if (!hasCredentials) {
+            return if (bluetoothSetUp) HeadlineStatus(Level.IDLE, "Waiting for the car computer", "Over Bluetooth, once it is on and in range")
+            else HeadlineStatus(Level.IDLE, "Not set up", "Add your private link, or set up Bluetooth, in Settings")
+        }
         if (t.authFailed) return HeadlineStatus(Level.BAD, "Link not accepted", "Check your private link in Settings")
         val f = t.frame ?: return HeadlineStatus(Level.IDLE, "Connecting…", "Looking for the server")
         val rx = t.sinceRx(now)

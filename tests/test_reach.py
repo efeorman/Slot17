@@ -93,7 +93,14 @@ class FullBandTests(unittest.TestCase):
                                       require_periodic=False) if h["tetra_channel"] == target]
             self.assertTrue(hits, target)
             self.assertIs(hits[0]["band_edge"], edge, target)
+            self.assertIs(hits[0]["air_channel"], target >= 190, target)
         self.assertEqual((channelize.EDGE_LOW, channelize.EDGE_HIGH), (3, 195))
+
+    def test_the_aircraft_channels_are_190_to_199(self):
+        """ECC/DEC/(06)05: 384.750-385.000 MHz, the core band and its extension (1.8.0)."""
+        import detect as d
+        air = [ch for ch in range(200) if d.air_channel(380.0125e6 + ch * 25e3)]
+        self.assertEqual(air, list(range(190, 200)))
 
 
 if __name__ == "__main__":

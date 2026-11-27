@@ -164,6 +164,7 @@ final class QuietModeTests: XCTestCase {
 
     func testQuietModeRaisesTheChimeLevelButNeverTouchesUrgent() {
         var s = AlertSettings()
+        s.red = 22          // Quiet mode's 28 counts when it is higher than the chime level (35 by default)
         s.quiet = true
         let engine = AlertEngine()
         XCTAssertEqual(run(s, 25, id: "a", now: 100, engine: engine)?.outcome,

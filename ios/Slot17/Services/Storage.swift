@@ -131,6 +131,8 @@ enum JSONStore {
 enum Keychain {
     static let linkAccount = "slot17-private-link"
     static let bluetoothAccount = "slot17-bluetooth-key"
+    /// The pairing code the key was made from, without a server (27 November 2026): shown again for another phone.
+    static let bluetoothCodeAccount = "slot17-bluetooth-code"
 
     private static func query(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: account]

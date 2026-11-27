@@ -43,8 +43,12 @@ struct LogsView: View {
         ForEach(rows.prefix(200)) { alert in
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Image(systemName: alert.sound == nil ? "bell.slash" : "bell.fill")
-                        .foregroundColor(alert.sound == .urgent ? Theme.red : (alert.sound == nil ? Theme.dim : Theme.yellow))
+                    if Aircraft.isAir(alert.channel) {
+                        HelicopterGlyph().fill(alert.sound == nil ? Theme.dim : Aircraft.colour).frame(width: 17, height: 17)
+                    } else {
+                        Image(systemName: alert.sound == nil ? "bell.slash" : "bell.fill")
+                            .foregroundColor(alert.sound == .urgent ? Theme.red : (alert.sound == nil ? Theme.dim : Theme.yellow))
+                    }
                     Text(AlertText.title(alert)).font(.subheadline.weight(.semibold)).foregroundColor(Theme.text)
                         .accessibilityIdentifier("alert-row")
                     Spacer()

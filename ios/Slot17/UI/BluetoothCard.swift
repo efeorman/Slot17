@@ -6,10 +6,13 @@ struct BluetoothCard: View {
     @ObservedObject var bluetooth: BluetoothRoute
     @State private var name = ""
     @State private var nameProblem: String?
+    @State private var typedCode = ""
+    @State private var codeProblem: String?
+    @State private var confirmNewCode = false
 
     var body: some View {
         Card(title: "Bluetooth to the car computer") {
-            Text("Everything also comes straight from the car computer over Bluetooth: alerts, its state, the Pi screen. With this phone connected, sightings, stop, power off, the Pi log and the other actions go over Bluetooth too, so it all works without internet. Switching Bluetooth on and support packages go through the server.")
+            Text("Everything also comes straight from the car computer over Bluetooth: alerts, its state, the Pi screen. With this phone connected, sightings, stop, power off, the Pi log and the other actions go over Bluetooth too, so it all works without internet. Switching Bluetooth on and support packages go through the server; without a server, set Bluetooth up with a pairing code, below.")
                 .font(.caption2).foregroundColor(Theme.dim)
             Toggle("Bluetooth on the car computer", isOn: Binding(
                 get: { bluetooth.shownOn },
@@ -62,6 +65,47 @@ struct BluetoothCard: View {
                     .buttonStyle(ActionButtonStyle(foreground: Theme.red))
             }
             ActionNote(state: bluetooth.pairing)
+            Divider().overlay(Theme.line)
+            Text("Without a server").font(.subheadline.weight(.semibold)).foregroundColor(Theme.text)
+            Text("This phone and the car computer share a key made from a pairing code. Make one here and write it in slot17.txt on the car computer's card (bluetooth_code=) before its first start, or type it at the setup's question (bash ~/Slot17/setup.sh car --bluetooth). Or type in the code the car computer's setup showed. The code never goes over the air; a new code replaces this phone's key, so the car computer then needs it too.")
+                .font(.caption2).foregroundColor(Theme.dim)
+            if let code = bluetooth.code {
+                Text(code).font(.system(.title3, design: .monospaced)).foregroundColor(Theme.text)
+                    .textSelection(.enabled).accessibilityIdentifier("bluetooth-code")
+                HStack {
+                    Button("Copy") {
+                        UIPasteboard.general.setItems([["public.utf8-plain-text": code]],
+                                                      options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(600)])
+                    }.buttonStyle(ActionButtonStyle())
+                    ShareLink(item: code) { Text("Share") }.buttonStyle(ActionButtonStyle())
+                }
+            }
+            Button(bluetooth.code == nil ? "Make a pairing code" : "Make a new pairing code") {
+                if bluetooth.code != nil || bluetooth.paired { confirmNewCode = true } else { bluetooth.makeCode() }
+            }
+                .buttonStyle(ActionButtonStyle())
+                .confirmationDialog("Make a new pairing code?", isPresented: $confirmNewCode, titleVisibility: .visible) {
+                    Button("Make a new code", role: .destructive) { bluetooth.makeCode() }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This phone's key is replaced. The car computer and any other phone then need the new code.")
+                }
+                .disabled(bluetooth.phoneUnavailable != nil || bluetooth.pairing.busy)
+                .accessibilityIdentifier("bluetooth-make-code")
+            HStack {
+                TextField("Code from the car computer", text: $typedCode)
+                    .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                    .padding(10).background(Theme.panel).foregroundColor(Theme.text)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .onChange(of: typedCode) { _ in codeProblem = nil }
+                Button("Use the code") {
+                    codeProblem = bluetooth.useCode(typedCode)
+                    if codeProblem == nil { typedCode = "" }
+                }
+                .buttonStyle(ActionButtonStyle()).fixedSize()
+                .disabled(typedCode.trimmingCharacters(in: .whitespaces).isEmpty || bluetooth.pairing.busy)
+            }
+            if let codeProblem { Text(codeProblem).font(.footnote).foregroundColor(Theme.red) }
             if bluetooth.stats.compared {
                 Divider().overlay(Theme.line)
                 LabelledRow(name: "First over Bluetooth", value: "\(bluetooth.stats.bluetoothFirst)")
@@ -71,7 +115,7 @@ struct BluetoothCard: View {
                 }
                 LabelledRow(name: "Only over Bluetooth", value: "\(bluetooth.stats.bluetoothOnly)")
             }
-            Text("Setting up needs iOS 18, and the car computer on and nearby. The car computer's key comes through the server once, never over Bluetooth; after that, setting up again needs no internet. If you swipe the app away, open it again before driving.")
+            Text("Setting up needs iOS 18, and the car computer on and nearby. The car computer's key comes through the server once, or from a pairing code without one, never over Bluetooth; after that, setting up again needs no internet. If you swipe the app away, open it again before driving.")
                 .font(.caption2).foregroundColor(Theme.dim)
         }
     }

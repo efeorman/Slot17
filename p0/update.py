@@ -43,12 +43,18 @@ import subprocess
 import sys
 import tarfile
 import time
+import urllib.error
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 KEY_FILE = Path.home() / ".config/slot17-release-key.pub"
 DISPLAY_CONFIG = Path.home() / ".config/slot17-display.json"
+# Without a display server, the public release's signed update: slot17-update.json holds the release number and
+# signature, as /api/release does; slot17-update.tar.gz is the bundle.
+GITHUB_RELEASE = "https://github.com/efeorman/Slot17/releases/latest/download/"
+GITHUB_FILES = {"/api/release": "slot17-update.json", "/api/release/bundle": "slot17-update.tar.gz"}
 MAX_BUNDLE = 20 << 20
+RELEASE_JSON_MAX = 64 << 10    # the release's description: a few hundred bytes
 MAX_FILE = 8 << 20
 MAX_FILES = 400
 NEVER = {"p0/calibration.json", "p0/downlink_channels.json"}
@@ -203,13 +209,25 @@ class Updater:
         return Ed25519PublicKey.from_public_bytes(bytes.fromhex(self.key_file.read_text(encoding="ascii").strip()))
 
     def _open(self, path, timeout):
-        cfg = json.loads(self.config.read_text(encoding="utf-8"))
-        base = cfg["url"].split("/api/")[0]
-        # The address is the owner's own, from a file only they can write; what comes back is
-        # trusted only after its signature has been checked.
-        req = urllib.request.Request(base + path, headers={"Authorization": "Bearer " + cfg["token"]})  # noqa: S310
+        try:
+            cfg = json.loads(self.config.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            cfg = None
+        if not cfg:
+            # No display server (since 27 November 2026, at the operator's request: Slot17 without any server): the
+            # newest public release on GitHub, the same signed files every server passes on to its car computers.
+            req = urllib.request.Request(GITHUB_RELEASE + GITHUB_FILES[path],  # noqa: S310
+                                         headers={"User-Agent": "Slot17-updater"})
+        else:
+            base = cfg["url"].split("/api/")[0]
+            # The address is the owner's own, from a file only they can write.
+            req = urllib.request.Request(base + path, headers={"Authorization": "Bearer " + cfg["token"]})  # noqa: S310
+        # Either way, what comes back is trusted only after its signature has been checked (verify).
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-            return resp.read(MAX_BUNDLE + 1)
+            if not cfg and not str(resp.geturl()).startswith("https://"):
+                # GitHub sends the download on to its own https host; anything else (a Wi-Fi's login page) isn't it.
+                raise urllib.error.URLError("not the release: the download was sent elsewhere")
+            return resp.read(RELEASE_JSON_MAX if path == "/api/release" else MAX_BUNDLE + 1)
 
     def staged(self):
         """Number of the newest release waiting to be installed, or 0."""

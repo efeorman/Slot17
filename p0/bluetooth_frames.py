@@ -41,6 +41,8 @@ import hashlib
 import hmac
 import json
 import math
+import re
+import secrets
 import struct
 import zlib
 
@@ -433,6 +435,59 @@ def stored(data: bytes) -> bytes:
     return bytes(out)
 
 
+# The pairing code: 16 random bytes in Crockford's base32 (26 characters; no I, L, O or U, so nothing reads as
+# another character), then one check character, in groups of four for reading aloud or typing. The key is the
+# SHA-256 of a fixed label and the 16 bytes, so it has the link's 32 bytes. shared/parity/ble-frames.json
+# holds examples that the apps' tests check too.
+CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+CODE_BYTES = 16
+CODE_DATA = 26
+CODE_LABEL = b"slot17-bluetooth-code-v1"
+CHECK_LABEL = b"slot17-bluetooth-code-check-v1"
+
+
+def _check_char(raw: bytes) -> str:
+    return CODE_ALPHABET[hashlib.sha256(CHECK_LABEL + raw).digest()[0] >> 3]
+
+
+def format_code(raw: bytes) -> str:
+    """The pairing code for 16 bytes: 27 characters in groups of four."""
+    if len(raw) != CODE_BYTES:
+        raise ValueError("a pairing code holds 16 bytes")
+    value = int.from_bytes(raw, "big") << 2                 # 130 bits: 26 characters of 5 bits
+    chars = "".join(CODE_ALPHABET[(value >> (5 * (CODE_DATA - 1 - i))) & 31] for i in range(CODE_DATA))
+    text = chars + _check_char(raw)
+    return "-".join(text[i:i + 4] for i in range(0, len(text), 4))
+
+
+def code_bytes(text: str) -> bytes:
+    """The 16 bytes of a pairing code, as typed: any case, spaces and dashes left out, O read as 0 and I or L as 1,
+    and a line copied from slot17.txt ("bluetooth_code=...") taken as its code. ValueError when it isn't one, or a
+    character was mistyped (the check character catches 31 in 32 of those)."""
+    text = re.sub(r"(?i)^\s*bluetooth_code\s*[=:]", "", str(text))
+    clean = re.sub(r"[\s-]", "", text).upper().translate(str.maketrans("OIL", "011"))
+    if len(clean) != CODE_DATA + 1 or any(c not in CODE_ALPHABET for c in clean):
+        raise ValueError("a pairing code has 27 letters and digits")
+    value = 0
+    for c in clean[:CODE_DATA]:
+        value = (value << 5) | CODE_ALPHABET.index(c)
+    if value & 3:
+        raise ValueError("not a pairing code: check it for a typing error")
+    raw = (value >> 2).to_bytes(CODE_BYTES, "big")
+    if _check_char(raw) != clean[CODE_DATA]:
+        raise ValueError("the pairing code has a typing error: check it against the one shown")
+    return raw
+
+
+def key_from_code(text: str) -> bytes:
+    """The link's key made from a pairing code, as both apps make it."""
+    return hashlib.sha256(CODE_LABEL + code_bytes(text)).digest()
+
+
+def make_code() -> str:
+    return format_code(secrets.token_bytes(CODE_BYTES))
+
+
 def parity_fixture() -> dict:
     """The frames in shared/parity/ble-frames.json, made with a fixed key so every app can check them."""
     key = bytes(range(KEY_BYTES))
@@ -478,6 +533,21 @@ def parity_fixture() -> dict:
         "sequence": [{"boot": 7, "counter": 1, "accept": True}, {"boot": 7, "counter": 2, "accept": True},
                      {"boot": 7, "counter": 2, "accept": False}, {"boot": 9, "counter": 1, "accept": True},
                      {"boot": 7, "counter": 3, "accept": False}, {"boot": 9, "counter": 2, "accept": True}],
+        # 27 November 2026, Bluetooth without a server: every app makes the key from a pairing code as here,
+        # reads a code typed any way that is the same code, and refuses one with a typing error.
+        "pairing_codes": [{"bytes": raw.hex(), "code": format_code(raw), "key": key_from_code(format_code(raw)).hex(),
+                           "key_id": key_id(key_from_code(format_code(raw)))}
+                          for raw in (bytes(16), bytes(range(16)), bytes(range(255, 239, -1)),
+                                      bytes.fromhex("7f3a9c11d02e45b8a6c3f00e91d25b47"))],
+        "pairing_codes_typed": [{"typed": typed, "bytes": code_bytes(typed).hex()}
+                                for typed in (format_code(bytes(range(16))).lower().replace("-", " "),
+                                              format_code(bytes(range(16))).replace("-", ""),
+                                              format_code(bytes(16)).replace("0", "O"),
+                                              "bluetooth_code=" + format_code(bytes(range(16))),
+                                              format_code(bytes(range(16))).replace("-", "\u00a0"))],
+        "pairing_codes_refused": [format_code(bytes(range(16)))[:-1] + ("0" if format_code(bytes(range(16)))[-1] != "0" else "1"),
+                                  format_code(bytes(range(16)))[:-2], format_code(bytes(range(16))) + "A",
+                                  format_code(bytes(range(16))).replace(format_code(bytes(range(16)))[0], "U", 1)],
     }
 
 

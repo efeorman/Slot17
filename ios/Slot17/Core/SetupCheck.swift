@@ -33,12 +33,15 @@ struct CheckRow: Equatable, Identifiable {
 /// "Check my setup": every link from this phone to the receiver in plain words, with what to do when one
 /// isn't right. The same rules as android/core SetupCheck.kt, with the iPhone's own items (sound armed).
 enum SetupCheck {
-    static func phone(hasLink: Bool, chain: [ChainItem], notifications: String, armed: Bool, sound: Bool) -> [CheckRow] {
-        guard hasLink else {
+    /// `bluetooth`: set up over Bluetooth, which needs no server (27 November 2026).
+    static func phone(hasLink: Bool, chain: [ChainItem], notifications: String, armed: Bool, sound: Bool,
+                      bluetooth: Bool = false) -> [CheckRow] {
+        guard hasLink || bluetooth else {
             return [CheckRow(name: "Private link", level: .bad, text: "Not added",
-                             fix: "Settings, Add your private link. You get it from /server create in the Slot17 Discord, or from your own server's setup.")]
+                             fix: "Settings, Add your private link. You get it from /server create in the Slot17 Discord, or from your own server's setup. Without a server: Settings, Bluetooth to the car computer, Without a server.")]
         }
-        var rows = [CheckRow(name: "Private link", level: .ok, text: "Added")]
+        var rows = [hasLink ? CheckRow(name: "Private link", level: .ok, text: "Added")
+                            : CheckRow(name: "Private link", level: .idle, text: "None: Bluetooth only")]
         for item in chain {
             rows.append(CheckRow(name: item.name, level: item.level, text: item.detail,
                                  fix: item.level == .bad || item.level == .warn ? fix(for: item.id) : nil))
@@ -57,7 +60,7 @@ enum SetupCheck {
     static func fix(for id: String) -> String {
         switch id {
         case "server": return "Check that this phone is online. With your own server: is it running, and is port 5732 open in its firewall?"
-        case "pi": return "Is the car computer powered, and on your phone's hotspot? Its server address and key must match your server."
+        case "pi": return "Is the car computer powered? With a server: is it on your phone's hotspot, and do its server address and key match your server? Over Bluetooth: is it nearby, with Bluetooth on?"
         case "detector": return "If it was stopped, it starts again at the next power-up. If it has a fault, the car computer's own check below says which."
         case "receiver": return "Check the receiver's USB cable and the antenna cable. Unplugging the receiver for a moment can help when it hangs."
         default: return "See the car computer's own check below."

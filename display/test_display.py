@@ -13,10 +13,12 @@ from pathlib import Path
 import socket
 import sys
 import tempfile
+import types
 import threading
 import time
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 from unittest import mock
 import urllib.parse
 
@@ -1110,13 +1112,14 @@ class BluetoothPublisherTests(unittest.TestCase):
         self.pub.pusher = SimpleNamespace(busy=True, results=deque())     # a server that never answers
         self.pub.step(now_mono=50)
         op = {"id": "a" * 32, "kind": "doctor"}
-        self.pub.doctor = SimpleNamespace(busy=True, due=lambda now: False, result=None, for_push=lambda now: None)
+        # A check already running answers this request too (1.8.0): here it ends at once.
+        self.pub.doctor = SimpleNamespace(busy=True, due=lambda now: False, result=None, for_push=lambda now: None,
+                                          start=lambda now, then=None: then and then(True, "no problems"))
         self.link.ops.append(op)
         pub.handle_ops(SimpleNamespace(pending_ops=deque()), self.pub, {})
         self.pub.step(now_mono=50.1)
         answers = self.link.states()[-1]["ops"]
-        self.assertEqual(answers, [{"id": "a" * 32, "kind": "doctor", "state": "failed",
-                                    "detail": "the check is already running"}])
+        self.assertEqual(answers, [{"id": "a" * 32, "kind": "doctor", "state": "done", "detail": "no problems"}])
 
     def test_a_long_state_drops_the_drives_first(self):
         heartbeat(self.hb, self.s1)
@@ -1144,6 +1147,57 @@ class BluetoothPublisherTests(unittest.TestCase):
             self.assertTrue(self.pub.step(now_mono=50))
         self.assertIn("did not start", out.getvalue())
         self.assertEqual(self.sent[-1]["bluetooth"]["state"], "starting")
+
+
+class NoServerTests(unittest.TestCase):
+    """The publisher without a display server (27 November 2026, Slot17 without any server): it feeds Bluetooth and
+    the car computer's own screen, and says so where something would need a server."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.pub = pub.Publisher(send=pub.LocalSender(), heartbeat=Path(self.tmp.name) / "hb.json")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_pushes_go_nowhere_and_count_as_delivered(self):
+        sender = pub.LocalSender()
+        self.assertIsNone(sender({"matches": [], "acks": []}))
+        self.assertEqual((sender.pending_command, list(sender.pending_ops)), (None, []))
+        sender.close()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(self.pub.step())
+
+    def test_a_log_upload_or_support_package_says_there_is_no_server(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            pub.upload_pi_log({"id": "d" * 32, "kind": "logs"}, self.pub, {})
+        ack = self.pub.acks.pop()
+        self.assertEqual(ack["state"], "failed")
+        self.assertIn("No display server", ack["detail"])
+        self.assertTrue(self.pub.log_upload_busy.acquire(blocking=False), "the upload lock was released")
+        self.pub.log_upload_busy.release()
+        self.pub.support = types.SimpleNamespace(available=True, start=lambda *a: self.fail("started"))
+        pub.run_support({"id": "e" * 32, "kind": "support", "choice": "quick"}, self.pub, {})
+        self.assertIn("No display server", self.pub.acks.pop()["detail"])
+
+    def test_run_without_a_config_needs_no_server_except_for_once(self):
+        missing = Path(self.tmp.name) / "slot17-display.json"
+        with self.assertRaises(SystemExit) as e:
+            pub.run(types.SimpleNamespace(config=missing, once=True))
+        self.assertIn("--once", str(e.exception))
+        seen = {}
+
+        def fake_run_publisher(args, sender, p, cfg=None):
+            seen.update(sender=sender, cfg=cfg, bluetooth=p.bluetooth)
+            return 0
+        real_memory = pub.OpMemory
+        with patch.object(pub, "run_publisher", fake_run_publisher), patch.object(pub, "BluetoothLink", lambda: "bt"), \
+                patch.object(pub, "OpMemory", lambda path: real_memory(Path(self.tmp.name) / "ops.json")), \
+                patch.object(pub, "ScreenLink", lambda: None):
+            self.assertEqual(pub.run(types.SimpleNamespace(config=missing, once=False)), 0)
+        self.assertIsInstance(seen["sender"], pub.LocalSender)
+        self.assertIsNone(seen["cfg"])
+        self.assertEqual(seen["bluetooth"], "bt")
 
 
 class BluetoothOpTests(unittest.TestCase):

@@ -36,6 +36,9 @@ struct LiveTilePreviewScreen: View {
 
     private var urgentAlert: LiveTileState.Alert { .init(urgent: true, channel: 154, strength: 55, at: Date().addingTimeInterval(-3)) }
     private var chimeAlert: LiveTileState.Alert { .init(urgent: false, channel: 102, strength: 30, at: Date().addingTimeInterval(-42)) }
+    /// An aircraft's channel (1.8.0): the helicopter beside the channel and in place of the bell.
+    private var airAlert: LiveTileState.Alert { .init(urgent: false, channel: 194, strength: 38, at: Date().addingTimeInterval(-6)) }
+    private var airSample: LiveTileState { sample(.signal, ch: 194, db: 38, level: 7, tone: .chime, heard: 2, alert: airAlert) }
 
     var body: some View {
         NavigationStack {
@@ -55,6 +58,7 @@ struct LiveTilePreviewScreen: View {
                     section("CarPlay Dashboard") {
                         carTile(markedSample)
                         carTile(sample(.signal, ch: 154, db: 55, level: 10, tone: .strong, frequent: true, heard: 1, alert: urgentAlert))
+                        carTile(airSample)
                         carTile(sample(.signal, ch: 119, db: 47, level: 9, tone: .chime, heard: 4, alert: chimeAlert))
                         carTile(sample(.signal, ch: 60, db: 15, level: 3, tone: .silent, heard: 7, alert: chimeAlert))
                         carTile(sample(.listening, alert: chimeAlert))
@@ -62,6 +66,7 @@ struct LiveTilePreviewScreen: View {
                     }
                     section("Lock Screen") {
                         lockTile(sample(.signal, ch: 154, db: 55, level: 10, tone: .strong, frequent: true, heard: 1, alert: urgentAlert))
+                        lockTile(airSample)
                         lockTile(sample(.signal, ch: 60, db: 15, level: 3, tone: .silent, heard: 7, alert: chimeAlert))
                         lockTile(sample(.listening, alert: chimeAlert))
                         lockTile(sample(.receiverQuiet))

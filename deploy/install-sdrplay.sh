@@ -37,6 +37,17 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+# At power-up the detector waits for SDRplay's service, and that service, which carries the receiver's USB
+# traffic, is never starved by the detector's own threads (found in review, 26 November 2026). Drop-ins, so neither
+# unit file is edited; written again on every run.
+SYSTEMD_DIR="${SLOT17_SYSTEMD_DIR:-/etc/systemd/system}"
+order_services() {
+    sudo mkdir -p "$SYSTEMD_DIR/tetra-detector.service.d" "$SYSTEMD_DIR/sdrplay.service.d"
+    printf '[Unit]\nAfter=sdrplay.service\nWants=sdrplay.service\n' \
+        | sudo tee "$SYSTEMD_DIR/tetra-detector.service.d/slot17-sdrplay.conf" >/dev/null
+    printf '[Service]\nNice=-10\n' | sudo tee "$SYSTEMD_DIR/sdrplay.service.d/slot17-priority.conf" >/dev/null
+    sudo systemctl daemon-reload >/dev/null 2>&1 || true
+}
 running() { systemctl is-active --quiet sdrplay.service 2>/dev/null; }
 enabled() { systemctl is-enabled --quiet sdrplay.service 2>/dev/null; }
 loads() { python3 -c 'import ctypes; ctypes.CDLL("libsdrplay_api.so.3")' >/dev/null 2>&1; }
@@ -57,7 +68,8 @@ if [ -z "$ONLY_TO" ] && [ -f "$LIB" ] && running && loads; then
         sudo systemctl enable sdrplay.service >/dev/null 2>&1 && enabled \
             || die "SDRplay's service runs but can't be enabled for power-up: systemctl status sdrplay"
     fi
-    ok "already installed; its service runs and starts at every power-up"
+    order_services
+    ok "already installed; its service runs and starts at every power-up, before the detector"
     exit 0
 fi
 arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
@@ -114,5 +126,6 @@ sudo systemctl start sdrplay.service || true
 sleep 2
 running || die "the SDRplay service doesn't run: journalctl -u sdrplay -n 30 --no-pager"
 loads || die "the SDRplay library doesn't load: try sudo ldconfig"
-ok "installed; its service runs as sdrplay.service and starts at every power-up"
+order_services
+ok "installed; its service runs as sdrplay.service and starts at every power-up, before the detector"
 note "SDRplay's installer asks for a restart for its USB rules: the next power-up does that."

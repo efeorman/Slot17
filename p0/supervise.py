@@ -254,9 +254,15 @@ class Log:
                 pass
 
 
+RECEIVER_WAIT_S = 30             # at power-up, a receiver may appear on USB this long after the detector starts
+
+
 def build_cmd(opts):
-    """The command that runs one watch.py session under this supervisor."""
-    return ([sys.executable, WATCH_PY] + list(opts.watch_args)
+    """The command that runs one watch.py session under this supervisor. It waits for the receiver to appear on
+    USB first (found in review, 26 November 2026: a receiver a few seconds late at a car's power-up cost the whole
+    drive), unless the arguments already say how long."""
+    extra = [] if "--receiver-wait" in opts.watch_args else ["--receiver-wait", str(RECEIVER_WAIT_S)]
+    return ([sys.executable, WATCH_PY] + list(opts.watch_args) + extra
             + ["--heartbeat", opts.heartbeat,
                "--stall-timeout", str(opts.stall_timeout)])
 

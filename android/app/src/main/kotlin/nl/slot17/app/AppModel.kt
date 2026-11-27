@@ -837,7 +837,7 @@ class AppModel(private val context: Context) {
         val now = mono()
         nowMs = System.currentTimeMillis() / 1000 * 1000
         val view = bluetoothView(now)
-        headline = StatusBuilder.headline(tracker, now, engine.lastDelay, hasLink || demo, view)
+        headline = StatusBuilder.headline(tracker, now, engine.lastDelay, hasLink || demo, view, bluetoothSetUp = bluetooth.paired)
         chain = StatusBuilder.chain(tracker, now, hasLink || demo,
             StatusBuilder.quietLimit(view?.detector ?: tracker.frame?.message?.state?.detector, settings), view)
         val frame = tracker.frame
@@ -846,14 +846,15 @@ class AppModel(private val context: Context) {
         val serverFresh = serverCarFresh(now)
         // Without the server, the car computer's own state over Bluetooth: from 1.6.0 car computers all of it, from
         // older ones the detector and channels on top of the server's last report.
-        val overBluetooth = !serverFresh && bluetooth.feed.live(now)
+        // Bluetooth first while its data is fresh: it comes straight from the car computer (1.8.0).
+        val overBluetooth = LinkTracker.bluetoothFirst(bluetooth.feed.live(now), bluetooth.feed.dataAge(now), serverFresh)
         piState = if (serverFresh) state else if (bluetooth.feed.heard(now)) bluetooth.feed.piState(state, now) else null
         val carFresh = frame != null && tracker.clockReady(now) && tracker.carAge(now) <= LinkTracker.CAR_STALE &&
             tracker.sinceRx(now) <= LinkTracker.LINK_LOST
         val bars = carFresh && tracker.detectorActive
         showBars = bars || overBluetooth
         var rows = emptyList<MeterRow>()
-        if (bars && frame != null && state != null) {
+        if (bars && !overBluetooth && frame != null && state != null) {
             val elapsed = tracker.elapsed(frame, now)
             rows = Meters.pick(state.channels.map {
                 // Ages in half seconds: the screen shows whole seconds, and finer steps only redraw.
@@ -862,7 +863,7 @@ class AppModel(private val context: Context) {
                     frequent = it.activity == "active" && age < 15, rising = (it.rising ?: false) && age < 20, call = it.call ?: false)
             })
         } else if (overBluetooth) {
-            rows = Meters.pick((piState?.channels ?: emptyList()).map {
+            rows = Meters.pick((bluetooth.feed.piState(state, now)?.channels ?: emptyList()).map {
                 val age = floor(it.age * 2) / 2
                 MeterRow(it.ch, it.freqMHz, it.strength, age, it.hits60, it.approxTime ?: false,
                     frequent = it.activity == "active" && age < 15, rising = (it.rising ?: false) && age < 20, call = it.call ?: false)
@@ -969,14 +970,15 @@ class AppModel(private val context: Context) {
         val lastSound = alerts.firstOrNull { it.sound == SoundKind.URGENT || it.sound == SoundKind.CHIME }
         val title = when {
             demo -> "Slot17 demo: fake data"
-            top != null && showBars -> "L${top.ch} · ${top.strength?.let { "${Fmt.fixed(it, 1)} dB" } ?: "strength n/a"}" +
+            top != null && showBars -> "L${top.ch}${if (top.air) " · aircraft" else ""} · ${top.strength?.let { "${Fmt.fixed(it, 1)} dB" } ?: "strength n/a"}" +
                 if (Meters.isStrong(top.strength, settings)) " · ${style.strongBadge}" else ""
             else -> headline.title
         }
         val parts = mutableListOf<String>()
         if (top != null && showBars) parts.add(headline.title)
         if (receiverQuiet) parts.add("Receiver hears nothing")
-        if (lastSound != null) parts.add("Last ${if (lastSound.sound == SoundKind.URGENT) "urgent beep" else "chime"}: L${lastSound.channel}, " +
+        if (lastSound != null) parts.add("Last ${if (lastSound.sound == SoundKind.URGENT) "urgent beep" else "chime"}: L${lastSound.channel}" +
+            (if (nl.slot17.core.Aircraft.isAir(lastSound.channel)) " (aircraft), " else ", ") +
             nl.slot17.core.Format.ago((System.currentTimeMillis() - lastSound.atMs) / 1000.0))
         if (parts.isEmpty()) parts.add(headline.detail)
         val important = (lastSound != null && lastSound.id != lastAlertIdShown) || receiverQuiet || headline.level == Level.BAD ||
@@ -1223,7 +1225,7 @@ class AppModel(private val context: Context) {
     val pushoverUnavailable: String?
         get() {
             if (demo) return "Not available in demo mode"
-            if (!hasLink && !bluetooth.canSendOps) return "Add the private link first"
+            if (!hasLink && !bluetooth.canSendOps) return "Add the private link first, or connect over Bluetooth"
             val state = carStateNow ?: return "The car computer has not reported yet"
             if ("notify" !in (state.features ?: emptyList())) return "The car computer needs software 1.2.9 or later for this"
             if (state.notify?.configured == false) return "Pushover is not set up on the car computer"
@@ -1237,7 +1239,8 @@ class AppModel(private val context: Context) {
     }
 
     /** The Pi screen's setup check: this phone's side, then the car computer's own. */
-    val setupRows: List<CheckRow> get() = SetupCheck.phone(hasLink || demo, chain, notices.allowed, ignoringBatteryOptimisation, settings.sound)
+    val setupRows: List<CheckRow> get() = SetupCheck.phone(hasLink || demo, chain, notices.allowed, ignoringBatteryOptimisation, settings.sound,
+        bluetooth = bluetooth.paired)
     val carRows: List<CheckRow> get() = SetupCheck.car(piState?.doctor)
 
     fun requestDoctor() { note("setup check requested"); sendOp("doctor") { doctorAction = it } }
@@ -1379,6 +1382,11 @@ class AppModel(private val context: Context) {
 
     fun refreshServerLogs() {
         loadPhonePiLogs()
+        if (!hasLink) {                  // without a server: the Pi logs that came over Bluetooth, nothing to ask for
+            serverLogs = emptyList()
+            serverLogsNote = ""
+            return
+        }
         scope.launch {
             client.listLogs().onSuccess {
                 serverLogs = it
@@ -1422,7 +1430,7 @@ class AppModel(private val context: Context) {
             channels = listOf(
                 ChannelRow(154, 383.8625, first, 1.0, 14, false, activity = "active"),
                 ChannelRow(60, 381.5125, if (screenshotValues) 9.8 else 14.2, 9.0, 3, false),
-                ChannelRow(119, 382.9875, null, 31.0, 1, true),
+                ChannelRow(194, 384.8625, 26.0, 4.0, 2, false),   // an aircraft's channel (1.8.0)
             ),
             matches = if (screenshotValues) emptyList() else matches, features = emptyList(),
             pi = PiHealth(1240.0, 52.4, 1.8, 96.2, 6120.0, 1236.0, 0.0)))

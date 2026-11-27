@@ -23,6 +23,9 @@ class SetupCheckTest {
 
     @Test fun allGood() {
         val rows = SetupCheck.phone(true, good, true, true, true)
+        val bluetoothOnly = SetupCheck.phone(false, good, true, true, true, bluetooth = true)
+        assertEquals(Level.IDLE, bluetoothOnly.first().level, "without a server, Bluetooth is enough (27 November 2026)")
+        assertEquals(rows.size, bluetoothOnly.size)
         assertTrue(rows.all { it.level == Level.OK })
         assertNull(SetupCheck.first(rows))
     }

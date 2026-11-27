@@ -451,6 +451,9 @@ class BluetoothFeed(key: ByteArray? = null) {
     /** Any checked frame lately, whatever the detector says: the car computer is there. */
     fun heard(now: Double): Boolean = now - lastFrameAt <= LinkTracker.CAR_STALE
 
+    /** Seconds since Bluetooth last brought the car's own data: a whole state, the status or the channels. */
+    fun dataAge(now: Double): Double = now - maxOf(carStateAt, statusAt, channelsAt)
+
     /**
      * What the screens show when only Bluetooth brings data. From a 1.6.0 car computer its whole state, aged since
      * it came; from an older one the last server state with Bluetooth's detector and channels on top.
@@ -522,6 +525,66 @@ internal fun hmac(key: ByteArray, data: ByteArray): ByteArray =
     Mac.getInstance("HmacSHA256").apply { init(SecretKeySpec(key, "HmacSHA256")) }.doFinal(data)
 
 internal fun sha256(data: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(data)
+
+/**
+ * The pairing code for Bluetooth without any server (27 November 2026): 16 random bytes in Crockford's base32 (no
+ * I, L, O or U), one check character, in groups of four. Made on one side, typed on the other: never sent over the
+ * air. The key is the SHA-256 of a fixed label and the 16 bytes. The same as p0/bluetooth_frames.py, and
+ * shared/parity/ble-frames.json holds examples the car computer and both apps check.
+ */
+object PairingCode {
+    private const val ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+    const val BYTES = 16
+    private const val DATA = 26
+    private val LABEL = "slot17-bluetooth-code-v1".toByteArray()
+    private val CHECK = "slot17-bluetooth-code-check-v1".toByteArray()
+
+    /** A new code, from the system's secure random numbers. */
+    fun make(): String = format(ByteArray(BYTES).also { java.security.SecureRandom().nextBytes(it) })
+
+    fun format(raw: ByteArray): String {
+        require(raw.size == BYTES) { "a pairing code holds 16 bytes" }
+        val text = StringBuilder()
+        for (i in 0 until DATA) {                    // 130 bits: the 128, then two zeros
+            var v = 0
+            for (b in 0 until 5) {
+                val bit = 5 * i + b
+                v = (v shl 1) or (if (bit < 128) (raw[bit / 8].toInt() shr (7 - bit % 8)) and 1 else 0)
+            }
+            text.append(ALPHABET[v])
+        }
+        text.append(check(raw))
+        return text.chunked(4).joinToString("-")
+    }
+
+    private fun check(raw: ByteArray): Char = ALPHABET[(sha256(CHECK + raw)[0].toInt() and 0xFF) shr 3]
+
+    /** The 16 bytes of a code as typed (any case, spaces and dashes left out, O read as 0, I and L as 1), or null
+     *  when it isn't one or has a typing error. */
+    fun bytes(typed: String): ByteArray? {
+        var text = typed.trimStart { it.isWhitespace() || Character.isSpaceChar(it) }
+        if (text.startsWith("bluetooth_code", ignoreCase = true)) {            // a line copied from slot17.txt
+            val rest = text.substring("bluetooth_code".length).trimStart { it.isWhitespace() || Character.isSpaceChar(it) }
+            if (rest.startsWith("=") || rest.startsWith(":")) text = rest.substring(1)
+        }
+        val clean = text.uppercase().filter { !it.isWhitespace() && !Character.isSpaceChar(it) && it != '-' }
+            .map { when (it) { 'O' -> '0'; 'I', 'L' -> '1'; else -> it } }
+        if (clean.size != DATA + 1) return null
+        val bits = IntArray(5 * DATA)
+        for ((i, c) in clean.take(DATA).withIndex()) {
+            val v = ALPHABET.indexOf(c)
+            if (v < 0) return null
+            for (b in 0 until 5) bits[5 * i + b] = (v shr (4 - b)) and 1
+        }
+        if (bits[128] != 0 || bits[129] != 0) return null
+        val raw = ByteArray(BYTES)
+        for (i in 0 until 128) if (bits[i] == 1) raw[i / 8] = (raw[i / 8].toInt() or (1 shl (7 - i % 8))).toByte()
+        return if (check(raw) == clean.last()) raw else null
+    }
+
+    /** The link's key made from a code, or null. */
+    fun key(typed: String): ByteArray? = bytes(typed)?.let { sha256(LABEL + it) }
+}
 
 internal fun ByteArray.hex(): String = joinToString("") { "%02x".format(it.toInt() and 0xFF) }
 

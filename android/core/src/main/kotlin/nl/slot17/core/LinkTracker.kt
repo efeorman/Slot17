@@ -120,5 +120,15 @@ class LinkTracker {
         const val CLOCK_REFRESH = 10.0
         const val REOPEN_AFTER = 9.0
         const val CLEAR_AFTER = 20.0
+
+        /**
+         * Bluetooth's data goes first, for the meters, while it is at most this old: it comes straight from the car
+         * computer, so the server's copy of the same data can only be later. Past this (a radio link that stalled)
+         * the server's, while that is fresh. Until 1.8.0 the server's always went first.
+         */
+        const val BLUETOOTH_FIRST_WITHIN = 4.0
+
+        fun bluetoothFirst(live: Boolean, age: Double, serverFresh: Boolean): Boolean =
+            live && (!serverFresh || age <= BLUETOOTH_FIRST_WITHIN)
     }
 }

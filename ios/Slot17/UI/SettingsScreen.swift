@@ -44,7 +44,9 @@ struct SettingsView: View {
                         Button("Remove", role: .destructive) { model.removeLink() }
                     }
             }
-            Text("This server uses plain HTTP, so the link and everything sent to it, including power off, is not encrypted.")
+            Text(!model.hasLink || model.linkIsHttps
+                 ? "The link works with your own server or a hosted one. An https link is encrypted all the way."
+                 : "This server uses plain HTTP, so the link and everything sent to it, including power off, is not encrypted.")
                 .font(.caption2).foregroundColor(Theme.dim)
         }
     }
@@ -54,6 +56,12 @@ struct SettingsView: View {
             toggle("Sound", $model.settings.sound, id: "setting-sound")
             toggle(String(format: "Urgent beep from %.0f dB", model.settings.urgentLevel), $model.settings.urgent, id: "setting-urgent")
             Text("Strong signal only. Not police, not a distance, and a quiet radio gives no beep.").font(.caption2).foregroundColor(Theme.dim)
+            toggle("Sound for aircraft", $model.settings.aircraftSound, id: "setting-aircraft")
+            HStack(alignment: .top, spacing: 6) {
+                HelicopterGlyph().fill(Aircraft.colour).frame(width: 15, height: 15)
+                Text("Police and ambulance helicopters in the air use their own channels, L190 to L199, and show with this mark. Off: they still show, without a sound. A helicopter low over the road uses the normal channels.")
+                    .font(.caption2).foregroundColor(Theme.dim)
+            }
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Volume").foregroundColor(Theme.text)
@@ -302,7 +310,8 @@ struct SetupCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Connect to your Pi").font(.headline).foregroundColor(Theme.text)
-            Text("Add the private link for your display server to start receiving.").font(.subheadline).foregroundColor(Theme.dim)
+            Text("Add the private link for your display server to start receiving. No server? Settings, Bluetooth to the car computer, Without a server: the app then gets everything straight from the car computer.")
+                .font(.subheadline).foregroundColor(Theme.dim)
             Button { editing = true } label: { Text("Add your private link") }
                 .buttonStyle(ActionButtonStyle(tint: Theme.blue, foreground: .black))
                 .accessibilityIdentifier("setup-link")

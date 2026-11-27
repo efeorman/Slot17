@@ -35,6 +35,7 @@ def find_bash():
 
 BASH = find_bash()
 STAND_INS = r'''
+BOLD=""; RESET=""                                # as common.sh sets them without a terminal
 step() { :; }
 ok() { echo "ok: $*"; }
 note() { echo "note: $*"; }
@@ -54,6 +55,10 @@ bash() { echo "bash $*" >> "$LOG"; return "${DRIVER_RC:-0}"; }
 python3() {
     echo "python3 $*" >> "$LOG"
     case "$*" in
+        *"bluetooth_link.py adapter"*) [ "${ADAPTER:-1}" = 1 ] && echo '{"present": true}' ;;
+        *key_id*) [ "${KEY_HERE:-0}" = 1 ]; return ;;                    # a key already on this car computer?
+        *--new-code*) echo "0000-0000-0000-0000-0000-0000-00W" ;;
+        *"--code -"*) cat > /dev/null ;;                                  # the code, on stdin
         *"import paths"*) echo "$IQ" ;;                                   # where captures go
         *capture.py*)                                                     # a capture, named with its tag
             local tag="" prev=""
@@ -66,11 +71,14 @@ python3() {
 
 
 def section(first, until):
-    """setup-car.sh's text from the heading `first` up to `until`, with the script's own `set` line before it."""
+    """setup-car.sh's text from the heading `first` up to `until`, with the script's own `set` line before it, and
+    its install_publisher, which several steps use."""
     text = SETUP.read_text(encoding="utf-8")
     options = re.search(r"^set -[a-z]+.*$", text, re.M).group(0)
+    p = text.index("# The publisher feeds the server")
+    publisher = text[p:text.index("# --- 8. display server", p)]
     start = text.index(first)
-    return options + "\n" + STAND_INS + text[start:text.index(until, start)]
+    return options + "\n" + STAND_INS + publisher + text[start:text.index(until, start)]
 
 
 @unittest.skipUnless(BASH, "needs bash")
@@ -157,17 +165,76 @@ class OneOpeningPerSetup(Steps):
 
 
 class TheScreenWithoutAServer(Steps):
-    """Found in review on 26 November 2026: a screen set up without a display server showed no data, with no word why."""
-    def test_a_screen_without_a_server_says_what_it_needs(self):
+    """Found in review on 26 November 2026: a screen set up without a display server showed no data, with no word why.
+    Since 27 November the publisher, which feeds the screen, runs without a server too, so the screen installs it."""
+    def test_a_screen_without_a_server_gets_its_data(self):
         rc, calls, out = self.run_section("# --- 10b. the car computer's own screen", "# --- 11. calibration",
                                           SCREEN="yes", DISPLAY_LINK="no", DISPLAY_CONFIG="/nonexistent/slot17-display.json", RUN_USER="pi")
-        self.assertIn("connected to a display server", out)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(any("install-publisher.sh" in c for c in calls), calls)
         self.assertTrue(any("install-screen.sh" in c for c in calls), calls)
 
-    def test_a_screen_with_a_server_installs_without_that_note(self):
-        rc, calls, out = self.run_section("# --- 10b. the car computer's own screen", "# --- 11. calibration",
-                                          SCREEN="yes", DISPLAY_LINK="yes", DISPLAY_CONFIG="/nonexistent/x.json", RUN_USER="pi")
-        self.assertNotIn("connected to a display server", out)
+    def test_the_publisher_is_installed_once(self):
+        rc, calls, out = self.run_section("# --- 9. Bluetooth", "# --- 11. calibration", BLUETOOTH="yes", BT_NAME="Slot17",
+                                          BT_CODE="0000-0000-0000-0000-0000-0000-00W", SCREEN="yes", DISPLAY_LINK="no",
+                                          NOTIFY="no", BT_SETTINGS="/x/bluetooth_config.py", RUN_USER="pi", HOME="/nonexistent")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(sum("install-publisher.sh" in c for c in calls), 1, calls)
+
+
+class BluetoothWithoutAServer(Steps):
+    """Since 27 November 2026 Bluetooth is set up with a pairing code where there is no display server."""
+    def bluetooth(self, **env):
+        base = dict(BLUETOOTH="yes", BT_NAME="Slot17", BT_CODE="", DISPLAY_LINK="no", YES="0",
+                    BT_SETTINGS="/x/bluetooth_config.py", RUN_USER="pi", HOME="/nonexistent")
+        base.update(env)
+        return self.run_section("# --- 9. Bluetooth", "# --- 10. notifications", **base)
+
+    def test_a_code_from_the_app_goes_in_on_stdin_never_the_command_line(self):
+        code = "000G-40R4-0M30-E209-185G-R38E-1W1"
+        rc, calls, out = self.bluetooth(BT_CODE=code)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(any("--code -" in c for c in calls), calls)
+        self.assertFalse(any(code in c for c in calls), calls)
+        self.assertTrue(any("install-publisher.sh" in c for c in calls), calls)
+        self.assertIn("pairing code", out)
+
+    def test_without_a_code_it_makes_one_and_shows_it(self):
+        rc, calls, out = self.bluetooth()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(any("--new-code" in c for c in calls), calls)
+        self.assertIn("0000-0000-0000-0000-0000-0000-00W", out)
+
+    def test_unattended_without_a_code_skips_with_a_word_on_how(self):
+        rc, calls, out = self.bluetooth(YES="1")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("--bluetooth and type it in", out)
+        self.assertFalse(any("--new-code" in c or "--on" in c for c in calls), calls)
+
+    def test_with_a_server_the_key_comes_the_old_way(self):
+        rc, calls, out = self.bluetooth(DISPLAY_LINK="yes")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(any("--on" in c for c in calls), calls)
+        self.assertFalse(any("--new-code" in c or "--code" in c for c in calls), calls)
+
+    def test_a_setup_run_again_keeps_the_key_phones_use(self):
+        """Found in review, 27 November 2026: Enter made a new code, and every phone set up before stopped working."""
+        rc, calls, out = self.bluetooth(KEY_HERE="1")
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(any("--new-code" in c for c in calls), calls)
+        self.assertTrue(any("--on" in c for c in calls), calls)
+        self.assertIn("the key the phones already use", out)
+
+    def test_unattended_with_a_key_already_here_keeps_it(self):
+        rc, calls, out = self.bluetooth(KEY_HERE="1", YES="1")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("skipped", out)
+        self.assertTrue(any("--on" in c for c in calls), calls)
+
+    def test_no_adapter_skips(self):
+        rc, calls, out = self.bluetooth(ADAPTER="0")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("no Bluetooth adapter", out)
 
 
 class CalibrationOfItsOwnCapture(Steps):

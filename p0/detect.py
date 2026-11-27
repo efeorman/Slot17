@@ -128,6 +128,19 @@ RANGE_MIN_M, RANGE_MAX_M = 5.0, 20000.0
 # have held one, over the analysed window.
 ACTIVITY_ACTIVE_RATIO = 0.30
 
+# The air-ground-air channels (1.8.0): ECC/DEC/(06)05 sets 384.800-385.000 MHz aside for emergency services'
+# aircraft, and 384.750-384.800 MHz as extension; channels 190-199 on our grid. Above about 150 m an aircraft's radio
+# uses only these (ETSI TR 102 300-6), so a match there is an aircraft, almost always a police or ambulance
+# helicopter. Checked against their ADS-B tracks on 27 November 2026: in minutes with a match on these channels one
+# flew within 20 km half the time, against 4 % in other minutes of the same drives.
+AIR_BAND_HZ = (384.750e6, 385.000e6)
+
+
+def air_channel(f_hz):
+    """The aircraft channels, by frequency: the same in every country that follows ECC/DEC/(06)05."""
+    return AIR_BAND_HZ[0] <= f_hz < AIR_BAND_HZ[1]
+
+
 BAND_LABELS = [
     (380.0e6, 385.0e6, "C2000-uplink", "L"),
     (390.0e6, 395.0e6, "C2000-downlink", "H"),
@@ -387,6 +400,8 @@ def detect(ch, threshold_db=DEFAULT_THRESHOLD_DB, downlink_channels=None,
             # were not examined before 1.2.6; a strong signal just outside the band could fold onto
             # them, so their matches say so and can be counted apart.
             "band_edge": bool(tetra_ch < channelize.EDGE_LOW or tetra_ch > channelize.EDGE_HIGH),
+            # An aircraft's channel (1.8.0): a radio in the air, not a vehicle on the road.
+            "air_channel": bool(air_channel(f_hz)),
             "bursts": n_bursts,
             "median_burst_ms": med_burst_ms,
             "burst_intervals_s": [[float(a), float(a + length)] for a, length in zip(t0, durs)],

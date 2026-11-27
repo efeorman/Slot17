@@ -14,14 +14,16 @@ data class CheckRow(val name: String, val level: Level, val text: String, val fi
  * isn't right. The phone's side comes from what the app sees; the car computer's side is its own doctor.
  */
 object SetupCheck {
-    fun phone(hasLink: Boolean, chain: List<ChainItem>, notifications: Boolean, batteryExempt: Boolean, sound: Boolean): List<CheckRow> =
+    /** [bluetooth]: set up over Bluetooth, which needs no server (27 November 2026). */
+    fun phone(hasLink: Boolean, chain: List<ChainItem>, notifications: Boolean, batteryExempt: Boolean, sound: Boolean,
+              bluetooth: Boolean = false): List<CheckRow> =
         buildList {
-            if (!hasLink) {
+            if (!hasLink && !bluetooth) {
                 add(CheckRow("Private link", Level.BAD, "Not added",
-                    "Settings, Add your private link. You get it from /server create in the Slot17 Discord, or from your own server's setup."))
+                    "Settings, Add your private link. You get it from /server create in the Slot17 Discord, or from your own server's setup. Without a server: Settings, Bluetooth to the car computer, Without a server."))
                 return@buildList
             }
-            add(CheckRow("Private link", Level.OK, "Added"))
+            add(if (hasLink) CheckRow("Private link", Level.OK, "Added") else CheckRow("Private link", Level.IDLE, "None: Bluetooth only"))
             for (item in chain) add(CheckRow(item.name, item.level, item.detail, if (item.level == Level.BAD || item.level == Level.WARN) fixFor(item.id) else null))
             add(if (sound) CheckRow("Sound", Level.OK, "On") else CheckRow("Sound", Level.WARN, "Off", "Settings, Sound."))
             add(if (notifications) CheckRow("Notifications", Level.OK, "Allowed")
@@ -32,7 +34,7 @@ object SetupCheck {
 
     fun fixFor(id: String): String = when (id) {
         "server" -> "Check that this phone is online. With your own server: is it running, and is port 5732 open in its firewall?"
-        "pi" -> "Is the car computer powered, and on your phone's hotspot? Its server address and key must match your server."
+        "pi" -> "Is the car computer powered? With a server: is it on your phone's hotspot, and do its server address and key match your server? Over Bluetooth: is it nearby, with Bluetooth on?"
         "detector" -> "If it was stopped, it starts again at the next power-up. If it has a fault, the car computer's own check below says which."
         "receiver" -> "Check the receiver's USB cable and the antenna cable. Unplugging the receiver for a moment can help when it hangs."
         else -> "See the car computer's own check below."

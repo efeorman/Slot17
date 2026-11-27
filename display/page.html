@@ -114,6 +114,9 @@
   .meter { position: relative; min-width: 0; display: flex; flex-direction: column; gap: 14px; padding: 18px; border-radius: 18px;
     background: var(--panel); border: 1.5px solid var(--line); transition: opacity .6s; }
   .meter[data-strong] { border-color: var(--text); }
+  .meter[data-air]:not([data-strong]) { border-color: var(--blue); border-width: 2px; }
+  .air-glyph { width: 1em; height: 1em; fill: currentColor; flex: none; vertical-align: -0.12em; }
+  .ch .air-glyph { color: var(--blue); margin-right: 6px; width: 0.95em; height: 0.95em; }
   .m-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; }
   .ch { font-family: var(--display); font-size: 22px; font-weight: 700; line-height: 1.1; }
   .badge { padding: 3px 9px; border-radius: 999px; background: var(--text); color: #0b0e13; font-size: 11px;
@@ -132,6 +135,12 @@
   .chip { display: inline-block; padding: 4px 9px; border-radius: 8px; background: var(--raised); color: var(--soft); font-size: 12px; }
   .chip::first-letter { text-transform: uppercase; }
   .chip.up { color: #ff8f90; } .chip.call { color: var(--yellow); }
+  .chip.air { color: var(--blue); font-weight: 700; display: inline-flex; align-items: center; gap: 5px; }
+  #dAir { color: var(--blue); margin-right: calc(8 * var(--u)); display: inline-flex; align-self: center; }
+  #dAir .air-glyph { width: 1.3em; height: 1.3em; }
+  .alert-air { display: inline-flex; flex: none; }
+  .alertbar .alert-air svg, .alertbar.hot .alert-air svg { color: var(--blue); }
+  .d-rair { color: var(--blue); font-size: calc(24 * var(--u)); flex: none; align-self: center; display: inline-flex; }
   .m-none { display: flex; flex-direction: column; justify-content: center; gap: 8px; min-height: 200px; padding: 26px 30px;
     border-radius: 18px; background: var(--panel); border: 1.5px solid var(--line); }
   .m-none b { font-family: var(--display); font-size: 30px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; }
@@ -438,7 +447,8 @@
           <div class="m-none" id="mNone" hidden><b id="mNoneTitle"></b><span id="mNoneSub"></span></div>
           <div class="empty-note" id="emptyNote"></div>
           <div class="alertbar" id="alertBar">
-            <svg class="i" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+            <svg class="i" id="alertBell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+            <span class="alert-air" id="alertAir" hidden></span>
             <div><b id="alertTitle">No alert yet</b><span id="alertSub">A beep shows here, with its channel and strength.</span></div>
             <button class="again" id="againBtn" hidden>Play again</button>
           </div>
@@ -522,6 +532,7 @@
             <div class="range-row"><label for="vol">Chime volume</label><output id="volOut"></output><input type="range" id="vol" min="0" max="100" step="5"></div>
             <div class="opt"><div><b>Urgent beep</b><span id="urgentHint"></span></div><button class="switch" role="switch" id="urgentBtn" aria-checked="true" aria-label="Urgent beep"></button></div>
             <div class="opt"><div><b>Repeat needed</b><span id="repeatHint"></span></div><button class="switch" role="switch" id="repeatBtn" aria-checked="false" aria-label="Repeat needed"></button></div>
+            <div class="opt"><div><b>Sound for aircraft</b><span id="airHint"></span></div><button class="switch" role="switch" id="airBtn" aria-checked="true" aria-label="Sound for aircraft"></button></div>
             <div class="btns"><button id="testBtn">Test chime</button><button id="testUrgentBtn">Test urgent beep</button></div>
             <div class="hint" id="wakeHint"></div></div>
           <div class="card"><h2 class="cap">Meter colours</h2>
@@ -555,7 +566,7 @@
     </div>
     <div class="d-num" id="dNum"><span id="dDb">—</span><span id="dUnit" hidden>dB</span></div>
     <div class="d-empty" id="dEmpty" hidden><b id="dEmptyTitle"></b><span id="dEmptySub"></span></div>
-    <div class="d-line" id="dLine"><span class="pill" id="dStrong" hidden>STRONG</span><span id="dCh">Waiting for the car computer</span></div>
+    <div class="d-line" id="dLine"><span class="pill" id="dStrong" hidden>STRONG</span><span id="dAir" hidden></span><span id="dCh">Waiting for the car computer</span></div>
     <div class="d-bar" id="dBar" aria-hidden="true"></div>
     <div class="d-three" id="dThree" hidden></div>
     <div class="d-others" id="dOthers"></div>
@@ -592,7 +603,18 @@
     for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); }
     return false;
   };
-  const DEFAULTS = { red: 35, yellow: 12, vol: 100, sound: true, repeat: false, antennaWarn: true, urgent: true };
+  const DEFAULTS = { red: 35, yellow: 12, vol: 100, sound: true, repeat: false, antennaWarn: true, urgent: true, aircraft: true };
+  // The aircraft channels (1.8.0): ECC/DEC/(06)05 sets 384.750-385.000 MHz aside for emergency services' aircraft,
+  // channels 190-199 here. Above about 150 m an aircraft's radio uses only these, so a match there is an aircraft,
+  // almost always a police or ambulance helicopter. The same rule as the car computer and both apps.
+  const isAir = ch => Number.isInteger(ch) && ch >= 190 && ch <= 199;
+  const AIR_PATH = "M2.8 3h18.4a0.8 0.8 0 0 1 0 1.6H2.8a0.8 0.8 0 0 1 0-1.6zM11.2 4.6h1.6v3.2h-1.6zM3.4 11.9a6.5 4.7 0 1 1 13 0a6.5 4.7 0 1 1-13 0zM15.6 10.8h5.8v1.6h-5.8zM20.4 8.9a0.9 0.9 0 0 1 1.8 0v3.8a0.9 0.9 0 0 1-1.8 0zM6.8 16.2h1.4v2.8H6.8zM12.2 16.2h1.4v2.8h-1.4zM4.75 18.8h10.9a0.75 0.75 0 0 1 0 1.5H4.75a0.75 0.75 0 0 1 0-1.5z";
+  function airGlyph() {                 // the helicopter mark: the apps draw the same path
+    const ns = "http://www.w3.org/2000/svg", s = document.createElementNS(ns, "svg"), p = document.createElementNS(ns, "path");
+    s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("class", "air-glyph"); s.setAttribute("aria-hidden", "true");
+    p.setAttribute("d", AIR_PATH); s.appendChild(p);
+    return s;
+  }
   const LINK_LOST_MS = 6000;     // no message for this long: the link is down, whatever the last state said
   const REOPEN_MS = 9000;        // a silent stream is reopened (a half-open mobile socket never errors)
   const CLEAR_MS = 20000;        // after this, stale bars are removed entirely
@@ -824,6 +846,7 @@
     const problem = audioProblem();
     if (problem) return silent(problem);
     if (performance.now() < mutedUntil) return silent("muted by the speaker button");
+    if (!cfg.aircraft && isAir(p.x.ch)) return silent("an aircraft channel, and sound for aircraft is off");
     if (!soundAllowed()) return silent("sound is not armed");
     if (callTier) {
       if (now - (lastCall[p.x.ch] ?? -1e12) < CALL_GAP_CHANNEL_MS) return silent("this channel's call tone played under 60 s ago");
@@ -859,7 +882,7 @@
       if (!started) {
         // Hold it for the first tap, but only if it would have chimed.
         if (p.x.strength_db != null && (p.x.strength_db >= cfg.red || (p.x.call === true && p.x.strength_db >= CALL_DB)) &&
-            p.age <= CHIME_MAX_AGE_S && !(cfg.repeat && !repeated(p)) &&
+            p.age <= CHIME_MAX_AGE_S && !(cfg.repeat && !repeated(p)) && !(!cfg.aircraft && isAir(p.x.ch)) &&
             !(pendingChime && isUrgent(pendingChime.x) && !isUrgent(p.x))) pendingChime = p;
         continue;
       }
@@ -919,7 +942,7 @@
         v.m.className = "meter empty"; v.segs.forEach(d => d.classList.remove("on"));
         v.ch.textContent = "—"; v.meta.textContent = ""; v.m.style.opacity = ""; v.badge.hidden = true;
         rows(v.chips, [], () => null);
-        delete v.m.dataset.strong; return;
+        delete v.m.dataset.strong; delete v.m.dataset.air; return;
       }
       const lit = level(r.strength_db);
       v.m.className = "meter " + (grey ? "grey" : klass(r.strength_db));
@@ -927,14 +950,17 @@
       v.badge.hidden = !strong;
       if (strong) v.m.dataset.strong = ""; else delete v.m.dataset.strong;
       v.segs.forEach((d, s) => d.classList.toggle("on", s < lit));
-      v.ch.textContent = "L" + r.ch;
+      const air = !grey && isAir(r.ch);
+      if (air) { v.m.dataset.air = ""; v.ch.replaceChildren(airGlyph(), "L" + r.ch); }
+      else { delete v.m.dataset.air; v.ch.textContent = "L" + r.ch; }
+      v.ch.setAttribute("aria-label", "L" + r.ch + (air ? ", aircraft channel: likely a police or ambulance helicopter" : ""));
       v.meta.replaceChildren(
         el("div", "db", r.strength_db == null ? "n/a" : `${r.strength_db.toFixed(1)} dB`),
         el("div", "freq", `${r.freq_mhz.toFixed(4)} MHz`),
         el("div", "when", `${r.approx_time ? "about " : ""}${ago(r.age)} · ${r.hits_60s} a minute`));
       const rule = RULES[(recent.find(x => x.ch === r.ch) || {}).rule];
-      rows(v.chips, [r.rising && ["rising", "up"], r.call && ["in a call", "call"], rule && [`${rule} rule`, ""]].filter(Boolean),
-           ([t, c]) => el("span", "chip" + (c ? " " + c : ""), t));
+      rows(v.chips, [air && ["Aircraft", "air"], r.rising && ["rising", "up"], r.call && ["in a call", "call"], rule && [`${rule} rule`, ""]].filter(Boolean),
+           ([t, c]) => { const x = el("span", "chip" + (c ? " " + c : ""), t); if (c === "air") x.prepend(airGlyph()); return x; });
       v.m.style.opacity = String(Math.max(0.35, 1 - Math.max(0, r.age - 10) / 50 * 0.65));
     });
   }
@@ -1084,7 +1110,12 @@
     if (!a) { bar.classList.remove("hot"); return; }
     const age = (performance.now() - a.at) / 1000;
     bar.classList.toggle("hot", age < 30);
-    setText($("alertTitle"), `${a.kind} · L${a.ch} · ${dbText(a.db)}`);
+    setText($("alertTitle"), `${a.kind} · L${a.ch}${isAir(a.ch) ? " · aircraft" : ""} · ${dbText(a.db)}`);
+    // An aircraft's beep shows the helicopter where the bell goes, as in the apps.
+    const air = isAir(a.ch), mark = $("alertAir");
+    $("alertBell").style.display = air ? "none" : "";
+    mark.hidden = !air;
+    if (air && !mark.firstChild) mark.appendChild(airGlyph());
     setText($("alertSub"), `${ago(age)}, at ${fmtClock(a.at)}`);
   }
 
@@ -1190,12 +1221,19 @@
   const dsegs = [];
   for (let i = 0; i < DSEGS; i++) { const s = el("i"); $("dBar").appendChild(s); dsegs.push(s); }
   const litOf = db => db != null ? Math.min(DSEGS, Math.max(1, Math.ceil((db - 6) / 2.5))) : 0;
+  // Drive mode shows an aircraft as the helicopter mark alone: the word made a row's line wrap on a phone on its side.
   const driveText = r => `L${r.ch} · ${ago(r.age)}${r.rising ? " · rising" : ""}${r.call ? " · in a call" : ""}`;
+  function airMark(cls) {
+    const g = el("span", cls); g.appendChild(airGlyph());
+    g.setAttribute("role", "img"); g.setAttribute("aria-label", "aircraft channel: likely a police or ambulance helicopter");
+    return g;
+  }
   function driveRow(d) {                // one of the three bars
     const row = el("div", "d-row lvl-" + d.lvl), head = el("div", "d-rh"), bar = el("div", "d-rbar");
     head.append(el("span", "d-rdb", d.db));
     if (d.unit) head.append(el("span", "d-ru", "dB"));
     if (d.strong) head.append(el("span", "pill", "STRONG"));
+    if (d.air) head.append(airMark("d-rair"));
     head.append(el("span", "d-rch", d.text));
     for (let i = 0; i < DSEGS; i++) bar.append(el("i", i < d.lit ? "on" : null));
     bar.setAttribute("aria-hidden", "true");
@@ -1213,6 +1251,9 @@
     $("dUnit").hidden = !top || top.strength_db == null;
     $("dStrong").hidden = !strong;
     setText($("dCh"), top ? driveText(top) : isLive ? "No TETRA heard" : $("stTitle").textContent);
+    const dAir = $("dAir");
+    dAir.hidden = !(top && isAir(top.ch));
+    if (!dAir.hidden && !dAir.firstChild) dAir.replaceWith(Object.assign(airMark(""), { id: "dAir" }));
     // Nothing to show: say why in words, where the number goes.
     $("dNum").hidden = $("dLine").hidden = $("dBar").hidden = !top || three;
     $("dEmpty").hidden = !!top;
@@ -1220,7 +1261,7 @@
     $("dOthers").hidden = three;
     rows($("dThree"), top && three ? rowsShown.slice(0, 3).map((r, i) => ({
       db: r.strength_db == null ? "n/a" : r.strength_db.toFixed(1), unit: r.strength_db != null, lvl: klass(r.strength_db),
-      lit: litOf(r.strength_db), strong: i === 0 && strong, text: driveText(r) })) : [], driveRow);
+      lit: litOf(r.strength_db), strong: i === 0 && strong, air: isAir(r.ch), text: driveText(r) })) : [], driveRow);
     setText($("dBarsText"), three ? "1 bar" : "3 bars");
     $("dBars").setAttribute("aria-label", three ? "Show one bar, for the strongest channel" : "Show three bars, for the three strongest channels");
     if (!top) {
@@ -1229,7 +1270,7 @@
     }
     const lit = top ? litOf(top.strength_db) : 0;
     dsegs.forEach((s, i) => s.classList.toggle("on", i < lit));
-    rows($("dOthers"), isLive ? rowsShown.slice(1, 3).map(r => `L${r.ch} · ${dbText(r.strength_db)} · ${ago(r.age)}`) : [], t => el("span", null, t));
+    rows($("dOthers"), isLive ? rowsShown.slice(1, 3).map(r => `L${r.ch}${isAir(r.ch) ? " aircraft" : ""} · ${dbText(r.strength_db)} · ${ago(r.age)}`) : [], t => el("span", null, t));
     const recentAlert = lastAlert && performance.now() - lastAlert.at < 10000;
     $("dAlert").hidden = !recentAlert;
     $("dDot").hidden = $("dStatus").hidden = $("dVia").hidden = !!recentAlert;
@@ -1470,7 +1511,7 @@
       channels: [
         { ch: 154, id: "d154", freq_mhz: 383.8625, strength_db: s, age_s: 1, hits_60s: 14, approx_time: false, rising: t < 50 },
         { ch: 60, id: "d60", freq_mhz: 381.5125, strength_db: 14.2, age_s: 9, hits_60s: 3, approx_time: false },
-        { ch: 119, id: "d119", freq_mhz: 382.9875, strength_db: null, age_s: 31, hits_60s: 1, approx_time: true }] } };
+        { ch: 194, id: "d194", freq_mhz: 384.8625, strength_db: 26, age_s: 4, hits_60s: 2, approx_time: false }] } };
   }
 
   /* ---------- controls ---------- */
@@ -1480,6 +1521,10 @@
     $("yelTh").value = cfg.yellow; $("yelOut").textContent = cfg.yellow + " dB";
     $("vol").value = cfg.vol; $("volOut").textContent = cfg.vol + "%";
     sw("soundBtn", cfg.sound); sw("demoBtn", demo); sw("repeatBtn", cfg.repeat); sw("urgentBtn", cfg.urgent); sw("antennaBtn", cfg.antennaWarn);
+    sw("airBtn", cfg.aircraft !== false);
+    $("airHint").textContent = cfg.aircraft !== false
+      ? "Police and ambulance helicopters in the air use their own channels, L190 to L199, and show with a helicopter mark. A helicopter low over the road uses the normal channels."
+      : "Helicopters in the air still show on the meters with their mark, without a sound.";
     $("repeatHint").textContent = cfg.repeat
       ? "Chime only when a channel matched twice within a minute. Fewer chimes; a vehicle that transmits once stays silent."
       : "Every new red match can chime. Turn on for fewer chimes, at the cost of missing single bursts.";
@@ -1522,6 +1567,7 @@
   $("urgentBtn").addEventListener("click", () => { cfg.urgent = !cfg.urgent; store.set(cfg); syncControls(); });
   $("soundBtn").addEventListener("click", () => { cfg.sound = !cfg.sound; store.set(cfg); syncControls(); });
   $("repeatBtn").addEventListener("click", () => { cfg.repeat = !cfg.repeat; store.set(cfg); syncControls(); });
+  $("airBtn").addEventListener("click", () => { cfg.aircraft = cfg.aircraft === false; store.set(cfg); syncControls(); });
   $("demoBtn").addEventListener("click", () => {
     demo = !demo; msg = null; boot = null; lastSeq = -1; lastStamp = -Infinity; clockSync = null;
     retiredBoots.clear(); resetContext();

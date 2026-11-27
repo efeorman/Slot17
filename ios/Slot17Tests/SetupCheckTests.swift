@@ -18,6 +18,9 @@ final class SetupCheckTests: XCTestCase {
 
     func testAllGood() {
         let rows = SetupCheck.phone(hasLink: true, chain: good, notifications: "Allowed", armed: true, sound: true)
+        let bluetoothOnly = SetupCheck.phone(hasLink: false, chain: good, notifications: "Allowed", armed: true, sound: true, bluetooth: true)
+        XCTAssertEqual(bluetoothOnly.first?.level, .idle, "without a server, Bluetooth is enough (27 November 2026)")
+        XCTAssertEqual(bluetoothOnly.count, rows.count)
         XCTAssertTrue(rows.allSatisfy { $0.level == .ok })
         XCTAssertNil(SetupCheck.first(rows))
     }

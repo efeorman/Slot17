@@ -47,12 +47,23 @@ class RtlError(RuntimeError):
     pass
 
 
+# RTL-SDR Blog's own driver, built by deploy/install-rtlsdr.sh for a V4L, or a V4 on a librtlsdr older than 2.0.0
+# (found in review, 26 November 2026). Loaded in place of the system's when it is there.
+BLOG_LIBRARIES = ("/usr/local/lib/librtlsdr.so.0", "/usr/local/lib/aarch64-linux-gnu/librtlsdr.so.0",
+                  "/usr/local/lib/x86_64-linux-gnu/librtlsdr.so.0")
+BLOG_MARK = "/usr/local/share/slot17/rtl-sdr-blog.commit"
+
+
 def library_path():
     override = os.environ.get("SLOT17_RTLSDR_LIB")
     if override:
         return override
     if sys.platform == "win32":
         return "rtlsdr.dll"
+    if os.path.exists(BLOG_MARK):
+        built = next((p for p in BLOG_LIBRARIES if os.path.exists(p)), None)
+        if built:
+            return built
     return "librtlsdr.so.0"
 
 

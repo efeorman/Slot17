@@ -9,6 +9,9 @@ final class AlertEngineTests: XCTestCase {
     override func setUp() {
         played = []
         settings = AlertSettings()
+        // These tests are about rules relative to the chime level, written at 22 dB; the default is 35 since 27
+        // November 2026 (testTheDefaultChimeLevelIsTheServers).
+        settings.red = 22
         engine = AlertEngine()
     }
 
@@ -94,6 +97,12 @@ final class AlertEngineTests: XCTestCase {
         _ = run([match("a", ch: 1, db: 55)], now: 100)
         _ = run([match("b", ch: 2, db: 55)], now: 100.5)
         XCTAssertEqual(played, [.urgent])
+    }
+
+    func testTheDefaultChimeLevelIsTheServers() {
+        // display/app-config.json's red_db: without a server the app chimed from 22 dB until 27 November 2026.
+        XCTAssertEqual(AlertSettings().red, 35)
+        XCTAssertEqual(AlertSettings().receiverQuietWindows, 240)
     }
 
     func testRedLevelBoundary() {
