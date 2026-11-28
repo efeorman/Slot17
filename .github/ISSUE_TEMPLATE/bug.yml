@@ -28,6 +28,6 @@ body:
     id: version
     attributes:
       label: Versions
-      placeholder: "1.8.0, app 1.10.0"
+      placeholder: "1.8.1, app 1.10.0"
     validations:
       required: true

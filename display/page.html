@@ -211,9 +211,14 @@
      on a 7-inch screen, a phone and a 1920 x 1080 monitor. Standing up, it stacks (390 x 844). */
   #drive { position: fixed; inset: 0; z-index: 15; background: #05070a; color: var(--text);
     --u: min(100vw / 844, 100dvh / 390, 3px);
+    --spare: 0px;
     display: flex; gap: calc(24 * var(--u));
     padding: max(calc(20 * var(--u)), env(safe-area-inset-top)) max(calc(24 * var(--u)), env(safe-area-inset-right))
       max(calc(20 * var(--u)), env(safe-area-inset-bottom)) max(calc(24 * var(--u)), env(safe-area-inset-left)); }
+  /* A screen smaller than the design and taller than it (a 3.5-inch 480 x 320, an 800 x 480; 28 November 2026) is
+     scaled by its width and leaves height over: there the bars and the number take part of it, instead of empty
+     space under a thin bar. Larger screens keep the design's proportions exactly. */
+  @media (max-width: 843.98px), (max-height: 389.98px) { #drive { --spare: max(0px, 100dvh - 390 * var(--u)); } }
   body.drive { overflow: hidden; }
   body.drive > header, body.drive > .app, body.drive > footer { visibility: hidden; }
   .d-read { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: calc(14 * var(--u)); }
@@ -234,7 +239,7 @@
     background: #10151d; border-color: #232b38; }
   .d-acts button svg { width: calc(18 * var(--u)); height: calc(18 * var(--u)); }
   .d-num { display: flex; align-items: baseline; gap: calc(10 * var(--u)); margin-top: calc(4 * var(--u)); color: var(--soft); }
-  #dDb { font-family: var(--display); font-size: calc(112 * var(--u)); font-weight: 700; letter-spacing: -.04em; line-height: .9; }
+  #dDb { font-family: var(--display); font-size: calc(112 * var(--u) + min(var(--spare) * .25, 24 * var(--u))); font-weight: 700; letter-spacing: -.04em; line-height: .9; }
   #dUnit { font-size: calc(28 * var(--u)); font-weight: 600; }
   .d-empty { display: flex; flex-direction: column; gap: calc(6 * var(--u)); margin-top: calc(10 * var(--u)); }
   .d-empty b { font-family: var(--display); font-size: calc(40 * var(--u)); font-weight: 700; letter-spacing: -.02em; line-height: 1.05; }
@@ -242,8 +247,11 @@
   .d-line { display: flex; align-items: center; gap: calc(10 * var(--u)); flex-wrap: wrap; font-size: calc(18 * var(--u)); font-weight: 600; }
   .d-line .pill, .d-rh .pill { padding: calc(4 * var(--u)) calc(10 * var(--u)); border-radius: 999px; background: var(--text); color: #14070a;
     font-size: calc(12 * var(--u)); font-weight: 800; letter-spacing: .08em; }
-  .d-bar { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: calc(4 * var(--u)); }
-  .d-bar i { height: calc(22 * var(--u)); border-radius: calc(4 * var(--u)); background: #161c26; }
+  /* --segs: 12 segments where each can be 24 px wide, fewer on a narrow bar (9 on a 3.5-inch screen); the last one
+     filled in quarters, so the bar shows the same share on every screen. */
+  .d-bar { display: grid; grid-template-columns: repeat(var(--segs, 12), minmax(0, 1fr)); gap: calc(4 * var(--u)); }
+  .d-bar i { height: calc(22 * var(--u) + min(var(--spare) * .4, 14 * var(--u))); border-radius: calc(4 * var(--u));
+    background: #161c26; }
   /* Three bars: the three strongest channels, each with its figure, its line and its own bar, in its own colour. */
   .d-three { display: flex; flex-direction: column; gap: calc(18 * var(--u)); min-width: 0; }
   .d-three:has(> .d-row:nth-child(3)) { flex: 1 1 auto; min-height: 0; justify-content: space-between; gap: calc(8 * var(--u)); }
@@ -254,8 +262,12 @@
   .d-ru { font-size: calc(20 * var(--u)); font-weight: 600; color: var(--soft); flex: none; }
   .d-rch { font-size: calc(17 * var(--u)); font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .d-rh .pill { align-self: center; flex: none; }
-  .d-rbar { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: calc(4 * var(--u)); }
-  .d-rbar i { height: calc(20 * var(--u)); border-radius: calc(4 * var(--u)); background: #161c26; }
+  .d-rbar { display: grid; grid-template-columns: repeat(var(--segs, 12), minmax(0, 1fr)); gap: calc(4 * var(--u)); }
+  .d-rbar i { height: calc(20 * var(--u) + min(var(--spare) * .1, 6 * var(--u))); border-radius: calc(4 * var(--u));
+    background: #161c26; }
+  #drive.lvl-red, .d-row.lvl-red { --lit: var(--red); } #drive.lvl-yellow, .d-row.lvl-yellow { --lit: var(--yellow); }
+  #drive.lvl-green, .d-row.lvl-green { --lit: var(--green); } #drive.lvl-grey, .d-row.lvl-grey { --lit: var(--grey); }
+  .d-bar i.part, .d-rbar i.part { background: linear-gradient(90deg, var(--lit) var(--part), #161c26 var(--part)); }
   .d-row.lvl-red .d-rdb, .d-row.lvl-red .d-ru { color: var(--red); }
   .d-row.lvl-yellow .d-rdb, .d-row.lvl-yellow .d-ru { color: var(--yellow); }
   .d-row.lvl-green .d-rdb, .d-row.lvl-green .d-ru { color: var(--green); }
@@ -288,15 +300,16 @@
   #drive.lvl-red .d-bar i.on { background: var(--red); } #drive.lvl-yellow .d-bar i.on { background: var(--yellow); }
   #drive.lvl-green .d-bar i.on { background: var(--green); } #drive.lvl-grey .d-bar i.on { background: var(--grey); }
   #drive.alerting { background: #14070a; box-shadow: inset 0 0 0 calc(4 * var(--u)) var(--red); }
-  #drive.alerting #dDb { font-weight: 800; font-size: calc(120 * var(--u)); letter-spacing: -.045em; }
+  #drive.alerting #dDb { font-weight: 800; font-size: calc(120 * var(--u) + min(var(--spare) * .25, 24 * var(--u)));
+    letter-spacing: -.045em; }
   #drive.alerting #dUnit { font-size: calc(30 * var(--u)); font-weight: 700; }
-  #drive.alerting .d-bar i { height: calc(24 * var(--u)); }
+  #drive.alerting .d-bar i { height: calc(24 * var(--u) + min(var(--spare) * .4, 14 * var(--u))); }
   #drive.alerting .d-saw button { background: #1f0b0e; border-color: #4a2226; }
   #drive.alerting .d-saw .nothing { color: #e6c9ca; }
   #drive.alerting .d-acts button, #drive.alerting #dBars { background: #23090c; border-color: #5a2a2d; }
   #drive.alerting .d-note { color: #c9a7a9; }
   @media (orientation: portrait) {
-    #drive { --u: min(100vw / 390, 100dvh / 844, 3px); flex-direction: column; gap: calc(18 * var(--u)); }
+    #drive { --u: min(100vw / 390, 100dvh / 844, 3px); --spare: 0px; flex-direction: column; gap: calc(18 * var(--u)); }
     .d-read { flex: none; }
     .d-others { margin-top: 0; }
     .d-saw { width: auto; flex: 1; }
@@ -1217,10 +1230,22 @@
   }
 
   /* ---------- drive mode ---------- */
+  // The scale: 6 dB to 36 dB over the bar, as 12 segments of 2.5 dB on a bar wide enough. On a narrow bar (a 3.5-inch
+  // screen, 28 November 2026) fewer, wider segments, the last filled in quarters: the same share on every screen.
   const DSEGS = 12;
-  const dsegs = [];
-  for (let i = 0; i < DSEGS; i++) { const s = el("i"); $("dBar").appendChild(s); dsegs.push(s); }
-  const litOf = db => db != null ? Math.min(DSEGS, Math.max(1, Math.ceil((db - 6) / 2.5))) : 0;
+  const segsFor = (width, gap) => Math.max(6, Math.min(DSEGS, Math.floor((width + gap) / (24 + gap))));
+  // Segments to fill, rounded up to a quarter: a channel heard is never shown as nothing, nor below its share.
+  const fillOf = (db, n) => db == null ? 0
+    : Math.max(0.25, Math.ceil(Math.min(1, Math.max(0, (db - 6) / 30)) * n * 4 - 1e-9) / 4);
+  function paintBar(bar, n, filled) {
+    while (bar.children.length > n) bar.lastChild.remove();
+    while (bar.children.length < n) bar.append(el("i"));
+    [...bar.children].forEach((s, i) => {
+      const part = filled - i;
+      s.className = part >= 1 ? "on" : part > 0 ? "part" : "";
+      if (part > 0 && part < 1) s.style.setProperty("--part", `${part * 100}%`); else s.style.removeProperty("--part");
+    });
+  }
   // Drive mode shows an aircraft as the helicopter mark alone: the word made a row's line wrap on a phone on its side.
   const driveText = r => `L${r.ch} · ${ago(r.age)}${r.rising ? " · rising" : ""}${r.call ? " · in a call" : ""}`;
   function airMark(cls) {
@@ -1235,7 +1260,7 @@
     if (d.strong) head.append(el("span", "pill", "STRONG"));
     if (d.air) head.append(airMark("d-rair"));
     head.append(el("span", "d-rch", d.text));
-    for (let i = 0; i < DSEGS; i++) bar.append(el("i", i < d.lit ? "on" : null));
+    paintBar(bar, d.segs, d.lit);
     bar.setAttribute("aria-hidden", "true");
     row.append(head, bar);
     return row;
@@ -1247,6 +1272,8 @@
     const strong = !!top && lvl === "red" && top.age < 15;
     const three = bars === 3;
     box.className = "lvl-" + lvl + (strong ? " alerting" : "") + (three ? " three" : "");
+    const segs = segsFor(box.querySelector(".d-read").clientWidth, parseFloat(getComputedStyle($("dBar")).columnGap) || 4);
+    box.style.setProperty("--segs", segs);
     setText($("dDb"), top ? (top.strength_db == null ? "n/a" : top.strength_db.toFixed(1)) : "—");
     $("dUnit").hidden = !top || top.strength_db == null;
     $("dStrong").hidden = !strong;
@@ -1261,15 +1288,14 @@
     $("dOthers").hidden = three;
     rows($("dThree"), top && three ? rowsShown.slice(0, 3).map((r, i) => ({
       db: r.strength_db == null ? "n/a" : r.strength_db.toFixed(1), unit: r.strength_db != null, lvl: klass(r.strength_db),
-      lit: litOf(r.strength_db), strong: i === 0 && strong, air: isAir(r.ch), text: driveText(r) })) : [], driveRow);
+      lit: fillOf(r.strength_db, segs), segs, strong: i === 0 && strong, air: isAir(r.ch), text: driveText(r) })) : [], driveRow);
     setText($("dBarsText"), three ? "1 bar" : "3 bars");
     $("dBars").setAttribute("aria-label", three ? "Show one bar, for the strongest channel" : "Show three bars, for the three strongest channels");
     if (!top) {
       setText($("dEmptyTitle"), isLive ? "No TETRA heard" : $("stTitle").textContent);
       setText($("dEmptySub"), isLive ? "Nothing in the last minute. A channel shows here when it is heard." : $("stSub").textContent.trim());
     }
-    const lit = top ? litOf(top.strength_db) : 0;
-    dsegs.forEach((s, i) => s.classList.toggle("on", i < lit));
+    paintBar($("dBar"), segs, top ? fillOf(top.strength_db, segs) : 0);
     rows($("dOthers"), isLive ? rowsShown.slice(1, 3).map(r => `L${r.ch}${isAir(r.ch) ? " aircraft" : ""} · ${dbText(r.strength_db)} · ${ago(r.age)}`) : [], t => el("span", null, t));
     const recentAlert = lastAlert && performance.now() - lastAlert.at < 10000;
     $("dAlert").hidden = !recentAlert;
@@ -1760,6 +1786,43 @@
     });
   }
   $("startBtn").addEventListener("click", begin);
+
+  /* ---------- the car computer's own screen: scrolling by dragging ----------
+     Some touchscreens report themselves as a mouse (a resistive 3.5-inch one, 28 November 2026): a finger's drag then
+     scrolled nothing, and only the thin scrollbar moved the cockpit. On the car computer's own screen a drag scrolls
+     what is under it, and the tap that ends a drag presses nothing. A real touchscreen scrolls by itself, as before. */
+  let dragScroll = null, swallowClick = false;
+  function scrollerOf(node) {
+    for (let n = node; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+      const s = getComputedStyle(n);
+      if (/(auto|scroll)/.test(s.overflowY + " " + s.overflowX)
+          && (n.scrollHeight > n.clientHeight + 1 || n.scrollWidth > n.clientWidth + 1)) return n;
+    }
+    return document.scrollingElement || document.documentElement;
+  }
+  document.addEventListener("pointerdown", e => {
+    swallowClick = false;
+    dragScroll = null;
+    if (!screen || e.pointerType !== "mouse" || e.button !== 0 || mode === "drive"
+        || e.target.closest("input, select, textarea")) return;
+    dragScroll = { x: e.clientX, y: e.clientY, target: scrollerOf(e.target), moved: false };
+  }, true);
+  document.addEventListener("pointermove", e => {
+    if (!dragScroll || !(e.buttons & 1)) return;
+    const dx = e.clientX - dragScroll.x, dy = e.clientY - dragScroll.y;
+    if (!dragScroll.moved && Math.hypot(dx, dy) < 8) return;            // a tap that wobbles is still a tap
+    dragScroll.moved = true;
+    dragScroll.target.scrollTop -= dy;
+    dragScroll.target.scrollLeft -= dx;
+    dragScroll.x = e.clientX; dragScroll.y = e.clientY;
+  }, true);
+  document.addEventListener("pointerup", () => { swallowClick = !!(dragScroll && dragScroll.moved); dragScroll = null; }, true);
+  document.addEventListener("click", e => {
+    if (!swallowClick) return;
+    swallowClick = false;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
 
   /* ---------- the car computer's own screen (p0/screen.py, deploy/slot17-kiosk.service) ----------
      Served by the car computer itself, only to its own browser: no Start tap (the kiosk browser may

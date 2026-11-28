@@ -2,6 +2,29 @@
 
 What changed, why, and what was tried and left out. Newest first. Figures come from our own car, receiver and drives; yours will differ.
 
+## 1.8.1: drive mode on small screens, and scrolling on a touchscreen that acts as a mouse (28 November 2026)
+
+From a user's car computer with a 3.5-inch 480 x 320 resistive touchscreen in a case on a Raspberry Pi 5:
+
+- **Drive mode on a small screen.** Drive mode is drawn at 844 x 390 and scaled as a whole. A screen smaller than that
+  and taller in proportion (480 x 320, 800 x 480) was scaled by its width, so the one bar was a thin strip of 12 small
+  segments with empty space under it. Now:
+  - a narrow bar has fewer, wider segments: 9 on a 3.5-inch screen on its side, 11 standing up, and 12 wherever each
+    can be 24 px wide;
+  - the last segment fills in quarters, so the bar shows the same share of its scale (6 to 36 dB, as before) on every
+    screen; 14 dB fills 3 1/4 of 12 segments, where it was rounded up to 4;
+  - on a screen smaller than the design and taller in proportion, the bars and the number take part of the spare
+    height. Larger screens keep the design's proportions exactly, and long screens (1920 x 440, 1920 x 480,
+    1280 x 400) look as before.
+- **Scrolling by dragging on the car computer's own screen.** Some touchscreens report themselves as a mouse, and a
+  finger's drag then scrolled nothing in the cockpit; only the thin scrollbar did. On the car computer's own screen a
+  drag now scrolls what is under it, a drag that starts on a button doesn't press it, and a tap presses as before.
+  Anywhere else a mouse stays a mouse.
+- Detection, the apps and the setup are unchanged.
+
+Tests: browser 62. Two are new: the small screen's segments and quarters, and drag-scrolling on the car computer's
+screen. The three-bar fit test now also runs at 480 x 320, 320 x 480, 1920 x 440 and 1280 x 400.
+
 ## 1.8.0: helicopters marked, without any server, and the new receivers ready for their first drive (27 November 2026)
 
 **Aircraft.** A match on channels 190–199 is now marked as an aircraft, with a helicopter and the word Aircraft in

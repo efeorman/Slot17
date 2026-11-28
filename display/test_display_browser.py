@@ -812,7 +812,10 @@ class BrowserTests(unittest.TestCase):
         self.assertIn("rising", rows[0][1])
         self.assertIn("L60", rows[1][1]); self.assertIn("n/a", rows[2][1]); self.assertIn("L119", rows[2][1])
         self.assertEqual([r[2] for r in rows], [12, 12, 12])
-        self.assertEqual([r[3] for r in rows], [12, 4, 0])                                   # the one bar's own scale: 40 dB fills it
+        # The one bar's own scale: 40 dB fills it; 14 dB is 3.2 of 12, shown as 3 1/4 (in quarters since 28 November 2026; it was 4).
+        self.assertEqual([r[3] for r in rows], [12, 3, 0])
+        self.assertEqual(page.evaluate("[...document.querySelectorAll('#dThree .d-rbar i.part')].map(i => i.style.getPropertyValue('--part'))"),
+                         ["25%"])
         self.assertEqual(page.evaluate("document.getElementById('dBarsText').textContent"), "1 bar")
         page.reload()
         page.click("#startBtn")
@@ -841,10 +844,64 @@ class BrowserTests(unittest.TestCase):
             time.sleep(0.05)
         self.assertEqual(saved, [{"bars": 1}])
 
+    # A user's 3.5-inch 480 x 320 screen, 28 November 2026: the one bar was a thin strip of 12 small segments with empty
+    # space under it. A narrow bar has fewer, wider segments, filled in quarters so it shows the same share on every
+    # screen, and a screen taller than the design gives the bars part of its spare height.
+    def test_a_small_screen_gets_fewer_wider_segments_filled_in_quarters(self):
+        page = self.open(self.scripted(self.three()), width=480, height=320,
+                         init="localStorage.setItem('s17view', JSON.stringify({section: 'live', mode: 'drive', bars: 3}));")
+        self.wait(page, "document.querySelectorAll('#dThree .d-row').length", 3)
+        rows = page.evaluate("[...document.querySelectorAll('#dThree .d-row')].map(r => [r.querySelectorAll('.d-rbar i').length,"
+                             " r.querySelectorAll('.d-rbar i.on').length,"
+                             " [...r.querySelectorAll('.d-rbar i.part')].map(i => i.style.getPropertyValue('--part'))])")
+        self.assertEqual(rows, [[9, 9, []], [9, 2, ["50%"]], [9, 0, []]])     # 14 dB is 2.4 of 9: shown 2 1/2
+        page.click("#dBars")
+        self.wait(page, "document.getElementById('dBar').hidden", False)
+        self.assertEqual(page.evaluate("document.querySelectorAll('#dBar i').length"), 9)
+        seg = "document.querySelector('#dBar i').getBoundingClientRect().height"
+        self.assertGreater(page.evaluate(seg), 24 * 480 / 844 + 4)       # taller than the design's (alerting) bar here
+        self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), 480)
+        for w, h in ((844, 390), (1920, 440)):              # the design's proportions, and a long screen: as before
+            page.set_viewport_size({"width": w, "height": h})
+            self.wait(page, "document.querySelectorAll('#dBar i').length", 12)
+            self.assertAlmostEqual(page.evaluate(seg), 24 * min(w / 844, h / 390, 3), delta=1, msg=(w, h))
+
+    # The same screen's touch acts as a mouse: a drag scrolled nothing in the cockpit, only the thin scrollbar did.
+    def test_on_the_car_computers_screen_a_mouse_drag_scrolls_and_a_tap_still_presses(self):
+        page = self.open(self.screen_routes(self.three(), []), start=False, width=480, height=320)
+        self.wait(page, "document.body.classList.contains('kiosk')", True)
+        page.click("#dExit")
+        self.wait(page, "document.getElementById('drive').hidden", True)
+        self.assertGreater(page.evaluate("document.documentElement.scrollHeight"), 320 + 200)
+
+        def drag(x, y, dy):
+            page.mouse.move(x, y)
+            page.mouse.down()
+            for step in range(1, 11):
+                page.mouse.move(x, y + dy * step / 10)
+            page.mouse.up()
+        b = json.loads(page.evaluate("JSON.stringify(document.getElementById('driveBtn').getBoundingClientRect())"))
+        drag(b["left"] + b["width"] / 2, b["top"] + b["height"] / 2, 120)   # a drag that starts on a button
+        time.sleep(0.3)
+        self.assertTrue(page.evaluate("document.getElementById('drive').hidden"), "the drag's end pressed it")
+        drag(240, 280, -200)
+        self.assertGreater(page.evaluate("scrollY"), 120)
+        page.click("#driveBtn")                                          # a tap still presses
+        self.wait(page, "document.getElementById('drive').hidden", False)
+        # In an ordinary browser a mouse drag stays a mouse drag.
+        page = self.open(self.scripted(self.three()), width=480, height=320)
+        page.mouse.move(240, 280)
+        page.mouse.down()
+        for step in range(1, 11):
+            page.mouse.move(240, 280 - 20 * step)
+        page.mouse.up()
+        self.assertEqual(page.evaluate("scrollY"), 0)
+
     def test_three_bars_fit_every_screen_and_no_word_is_cut(self):
         cut = ("[...document.querySelectorAll('#drive .d-acts button span, #dBars span, #dStatus, #dVia, #dAlert, .d-rch')]"
                ".filter(e => e.offsetParent && e.scrollWidth > e.clientWidth + 1).map(e => e.id || e.className + ':' + e.textContent)")
-        for width, height in ((1920, 1080), (1280, 800), (1024, 600), (800, 480), (844, 390), (390, 844)):
+        for width, height in ((1920, 1080), (1280, 800), (1024, 600), (800, 480), (844, 390), (390, 844), (480, 320),
+                              (320, 480), (1920, 440), (1280, 400)):
             page = self.open(self.scripted(self.three()), width=width, height=height,
                              init="localStorage.setItem('s17view', JSON.stringify({section: 'live', mode: 'drive', bars: 3}));")
             self.wait(page, "document.querySelectorAll('#dThree .d-row').length", 3)
